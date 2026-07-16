@@ -34,7 +34,7 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer linking={{ prefixes: ['appcond://'], config: { screens: { Login: 'login', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha' } } }}>
+    <NavigationContainer linking={{ prefixes: ['laremdia://', 'appcond://'], config: { screens: { Login: 'login', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha' } } }}>
       <Stack.Navigator>
         {userToken ? (
           <>

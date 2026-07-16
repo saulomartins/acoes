@@ -6,8 +6,10 @@ import * as Sharing from 'expo-sharing';
 const defaultApiUrlByPlatform =
   Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
 
+const productionApiUrlFallback = 'https://acoes-production.up.railway.app';
+
 export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || defaultApiUrlByPlatform;
+  process.env.EXPO_PUBLIC_API_URL || ((typeof __DEV__ !== 'undefined' && __DEV__) ? defaultApiUrlByPlatform : productionApiUrlFallback);
 
 const authStorage = {
   get: async (key: string) =>

@@ -29,7 +29,10 @@ export const sendEmail = async ({ to, subject, html }: EmailInput) => {
 };
 
 export const sendPasswordResetEmail = (to: string, name: string, resetToken: string) => {
-  const resetUrl = `${config.webUrl.replace(/\/$/, '')}/redefinir-senha?token=${encodeURIComponent(resetToken)}`;
+  const baseUrl = config.webUrl.trim();
+  const resetUrl = baseUrl.endsWith('://')
+    ? `${baseUrl}redefinir-senha?token=${encodeURIComponent(resetToken)}`
+    : `${baseUrl.replace(/\/$/, '')}/redefinir-senha?token=${encodeURIComponent(resetToken)}`;
   return sendEmail({
     to,
     subject: 'Redefinição de senha — Lar em Dia',
