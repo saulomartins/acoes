@@ -1,5 +1,6 @@
 import fs from 'fs';
 import https from 'https';
+import path from 'path';
 import { URL } from 'url';
 import { randomUUID } from 'crypto';
 import { config } from '../config';
@@ -79,17 +80,40 @@ const isConfigured = (integration: InterIntegrationConfig | null | undefined) =>
       integration.tokenPath,
   );
 
+const resolveCertificatePath = (rawPath: string) => {
+  const normalized = rawPath.trim().replace(/\\/g, '/');
+  const projectRoot = path.resolve(__dirname, '../..');
+  const candidates = [
+    normalized,
+    path.resolve(process.cwd(), normalized),
+    path.resolve(projectRoot, normalized),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+};
+
 const getHttpsAgent = (integration: InterIntegrationConfig) =>
   {
-    if (!fs.existsSync(integration.certPath)) {
+    const certPath = resolveCertificatePath(integration.certPath);
+    const keyPath = resolveCertificatePath(integration.keyPath);
+
+    if (!certPath) {
       throw new Error(`Certificado do Banco Inter não encontrado em ${integration.certPath}.`);
     }
-    if (!fs.existsSync(integration.keyPath)) {
+
+    if (!keyPath) {
       throw new Error(`Chave do Banco Inter não encontrada em ${integration.keyPath}.`);
     }
+
     return new https.Agent({
-      cert: fs.readFileSync(integration.certPath),
-      key: fs.readFileSync(integration.keyPath),
+      cert: fs.readFileSync(certPath),
+      key: fs.readFileSync(keyPath),
       passphrase: integration.certPassphrase || undefined,
     });
   };
