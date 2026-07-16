@@ -47,3 +47,12 @@ export const unregisterPushNotifications = async (accessToken: string, pushToken
     body: JSON.stringify({ pushToken }),
   });
 };
+
+export const syncNotificationBadge = async (count: number) => {
+  if (Platform.OS === 'web') return;
+  try {
+    await Notifications.setBadgeCountAsync(Math.max(0, count));
+  } catch (error) {
+    console.warn('Failed to update notification badge', error);
+  }
+};

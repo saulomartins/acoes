@@ -246,7 +246,14 @@ router.get('/:id/pdf', asyncHandler(async(req,res)=>{
   if(row.status==='canceled')return res.status(409).json({message:'Este boleto foi cancelado e não deve ser impresso para pagamento.'});
   if(!row.external_id)return res.status(409).json({message:'O Banco Inter ainda não disponibilizou o PDF deste boleto.'});
   const integration=await getInterIntegration(row.condominium_id);if(!integration)return res.status(400).json({message:'Integração Banco Inter não configurada.'});
-  const pdf=await getInterBoletoPdf(row.external_id,integration);const safeName=String(row.full_name||row.username||'boleto').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9_-]+/g,'-');
+  let pdf: Buffer;
+  try {
+    pdf = await getInterBoletoPdf(row.external_id,integration);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Não foi possível gerar o PDF deste boleto.';
+    return res.status(502).json({ message });
+  }
+  const safeName=String(row.full_name||row.username||'boleto').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9_-]+/g,'-');
   res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`inline; filename="boleto-${safeName}.pdf"`);return res.send(pdf);
 }));
 

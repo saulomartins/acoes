@@ -43,6 +43,8 @@ export default function Home({ navigation }: any) {
   const { signOut, user, userToken } = useContext(AuthContext);
   const [condominiumName, setCondominiumName] = useState(user?.condominiumName || '');
   const [noticesOpen, setNoticesOpen] = useState(true);
+  const [unreadNotices, setUnreadNotices] = useState(0);
+  const [unreadReports, setUnreadReports] = useState(0);
   const visibleModules = modules.filter((item) => item.roles.includes(user?.role || ''));
   const noticeModules = visibleModules.filter((item) => item.route === 'Communications' || item.route === 'Reports').sort((a, b) => (a.route === 'Communications' ? 0 : 1) - (b.route === 'Communications' ? 0 : 1));
   const mainMenuModules = visibleModules.filter((item) => item.route !== 'Communications' && item.route !== 'Reports');
@@ -58,6 +60,27 @@ export default function Home({ navigation }: any) {
       .then(response=>setCondominiumName(response.user.condominiumName || ''))
       .catch(()=>setCondominiumName(''));
   }, [admin,user?.condominiumName,userToken]);
+
+  useEffect(() => {
+    if (!userToken || admin) return;
+    const loadAttention = async () => {
+      try {
+        const [noticeData, reportData] = await Promise.all([
+          apiRequest<{ count: number }>('/notifications/unread-count', userToken),
+          apiRequest<{ reports: Array<{ unread_count: number }> }>('/reports', userToken),
+        ]);
+        setUnreadNotices(noticeData.count || 0);
+        setUnreadReports(reportData.reports.reduce((sum, item) => sum + Number(item.unread_count || 0), 0));
+      } catch {
+        setUnreadNotices(0);
+        setUnreadReports(0);
+      }
+    };
+
+    loadAttention();
+    const timer = setInterval(loadAttention, 30000);
+    return () => clearInterval(timer);
+  }, [admin, userToken]);
 
   const open = (route?: string) => route && navigation.navigate(route);
 
@@ -107,6 +130,29 @@ export default function Home({ navigation }: any) {
             <View style={[styles.stat, styles.profileStat]}><View style={styles.statHead}><View style={[styles.statIcon, { backgroundColor: '#fff3de' }]}><Text style={{ color: colors.amber }}>♙</Text></View><Text style={styles.statLabel}>SEU PERFIL</Text></View><Text numberOfLines={1} style={[styles.statValue, styles.roleValue]}>{roleLabels[user?.role || ''] || 'Usuário'}</Text><Text style={styles.statDescription}>acesso personalizado por permissão</Text></View>
           </View>
 
+          {!admin && (unreadNotices > 0 || unreadReports > 0) ? (
+            <View style={styles.attentionCard}>
+              <View style={styles.attentionHead}>
+                <Text style={styles.attentionEyebrow}>ATUALIZAÇÕES</Text>
+                <Text style={styles.attentionTitle}>Você tem novidades para revisar</Text>
+              </View>
+              {unreadNotices > 0 ? (
+                <Pressable onPress={() => navigation.navigate('Communications')} style={styles.attentionRow}>
+                  <View style={[styles.attentionIcon, { backgroundColor: '#dff5ef' }]}><Text style={styles.attentionIconText}>●</Text></View>
+                  <View style={styles.grow}><Text style={styles.attentionRowTitle}>Avisos e comunicação</Text><Text style={styles.attentionRowText}>{unreadNotices} aviso{unreadNotices === 1 ? '' : 's'} não lido{unreadNotices === 1 ? '' : 's'}.</Text></View>
+                  <Text style={styles.attentionLink}>Abrir</Text>
+                </Pressable>
+              ) : null}
+              {unreadReports > 0 ? (
+                <Pressable onPress={() => navigation.navigate('Reports')} style={styles.attentionRow}>
+                  <View style={[styles.attentionIcon, { backgroundColor: '#fff2da' }]}><Text style={styles.attentionIconText}>!</Text></View>
+                  <View style={styles.grow}><Text style={styles.attentionRowTitle}>Relatos e solicitações</Text><Text style={styles.attentionRowText}>{unreadReports} resposta{unreadReports === 1 ? '' : 's'} ou atualização{unreadReports === 1 ? '' : 'ões'} pendente{unreadReports === 1 ? '' : 's'}.</Text></View>
+                  <Text style={styles.attentionLink}>Abrir</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+
           <View style={styles.sectionHead}><View><Text style={styles.sectionTitle}>Acesso rápido</Text><Text style={styles.sectionSubtitle}>Escolha uma área para continuar</Text></View></View>
           <View style={[styles.moduleGrid, desktop && styles.moduleGridDesktop]}>
             {visibleModules.map((item) => (
@@ -144,6 +190,7 @@ const styles = StyleSheet.create({
   topbar: { height: 68, paddingHorizontal: 34, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, breadcrumb: { color: '#8794a2', fontSize: 14 }, breadcrumbStrong: { color: '#34475c', fontWeight: '800' }, topActions: { flexDirection: 'row', alignItems: 'center', gap: 14, marginLeft: 'auto' }, online: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#dce8e5', borderRadius: 15, backgroundColor: '#f6fbf9', paddingHorizontal: 9, paddingVertical: 6 }, onlineDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#2bb596', marginRight: 5 }, onlineText: { color: '#497067', fontSize: 13 }, avatarDark: { width: 33, height: 33, borderRadius: 17, backgroundColor: colors.navy, alignItems: 'center', justifyContent: 'center' }, avatarDarkText: { color: '#fff', fontSize: 14, fontWeight: '800' },
   content: { width: '100%', maxWidth: layout.contentMaxWidth, alignSelf: 'center', paddingHorizontal: 34, paddingTop: 31, paddingBottom: 60 }, contentMobile: { paddingHorizontal: 15, paddingTop: 23, paddingBottom: 100 }, welcome: { marginBottom: 25 }, eyebrow: { color: '#8b98a6', fontSize: 13, letterSpacing: 1.1, fontWeight: '800', marginBottom: 7 }, welcomeTitle: { color: '#15263a', fontSize: 26, fontWeight: '900' }, welcomeText: { color: '#718091', fontSize: 15, lineHeight: 22, marginTop: 7 }, condominiumHighlight: { color: colors.primaryDark, fontWeight: '900' },
   statGrid: { flexDirection: 'row', gap: 14, marginBottom: 26 }, horizontalCards: { flexWrap: 'wrap' }, stat: { flex: 1, minWidth: 210, minHeight: 151, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: layout.radius, padding: 17 }, profileStat: { maxWidth: 420 }, statFeatured: { borderTopWidth: 3, borderTopColor: colors.teal }, statHead: { flexDirection: 'row', alignItems: 'center', gap: 8 }, statIcon: { width: 26, height: 26, borderRadius: 7, alignItems: 'center', justifyContent: 'center' }, statLabel: { color: '#788796', fontSize: 12, fontWeight: '900', letterSpacing: .7 }, statValue: { color: colors.ink, fontSize: 23, fontWeight: '900', marginTop: 13, marginBottom: 5 }, roleValue: { fontSize: 19 }, statDescription: { color: '#83909e', fontSize: 13 },
+  attentionCard: { marginBottom: 26, backgroundColor: '#fff', borderWidth: 1, borderColor: '#ecd598', borderRadius: layout.radius, padding: 16, gap: 10, ...shadow }, attentionHead: { marginBottom: 2 }, attentionEyebrow: { color: '#9b6a00', fontSize: 12, fontWeight: '900', letterSpacing: .8 }, attentionTitle: { color: '#5d3f00', fontSize: 20, fontWeight: '900', marginTop: 4 }, attentionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#f1e4b7', borderRadius: 14, backgroundColor: '#fffaf0', paddingHorizontal: 12, paddingVertical: 12 }, attentionIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, attentionIconText: { color: '#7d5800', fontSize: 16, fontWeight: '900' }, attentionRowTitle: { color: colors.ink, fontSize: 15, fontWeight: '900' }, attentionRowText: { color: colors.muted, fontSize: 13, marginTop: 3 }, attentionLink: { color: colors.primary, fontSize: 14, fontWeight: '900' },
   sectionHead: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 13 }, sectionTitle: { color: '#25374b', fontSize: 18, fontWeight: '900' }, sectionSubtitle: { color: '#8b97a3', fontSize: 14, marginTop: 4 }, moduleGrid: { gap: 12 }, moduleGridDesktop: { flexDirection: 'row', flexWrap: 'wrap' }, moduleCard: { minHeight: 112, flexBasis: '31%', flexGrow: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 13, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: layout.radius, padding: 16, ...shadow }, moduleIcon: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, moduleSymbol: { fontSize: 20, fontWeight: '800' }, moduleTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }, moduleTitle: { color: colors.ink, fontSize: 17, fontWeight: '900' }, moduleDescription: { color: colors.muted, fontSize: 14, lineHeight: 19, marginTop: 7 }, arrow: { color: colors.primary, fontSize: 19 }, planned: { color: colors.muted, fontSize: 11, fontWeight: '900' }, pressed: { opacity: .88, transform: [{ scale: .995 }] }, disabled: { opacity: .65 },
   securityCard: { marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#f3f7fb', borderRadius: layout.radius, padding: 15 }, securityIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#e5edf7', alignItems: 'center', justifyContent: 'center' }, securityTitle: { color: colors.ink, fontSize: 14, fontWeight: '900' }, securityText: { color: colors.muted, fontSize: 13, lineHeight: 16, marginTop: 3 }, mobileExit: { marginTop: 16, height: 44, alignItems: 'center', justifyContent: 'center' }, mobileExitText: { color: colors.red, fontSize: 15, fontWeight: '800' },
   mobileNav: { position: 'absolute', left: 0, right: 0, bottom: 0, minHeight: 88, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: 'row', paddingHorizontal: 5, paddingVertical: 8 }, mobileNavItem: { flex: 1, minHeight: 70, alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 3 }, mobileNavIcon: { color: '#657585', fontSize: 29, fontWeight: '800' }, mobileNavIconActive: { color: colors.primary, fontSize: 29, fontWeight: '900' }, mobileNavText: { color: '#657585', fontSize: 13, fontWeight: '700', textAlign: 'center' }, mobileNavTextActive: { color: colors.primary, fontSize: 13, fontWeight: '900', textAlign: 'center' },

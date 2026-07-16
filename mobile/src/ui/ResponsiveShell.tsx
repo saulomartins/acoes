@@ -3,6 +3,7 @@ import { Image, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, Vi
 import { AuthContext } from '../context/AuthContext';
 import { colors, layout } from './theme';
 import { apiRequest } from '../api/client';
+import { syncNotificationBadge } from '../services/pushNotifications';
 
 type Item = { label: string; route: string; symbol: string; roles: string[] };
 
@@ -90,6 +91,10 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
     const timer = setInterval(update, 30000);
     return () => clearInterval(timer);
   }, [activeRoute, user?.role, userToken]);
+
+  useEffect(() => {
+    syncNotificationBadge(unreadNotices + unreadReports);
+  }, [unreadNotices, unreadReports]);
 
   return (
     <View style={styles.shell}>

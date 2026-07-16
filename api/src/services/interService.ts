@@ -80,11 +80,19 @@ const isConfigured = (integration: InterIntegrationConfig | null | undefined) =>
   );
 
 const getHttpsAgent = (integration: InterIntegrationConfig) =>
-  new https.Agent({
-    cert: fs.readFileSync(integration.certPath),
-    key: fs.readFileSync(integration.keyPath),
-    passphrase: integration.certPassphrase || undefined,
-  });
+  {
+    if (!fs.existsSync(integration.certPath)) {
+      throw new Error(`Certificado do Banco Inter não encontrado em ${integration.certPath}.`);
+    }
+    if (!fs.existsSync(integration.keyPath)) {
+      throw new Error(`Chave do Banco Inter não encontrada em ${integration.keyPath}.`);
+    }
+    return new https.Agent({
+      cert: fs.readFileSync(integration.certPath),
+      key: fs.readFileSync(integration.keyPath),
+      passphrase: integration.certPassphrase || undefined,
+    });
+  };
 
 const interRequest = <T>(
   integration: InterIntegrationConfig,

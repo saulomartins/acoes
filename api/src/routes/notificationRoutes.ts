@@ -71,7 +71,7 @@ router.post('/',authorize('sindico','subsindico'),asyncHandler(async(req,res)=>{
   if(!recipients.rows.length)return res.status(404).json({message:targetUserId?'A pessoa selecionada não está ativa neste condomínio.':'Não há pessoas ativas neste condomínio.'});
   const devices=await query<{fcm_token:string}>(`select dt.fcm_token from device_tokens dt join users u on u.id=dt.user_id where u.condominium_id=$1 and u.login_enabled=true and ($2::uuid is null or u.id=$2)`,[condominiumId,targetUserId]);
   const tokens=devices.rows.map(row=>row.fcm_token);
-  let push;try{push=await sendPushNotification({tokens,title,body,data:{screen:'Communications'}});}catch{push={provider:'expo',status:'provider_error',delivered:0,requested:tokens.length};}
+  let push;try{push=await sendPushNotification({tokens,title,body,data:{screen:'Communications'}});if(push.errors?.length)console.warn('Communication push notification errors',push.errors);}catch(error){console.warn('Communication push notification failed',error);push={provider:'expo',status:'provider_error',delivered:0,requested:tokens.length,errors:['Falha ao enviar push notification.']};}
   const notification=await withTransaction(async client=>{
     const created=await client.query(`insert into notifications(id,condominium_id,title,body,target_role,created_by,provider_status,audience_type,target_user_id) values($1,$2,$3,$4,null,$5,$6,$7,$8) returning *`,[randomUUID(),condominiumId,title,body,req.user?.id,push.status,targetUserId?'personal':'general',targetUserId]);
     for(const recipient of recipients.rows)await client.query(`insert into notification_recipients(notification_id,user_id) values($1,$2)`,[created.rows[0].id,recipient.id]);
