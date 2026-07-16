@@ -1,8 +1,9 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { AuthContext } from '../context/AuthContext';
 import { colors, layout, shadow } from '../ui/theme';
 import { apiRequest } from '../api/client';
+import { subscribeNotificationsChanged } from '../services/notificationEvents';
 
 type Module = {
   title: string;
@@ -61,26 +62,28 @@ export default function Home({ navigation }: any) {
       .catch(()=>setCondominiumName(''));
   }, [admin,user?.condominiumName,userToken]);
 
-  useEffect(() => {
+  const loadAttention = useCallback(async () => {
     if (!userToken || admin) return;
-    const loadAttention = async () => {
-      try {
-        const [noticeData, reportData] = await Promise.all([
-          apiRequest<{ count: number }>('/notifications/unread-count', userToken),
-          apiRequest<{ reports: Array<{ unread_count: number }> }>('/reports', userToken),
-        ]);
-        setUnreadNotices(noticeData.count || 0);
-        setUnreadReports(reportData.reports.reduce((sum, item) => sum + Number(item.unread_count || 0), 0));
-      } catch {
-        setUnreadNotices(0);
-        setUnreadReports(0);
-      }
-    };
+    try {
+      const [noticeData, reportData] = await Promise.all([
+        apiRequest<{ count: number }>('/notifications/unread-count', userToken),
+        apiRequest<{ reports: Array<{ unread_count: number }> }>('/reports', userToken),
+      ]);
+      setUnreadNotices(noticeData.count || 0);
+      setUnreadReports(reportData.reports.reduce((sum, item) => sum + Number(item.unread_count || 0), 0));
+    } catch {
+      setUnreadNotices(0);
+      setUnreadReports(0);
+    }
+  }, [admin, userToken]);
 
+  useEffect(() => {
     loadAttention();
     const timer = setInterval(loadAttention, 30000);
     return () => clearInterval(timer);
-  }, [admin, userToken]);
+  }, [loadAttention]);
+
+  useEffect(() => subscribeNotificationsChanged(() => { void loadAttention(); }), [loadAttention]);
 
   const open = (route?: string) => route && navigation.navigate(route);
 

@@ -14,6 +14,7 @@ import { AuthContext } from "../context/AuthContext";
 import { AppButton, AppDialog, EmptyState, Panel } from "../ui/components";
 import ResponsiveShell from "../ui/ResponsiveShell";
 import { colors, layout } from "../ui/theme";
+import { emitNotificationsChanged } from "../services/notificationEvents";
 
 type Notice = {
   id: string;
@@ -177,19 +178,16 @@ export default function Communications({ navigation }: any) {
   };
   const markRead = async (notice: Notice) => {
     if (!userToken || notice.read_at) return;
-    setNotices((current) =>
-      current.map((item) =>
-        item.id === notice.id
-          ? { ...item, read_at: new Date().toISOString() }
-          : item,
-      ),
-    );
+    setNotices((current) => current.filter((item) => item.id !== notice.id));
+    emitNotificationsChanged();
     try {
       await apiRequest(`/notifications/${notice.id}/read`, userToken, {
         method: "PATCH",
       });
+      emitNotificationsChanged();
     } catch {
       load(true);
+      emitNotificationsChanged();
     }
   };
   const unread = notices.filter((item) => !item.read_at).length;
@@ -197,6 +195,8 @@ export default function Communications({ navigation }: any) {
     <ResponsiveShell activeRoute="Communications" navigation={navigation}>
       <ScrollView
         contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -471,6 +471,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
+    flexWrap: "wrap",
     gap: 16,
   },
   eyebrow: {
@@ -487,14 +488,16 @@ const styles = StyleSheet.create({
   },
   subtitle: { color: colors.muted, fontSize: 16, marginTop: 5 },
   counter: {
-    minWidth: 80,
+    minWidth: 92,
+    maxWidth: "100%",
     backgroundColor: "#eaf1fb",
     borderRadius: 12,
     padding: 10,
     alignItems: "center",
+    alignSelf: "flex-start",
   },
   counterValue: { color: colors.primary, fontSize: 22, fontWeight: "900" },
-  counterLabel: { color: colors.primaryDark, fontSize: 13, fontWeight: "800" },
+  counterLabel: { color: colors.primaryDark, fontSize: 13, fontWeight: "800", textAlign: "center" },
   panelTitle: { color: colors.ink, fontSize: 19, fontWeight: "900" },
   hint: { color: colors.muted, fontSize: 14, marginTop: 5, marginBottom: 14 },
   label: {

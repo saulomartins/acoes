@@ -1,9 +1,10 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { AuthContext } from '../context/AuthContext';
 import { colors, layout } from './theme';
 import { apiRequest } from '../api/client';
 import { syncNotificationBadge } from '../services/pushNotifications';
+import { subscribeNotificationsChanged } from '../services/notificationEvents';
 
 type Item = { label: string; route: string; symbol: string; roles: string[] };
 
@@ -73,24 +74,27 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
       .catch(()=>setCondominiumName('Meu condomínio'));
   }, [user?.condominiumName,user?.role,userToken]);
 
-  useEffect(() => {
+  const refreshAttention = useCallback(async () => {
     if (!userToken || user?.role === 'admin_geral') return;
-    const update = async () => {
-      try {
-        const [noticeData, reportData] = await Promise.all([
-          apiRequest<{count:number}>('/notifications/unread-count', userToken),
-          apiRequest<{reports:Array<{unread_count:number}>}>('/reports', userToken),
-        ]);
-        setUnreadNotices(noticeData.count);
-        setUnreadReports(reportData.reports.reduce((sum, report) => sum + Number(report.unread_count || 0), 0));
-      } catch {
-        return null;
-      }
-    };
-    update();
-    const timer = setInterval(update, 30000);
+    try {
+      const [noticeData, reportData] = await Promise.all([
+        apiRequest<{count:number}>('/notifications/unread-count', userToken),
+        apiRequest<{reports:Array<{unread_count:number}>}>('/reports', userToken),
+      ]);
+      setUnreadNotices(noticeData.count);
+      setUnreadReports(reportData.reports.reduce((sum, report) => sum + Number(report.unread_count || 0), 0));
+    } catch {
+      return null;
+    }
+  }, [user?.role, userToken]);
+
+  useEffect(() => {
+    refreshAttention();
+    const timer = setInterval(refreshAttention, 30000);
     return () => clearInterval(timer);
-  }, [activeRoute, user?.role, userToken]);
+  }, [activeRoute, refreshAttention]);
+
+  useEffect(() => subscribeNotificationsChanged(() => { void refreshAttention(); }), [refreshAttention]);
 
   useEffect(() => {
     syncNotificationBadge(unreadNotices + unreadReports);
