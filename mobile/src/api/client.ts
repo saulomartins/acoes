@@ -105,7 +105,15 @@ export const openAuthenticatedPdf = async (path:string,token:string) => {
     const result = await FileSystem.downloadAsync(`${API_BASE_URL}${path}`, localUri, { headers: { Authorization: `Bearer ${accessToken}` } });
     if (result.status < 200 || result.status >= 300) {
       await FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => null);
-      throw new Error('Não foi possível baixar o boleto em PDF.');
+      let detailedMessage = '';
+      try {
+        const fallback = await fetch(`${API_BASE_URL}${path}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+        const payload = await fallback.json().catch(() => null) as { message?: string } | null;
+        if (payload?.message) detailedMessage = payload.message;
+      } catch {
+        // Ignore fallback failures and keep generic message.
+      }
+      throw new Error(detailedMessage || 'Não foi possível baixar o boleto em PDF.');
     }
     if (!(await Sharing.isAvailableAsync())) throw new Error('Nenhum visualizador de PDF está disponível neste aparelho.');
     try { await Sharing.shareAsync(localUri, { mimeType: 'application/pdf', dialogTitle: 'Abrir ou imprimir boleto', UTI: 'com.adobe.pdf' }); }
