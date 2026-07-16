@@ -61,19 +61,23 @@ router.patch('/:id/read',asyncHandler(async(req,res)=>{
 
 router.post('/',authorize('sindico','subsindico'),asyncHandler(async(req,res)=>{
   const condominiumId=req.user?.condominiumId;
+  const senderId=req.user?.id;
   const title=String(req.body?.title||'').trim();
   const body=String(req.body?.body||'').trim();
   const targetUserId=req.body?.targetUserId?String(req.body.targetUserId):null;
   if(!condominiumId)return res.status(400).json({message:'Condomínio obrigatório.'});
+  if(!senderId)return res.status(401).json({message:'Usuário autenticado obrigatório.'});
+  if(targetUserId&&targetUserId===senderId)return res.status(400).json({message:'Você não pode enviar um aviso para você mesmo.'});
   if(title.length<3||title.length>120)return res.status(400).json({message:'O título deve ter entre 3 e 120 caracteres.'});
   if(body.length<3||body.length>2000)return res.status(400).json({message:'A mensagem deve ter entre 3 e 2.000 caracteres.'});
-  const recipients=await query<{id:string;full_name:string|null;username:string}>(`select u.id,u.full_name,u.username from users u where u.condominium_id=$1 and u.login_enabled=true and ($2::uuid is null or u.id=$2)`,[condominiumId,targetUserId]);
+  const recipients=await query<{id:string;full_name:string|null;username:string}>(`select u.id,u.full_name,u.username from users u where u.condominium_id=$1 and u.login_enabled=true and u.id<>$3 and ($2::uuid is null or u.id=$2)`,[condominiumId,targetUserId,senderId]);
   if(!recipients.rows.length)return res.status(404).json({message:targetUserId?'A pessoa selecionada não está ativa neste condomínio.':'Não há pessoas ativas neste condomínio.'});
-  const devices=await query<{fcm_token:string}>(`select dt.fcm_token from device_tokens dt join users u on u.id=dt.user_id where u.condominium_id=$1 and u.login_enabled=true and ($2::uuid is null or u.id=$2)`,[condominiumId,targetUserId]);
-  const tokens=devices.rows.map(row=>row.fcm_token);
-  let push;try{push=await sendPushNotification({tokens,title,body,data:{screen:'Communications'}});if(push.errors?.length)console.warn('Communication push notification errors',push.errors);}catch(error){console.warn('Communication push notification failed',error);push={provider:'expo',status:'provider_error',delivered:0,requested:tokens.length,errors:['Falha ao enviar push notification.']};}
+  const recipientIds=recipients.rows.map(row=>row.id);
+  const devices=await query<{fcm_token:string}>(`select distinct fcm_token from device_tokens where user_id = any($1::uuid[])`,[recipientIds]);
+  const tokens=devices.rows.map(row=>row.fcm_token).filter(Boolean);
+  let push;try{push=await sendPushNotification({tokens,title,body,data:{screen:'Communications'}});if(push.errors?.length)console.warn('Communication push notification errors',push.errors);if(push.invalidTokens?.length)await query(`delete from device_tokens where fcm_token = any($1::text[])`,[push.invalidTokens]);}catch(error){console.warn('Communication push notification failed',error);push={provider:'expo',status:'provider_error',delivered:0,requested:tokens.length,errors:['Falha ao enviar push notification.'],invalidTokens:[]};}
   const notification=await withTransaction(async client=>{
-    const created=await client.query(`insert into notifications(id,condominium_id,title,body,target_role,created_by,provider_status,audience_type,target_user_id) values($1,$2,$3,$4,null,$5,$6,$7,$8) returning *`,[randomUUID(),condominiumId,title,body,req.user?.id,push.status,targetUserId?'personal':'general',targetUserId]);
+    const created=await client.query(`insert into notifications(id,condominium_id,title,body,target_role,created_by,provider_status,audience_type,target_user_id) values($1,$2,$3,$4,null,$5,$6,$7,$8) returning *`,[randomUUID(),condominiumId,title,body,senderId,push.status,targetUserId?'personal':'general',targetUserId]);
     for(const recipient of recipients.rows)await client.query(`insert into notification_recipients(notification_id,user_id) values($1,$2)`,[created.rows[0].id,recipient.id]);
     return created.rows[0];
   });
