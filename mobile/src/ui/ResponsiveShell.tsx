@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { AuthContext } from '../context/AuthContext';
 import { colors, layout } from './theme';
 import { apiRequest } from '../api/client';
@@ -34,6 +34,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
   const { user, userToken, signOut } = useContext(AuthContext);
   const [condominiumName, setCondominiumName] = useState(user?.condominiumName || '');
   const [unreadNotices, setUnreadNotices] = useState(0);
+  const [unreadReports, setUnreadReports] = useState(0);
   const visible = items.filter((item) => item.roles.includes(user?.role || ''));
   const mainItems = visible.filter((item) => !billingRoutes.includes(item.route) && !noticeRoutes.includes(item.route) && !bankRoutes.includes(item.route));
   const bankItems = visible.filter((item) => bankRoutes.includes(item.route));
@@ -45,9 +46,15 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
   const [billingOpen, setBillingOpen] = useState(billingActive);
   const [noticeOpen, setNoticeOpen] = useState(noticeActive);
   const [bankOpen, setBankOpen] = useState(bankActive);
-  const mobileItems = [{ label: 'Avisos', route: 'Communications', symbol: '●', roles: [] }, ...visible.filter((item) => !noticeRoutes.includes(item.route))].slice(0, 5);
   const initials = (user?.username || 'U').slice(0, 2).toUpperCase();
   const activeLabel = items.find((item) => item.route === activeRoute)?.label || 'Lar em Dia';
+  const preferredMobileRoutes = ['Home', 'Communications', 'Reports', 'Invoices', 'Accountability'];
+  const mobileBaseItems = preferredMobileRoutes
+    .map((route) => visible.find((item) => item.route === route))
+    .filter(Boolean) as Item[];
+  const activeMobileItem = visible.find((item) => item.route === activeRoute && !mobileBaseItems.some((base) => base.route === item.route));
+  const mobileItems = (activeMobileItem ? [...mobileBaseItems.slice(0, 4), activeMobileItem] : mobileBaseItems).slice(0, 5);
+  const totalAttention = unreadNotices + unreadReports;
 
   useEffect(() => {
     setBillingOpen(billingActive);
@@ -67,7 +74,18 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
 
   useEffect(() => {
     if (!userToken || user?.role === 'admin_geral') return;
-    const update = () => apiRequest<{count:number}>('/notifications/unread-count', userToken).then(data => setUnreadNotices(data.count)).catch(() => null);
+    const update = async () => {
+      try {
+        const [noticeData, reportData] = await Promise.all([
+          apiRequest<{count:number}>('/notifications/unread-count', userToken),
+          apiRequest<{reports:Array<{unread_count:number}>}>('/reports', userToken),
+        ]);
+        setUnreadNotices(noticeData.count);
+        setUnreadReports(reportData.reports.reduce((sum, report) => sum + Number(report.unread_count || 0), 0));
+      } catch {
+        return null;
+      }
+    };
     update();
     const timer = setInterval(update, 30000);
     return () => clearInterval(timer);
@@ -110,8 +128,8 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
           {desktop ? <Text style={styles.breadcrumb}>Painel  /  <Text style={styles.breadcrumbStrong}>{activeLabel}</Text></Text> : <View style={styles.brand}><Image source={require('../../assets/lar-em-dia-logo.png')} style={styles.mobileBrandLogo} resizeMode="contain" /><Text style={styles.mobileTitle}>{activeLabel}</Text></View>}
           <View style={styles.topActions}><View style={styles.online}><View style={styles.dot}/><Text style={styles.onlineText}>Tudo certo</Text></View><View style={styles.avatar}><Text style={styles.avatarText}>{initials}</Text></View></View>
         </View>
-        <View style={[styles.body, !desktop && styles.bodyMobile]}>{!desktop && bankActive ? <View style={styles.noticeTabs}>{bankItems.map(item=><Pressable key={item.route} onPress={()=>navigation.navigate(item.route)} style={[styles.noticeTab,activeRoute===item.route&&styles.noticeTabActive]}><Text style={[styles.noticeTabText,activeRoute===item.route&&styles.noticeTabTextActive]}>{item.route==='BankLink'?'Vincular':item.route==='BankConfigurations'?'Configurações':'Bancos'}</Text></Pressable>)}</View>:null}{!desktop && noticeActive ? <View style={styles.noticeTabs}><Pressable onPress={() => navigation.navigate('Communications')} style={[styles.noticeTab, activeRoute === 'Communications' && styles.noticeTabActive]}><Text style={[styles.noticeTabText, activeRoute === 'Communications' && styles.noticeTabTextActive]}>Comunicação</Text></Pressable><Pressable onPress={() => navigation.navigate('Reports')} style={[styles.noticeTab, activeRoute === 'Reports' && styles.noticeTabActive]}><Text style={[styles.noticeTabText, activeRoute === 'Reports' && styles.noticeTabTextActive]}>Relatos e solicitações</Text></Pressable></View> : null}{children}</View>
-        {!desktop ? <View style={styles.mobileNav}>{mobileItems.map((item) => {const active=item.route==='Communications'?noticeActive:activeRoute===item.route;return <Pressable key={item.route} onPress={() => navigation.navigate(item.route)} style={styles.mobileItem}><Text style={[styles.mobileIcon, active && styles.mobileActive]}>{item.symbol}</Text><Text numberOfLines={2} style={[styles.mobileText, active && styles.mobileActive]}>{item.label}</Text></Pressable>})}</View> : null}
+        <View style={[styles.body, !desktop && styles.bodyMobile]}>{!desktop && bankActive ? <View style={styles.noticeTabs}>{bankItems.map(item=><Pressable key={item.route} onPress={()=>navigation.navigate(item.route)} style={[styles.noticeTab,activeRoute===item.route&&styles.noticeTabActive]}><Text style={[styles.noticeTabText,activeRoute===item.route&&styles.noticeTabTextActive]}>{item.route==='BankLink'?'Vincular':item.route==='BankConfigurations'?'Configurações':'Bancos'}</Text></Pressable>)}</View>:null}{!desktop && noticeActive ? <View style={styles.noticeTabs}><Pressable onPress={() => navigation.navigate('Communications')} style={[styles.noticeTab, activeRoute === 'Communications' && styles.noticeTabActive]}><Text style={[styles.noticeTabText, activeRoute === 'Communications' && styles.noticeTabTextActive]}>Comunicação</Text></Pressable><Pressable onPress={() => navigation.navigate('Reports')} style={[styles.noticeTab, activeRoute === 'Reports' && styles.noticeTabActive]}><Text style={[styles.noticeTabText, activeRoute === 'Reports' && styles.noticeTabTextActive]}>Relatos e solicitações</Text></Pressable></View> : null}{totalAttention > 0 ? <View style={styles.attentionBanner}><View style={styles.grow}><Text style={styles.attentionTitle}>Você tem atualizações pendentes</Text><Text style={styles.attentionText}>{unreadNotices > 0 ? `${unreadNotices} aviso${unreadNotices === 1 ? '' : 's'} não lido${unreadNotices === 1 ? '' : 's'}` : null}{unreadNotices > 0 && unreadReports > 0 ? ' · ' : ''}{unreadReports > 0 ? `${unreadReports} resposta${unreadReports === 1 ? '' : 's'} ou relato${unreadReports === 1 ? '' : 's'} com novidades` : null}</Text></View>{unreadNotices > 0 ? <Pressable onPress={() => navigation.navigate('Communications')} style={styles.attentionAction}><Text style={styles.attentionActionText}>Avisos</Text></Pressable> : null}{unreadReports > 0 ? <Pressable onPress={() => navigation.navigate('Reports')} style={styles.attentionAction}><Text style={styles.attentionActionText}>Relatos</Text></Pressable> : null}</View> : null}{children}</View>
+        {!desktop ? <View style={styles.mobileNavShell}><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mobileNav}>{mobileItems.map((item) => {const active=item.route==='Communications'?noticeActive:activeRoute===item.route;const badge=item.route==='Communications'?unreadNotices:item.route==='Reports'?unreadReports:0;return <Pressable key={item.route} onPress={() => navigation.navigate(item.route)} style={[styles.mobileItem, active && styles.mobileItemActive]}><View style={styles.mobileIconWrap}><Text style={[styles.mobileIcon, active && styles.mobileActive]}>{item.symbol}</Text>{badge > 0 ? <Text style={styles.mobileBadge}>{badge > 99 ? '99+' : badge}</Text> : null}</View><Text numberOfLines={2} style={[styles.mobileText, active && styles.mobileActive]}>{item.label}</Text></Pressable>})}</ScrollView></View> : null}
       </View>
     </View>
   );
@@ -133,6 +151,6 @@ const styles = StyleSheet.create({
   subnavText: { color: '#6e7b88', fontSize: 14, fontWeight: '700' },
   profile: { marginTop: 'auto', borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 8, paddingTop: 16, flexDirection: 'row', alignItems: 'center', gap: 9 }, avatarLight: { width: 33, height: 33, borderRadius: 17, backgroundColor: '#dfe9f6', alignItems: 'center', justifyContent: 'center' }, avatarLightText: { color: colors.primary, fontSize: 14, fontWeight: '800' }, profileName: { color: colors.ink, fontSize: 14, fontWeight: '800' }, profileRole: { color: '#8190a0', fontSize: 12, marginTop: 2 }, exit: { color: colors.red, fontSize: 13, fontWeight: '800' },
   topbar: { height: 68, paddingHorizontal: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: colors.border }, breadcrumb: { color: '#8794a2', fontSize: 14 }, breadcrumbStrong: { color: '#34475c', fontWeight: '800' }, topActions: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 13 }, online: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#dce8e5', backgroundColor: '#f6fbf9', borderRadius: 15, paddingHorizontal: 9, paddingVertical: 6 }, dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#2bb596', marginRight: 5 }, onlineText: { color: '#497067', fontSize: 13 }, avatar: { width: 33, height: 33, borderRadius: 17, backgroundColor: colors.navy, alignItems: 'center', justifyContent: 'center' }, avatarText: { color: '#fff', fontSize: 14, fontWeight: '800' },
-  body: { flex: 1 }, bodyMobile: { paddingBottom: 88 }, mobileNav: { position: 'absolute', left: 0, right: 0, bottom: 0, minHeight: 88, flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 5, paddingVertical: 8 }, mobileItem: { flex: 1, minHeight: 70, alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 3 }, mobileIcon: { color: '#657585', fontSize: 29, fontWeight: '800' }, mobileText: { color: '#657585', fontSize: 13, fontWeight: '700', textAlign: 'center' }, mobileActive: { color: colors.primary, fontWeight: '900' },
+  body: { flex: 1 }, bodyMobile: { paddingBottom: 114 }, attentionBanner: { marginHorizontal: 14, marginTop: 12, padding: 14, borderRadius: 16, backgroundColor: '#fff4db', borderWidth: 1, borderColor: '#f1d28b', flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }, attentionTitle: { color: '#7a4a00', fontSize: 15, fontWeight: '900' }, attentionText: { color: '#8d6517', fontSize: 13, marginTop: 3 }, attentionAction: { minHeight: 34, paddingHorizontal: 12, borderRadius: 17, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e6bf68', alignItems: 'center', justifyContent: 'center' }, attentionActionText: { color: '#7a4a00', fontSize: 13, fontWeight: '900' }, mobileNavShell: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 10, paddingBottom: 8, paddingTop: 6, backgroundColor: 'transparent' }, mobileNav: { gap: 10, paddingHorizontal: 2 }, mobileItem: { minWidth: 92, maxWidth: 110, minHeight: 82, borderRadius: 18, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.border }, mobileItemActive: { backgroundColor: '#eaf1fb', borderColor: '#b9d0ef' }, mobileIconWrap: { position: 'relative', alignItems: 'center', justifyContent: 'center', minWidth: 36, minHeight: 30 }, mobileIcon: { color: '#657585', fontSize: 25, fontWeight: '800' }, mobileBadge: { position: 'absolute', top: -6, right: -10, minWidth: 22, height: 22, paddingHorizontal: 5, borderRadius: 11, overflow: 'hidden', textAlign: 'center', lineHeight: 22, color: '#fff', backgroundColor: colors.red, fontSize: 12, fontWeight: '900' }, mobileText: { color: '#657585', fontSize: 13, fontWeight: '800', textAlign: 'center' }, mobileActive: { color: colors.primary, fontWeight: '900' },
   noticeTabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingTop: 12, backgroundColor: colors.background }, noticeTab: { flex: 1, minHeight: 52, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: 11, backgroundColor: '#fff', paddingHorizontal: 8 }, noticeTabActive: { backgroundColor: colors.primary, borderColor: colors.primary }, noticeTabText: { color: colors.ink, fontSize: 15, fontWeight: '800', textAlign: 'center' }, noticeTabTextActive: { color: '#fff', fontWeight: '900' },
 });

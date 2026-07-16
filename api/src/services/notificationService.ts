@@ -2,6 +2,7 @@ type PushInput = {
   tokens: string[];
   title: string;
   body: string;
+  data?: Record<string, unknown>;
 };
 
 export const sendPushNotification = async (input: PushInput) => {
@@ -18,7 +19,7 @@ export const sendPushNotification = async (input: PushInput) => {
       sound: 'default',
       channelId: 'default',
       priority: 'high',
-      data: { screen: 'Communications' },
+      data: input.data || { screen: 'Communications' },
     }));
     const response = await fetch('https://exp.host/--/api/v2/push/send', {
       method: 'POST',
