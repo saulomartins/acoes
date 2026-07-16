@@ -1,0 +1,8 @@
+
+> condominio-mobile@0.1.0 web
+> expo start --web
+
+env: load .env
+env: export EXPO_PUBLIC_API_URL
+Starting project at C:\Users\saulo\OneDrive\Documentos\projetos\APP COND\externals\mobile
+Starting Metro Bundler

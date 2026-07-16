@@ -1,0 +1,36 @@
+{
+  "name": "condominio-api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p .",
+    "db:setup": "ts-node --files src/scripts/setupDatabase.ts",
+    "units:link-complements": "ts-node --files src/scripts/linkUsersToUnitsFromAddressComplement.ts",
+    "inter:sync": "ts-node --files src/scripts/syncInterIntegration.ts",
+    "inter:test": "ts-node --files src/scripts/testInterToken.ts",
+    "inter:audit": "ts-node --files src/scripts/auditBankIntegrations.ts"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "dotenv": "^16.0.0",
+    "exceljs": "^4.4.0",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.0",
+    "jszip": "^3.10.1",
+    "multer": "^2.2.0",
+    "pdf-parse": "^1.1.1",
+    "pg": "^8.9.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/express": "^4.17.15",
+    "@types/jsonwebtoken": "^9.0.2",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^20.2.5",
+    "@types/pdf-parse": "^1.1.4",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.1.3"
+  }
+}

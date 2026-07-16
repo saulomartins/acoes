@@ -1,0 +1,355 @@
+import { randomUUID } from 'crypto';
+import { Router } from 'express';
+import { authenticate, authorize } from '../middleware/auth';
+import { asyncHandler } from '../middleware/asyncHandler';
+import { query, withTransaction } from '../db';
+import multer from 'multer';
+import ExcelJS from 'exceljs';
+import bcrypt from 'bcrypt';
+import { Readable } from 'stream';
+import { createInterBoleto } from '../services/interService';
+import { createBillingTemplateWorkbook } from '../services/billingTemplateService';
+import { getInterIntegration } from './invoiceRoutes';
+
+const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+const issuanceErrorMessage = (error: any) => {
+  if (typeof error?.message === 'string' && error.message.trim()) return error.message.trim();
+  const nested = Array.isArray(error?.errors) ? error.errors.find((item: any) => item?.message)?.message : null;
+  if (nested) return String(nested);
+  if (error?.code === 'EACCES') return 'O servidor não conseguiu acessar o Banco Inter. Verifique a permissão de conexão HTTPS.';
+  if (typeof error === 'string' && error.trim()) return error.trim();
+  return 'O Banco Inter não devolveu detalhes da falha. Tente novamente ou consulte o suporte.';
+};
+const interDate = (value: unknown) => {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const raw = String(value ?? '').trim();
+  const iso = /^(\d{4}-\d{2}-\d{2})/.exec(raw);
+  if (!iso) throw new Error('A data de vencimento da cobrança é inválida.');
+  return iso[1];
+};
+const todayIso = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+};
+const formatDateBr = (iso: string) => `${iso.slice(8,10)}/${iso.slice(5,7)}/${iso.slice(0,4)}`;
+router.use(authenticate, authorize('sindico', 'subsindico'));
+
+router.get('/settings', asyncHandler(async (req, res) => {
+  const [result, condominium] = await Promise.all([query(
+    `select * from billing_settings where condominium_id = $1`,
+    [req.user?.condominiumId],
+  ), query(`select id,name,cnpj from condominiums where id=$1`,[req.user?.condominiumId])]);
+  return res.json({ settings: result.rows[0] || null, condominium:condominium.rows[0] || null });
+}));
+
+router.put('/settings', asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.condominiumId;
+  if (!condominiumId) return res.status(400).json({ message: 'Condomínio obrigatório.' });
+  const body = req.body || {};
+  if (String(body.descriptionTemplate || '').length > 100) return res.status(400).json({ message: 'A descrição deve ter no máximo 100 caracteres.' });
+  const daysAfterDue = Number(body.daysAfterDue ?? 30);
+  const discountDays = Number(body.discountDays ?? 0);
+  if (daysAfterDue < 0 || daysAfterDue > 60 || discountDays < 0 || discountDays > 60) {
+    return res.status(400).json({ message: 'Os prazos devem estar entre 0 e 60 dias.' });
+  }
+  if (!body.receiveBoleto && !body.receivePix) return res.status(400).json({ message: 'Selecione boleto e/ou Pix.' });
+  const result = await query(
+    `insert into billing_settings (condominium_id, description_template, receive_boleto, receive_pix,
+       allow_after_due, days_after_due, fine_type, fine_value, interest_type, interest_value,
+       discount_type, discount_value, discount_days, updated_by, updated_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
+     on conflict (condominium_id) do update set description_template=excluded.description_template,
+       receive_boleto=excluded.receive_boleto, receive_pix=excluded.receive_pix,
+       allow_after_due=excluded.allow_after_due, days_after_due=excluded.days_after_due,
+       fine_type=excluded.fine_type, fine_value=excluded.fine_value,
+       interest_type=excluded.interest_type, interest_value=excluded.interest_value,
+       discount_type=excluded.discount_type, discount_value=excluded.discount_value,
+       discount_days=excluded.discount_days, updated_by=excluded.updated_by, updated_at=now()
+     returning *`,
+    [condominiumId, String(body.descriptionTemplate || 'Taxa condominial - {tipologia}'),
+      Boolean(body.receiveBoleto), Boolean(body.receivePix), Boolean(body.allowAfterDue), daysAfterDue,
+      body.fineType || 'NONE', Number(body.fineValue || 0), body.interestType || 'NONE', Number(body.interestValue || 0),
+      body.discountType || 'NONE', Number(body.discountValue || 0), discountDays, req.user?.id],
+  );
+  return res.json({ settings: result.rows[0] });
+}));
+
+router.post('/batches/preview', asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.condominiumId;
+  const referenceMonth = String(req.body?.referenceMonth || '');
+  const userIds = Array.isArray(req.body?.userIds) ? req.body.userIds : [];
+  if (!/^\d{4}-\d{2}$/.test(referenceMonth)) return res.status(400).json({ message: 'Informe o mês de referência no formato AAAA-MM.' });
+  if (!userIds.length) return res.status(400).json({ message: 'Selecione ao menos uma pessoa.' });
+  const result = await query<{
+    id: string; full_name: string | null; username: string; cpf: string | null; unit: string | null;
+    unit_type_name: string | null; fee_cents: number | null; address_complete: boolean; duplicate: boolean; billing_exempt:boolean; preferred_due_day:number;
+  }>(
+    `select u.id,u.full_name,u.username,u.cpf,u.unit,u.billing_exempt,u.preferred_due_day,ut.name unit_type_name,ut.fee_cents,
+       (u.full_name is not null and u.cpf is not null and u.street is not null and u.address_number is not null
+        and u.neighborhood is not null and u.city is not null and u.state is not null and u.postal_code is not null) address_complete,
+       exists(select 1 from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status <> 'canceled') duplicate
+     from users u left join units un on un.id=u.unit_id left join unit_types ut on ut.id=un.unit_type_id
+     where u.condominium_id=$1 and u.id=any($2::uuid[]) order by u.full_name,u.username`,
+    [condominiumId, userIds, `${referenceMonth}-01`],
+  );
+  const items = result.rows.map(row => {const dueDate=`${referenceMonth}-${String(row.preferred_due_day).padStart(2,'0')}`;return ({ ...row, valid: Boolean(row.fee_cents && row.address_complete && !row.duplicate && !row.billing_exempt && dueDate>=todayIso()),
+    issues: [!row.fee_cents ? 'Sem valor de tipologia' : null, !row.address_complete ? 'Cadastro/endereço incompleto' : null,
+      row.duplicate ? 'Cobrança já existente nesta referência' : null, row.billing_exempt ? 'Pessoa isenta de boleto' : null,
+      dueDate<todayIso() ? `O vencimento ${formatDateBr(dueDate)} já passou` : null].filter(Boolean),
+      due_date:dueDate })});
+  return res.json({ referenceMonth, items, validCount: items.filter(i => i.valid).length,
+    totalAmountCents: items.filter(i => i.valid).reduce((sum, i) => sum + Number(i.fee_cents || 0), 0) });
+}));
+
+router.post('/batches', asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.condominiumId;
+  const { referenceMonth, description, userIds } = req.body || {};
+  if (!/^\d{4}-\d{2}$/.test(String(referenceMonth || '')) || !Array.isArray(userIds) || !userIds.length) {
+    return res.status(400).json({ message: 'Informe mês de referência e pessoas.' });
+  }
+  const billingDescription=String(description||'').trim();
+  if(!billingDescription) return res.status(400).json({message:'Informe a descrição que será exibida no boleto.'});
+  if(billingDescription.length>100) return res.status(400).json({message:'A descrição deve ter no máximo 100 caracteres.'});
+  const condominium=await query<{name:string;cnpj:string|null}>(`select name,cnpj from condominiums where id=$1`,[condominiumId]);
+  if(!condominium.rows[0]?.name||!condominium.rows[0]?.cnpj) return res.status(400).json({message:'Complete o nome e o CNPJ do condomínio antes de gerar boletos.'});
+  const people = await query<any>(
+    `select u.id,u.full_name,u.username,u.cpf,u.preferred_due_day,ut.fee_cents,
+       exists(select 1 from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status<>'canceled') duplicate
+     from users u join units un on un.id=u.unit_id join unit_types ut on ut.id=un.unit_type_id
+     where u.condominium_id=$1 and u.billing_exempt=false and u.id=any($2::uuid[])`,
+    [condominiumId,userIds,`${referenceMonth}-01`],
+  );
+  if (people.rows.some((person:any)=>person.duplicate)) return res.status(409).json({ message:'Uma ou mais pessoas já possuem cobrança nesta referência.' });
+  const batch = await withTransaction(async client=>{
+    const batchId=randomUUID(); const total=people.rows.reduce((sum:number,p:any)=>sum+Number(p.fee_cents||0),0);
+    const created=await client.query(
+      `insert into billing_batches(id,condominium_id,reference_month,due_date,description,beneficiary_name,beneficiary_document,status,total_items,total_amount_cents,created_by)
+       values($1,$2,$3,$4,$5,$6,$7,'validated',$8,$9,$10) returning *`,
+      [batchId,condominiumId,`${referenceMonth}-01`,null,billingDescription,condominium.rows[0].name,condominium.rows[0].cnpj,people.rows.length,total,req.user?.id]);
+    for(const person of people.rows) await client.query(
+      `insert into billing_batch_items(id,batch_id,user_id,document,payer_name,amount_cents,due_date,status)
+       values($1,$2,$3,$4,$5,$6,$7,'valid')`,
+      [randomUUID(),batchId,person.id,person.cpf||person.id,person.full_name||person.username,person.fee_cents,`${referenceMonth}-${String(person.preferred_due_day).padStart(2,'0')}`]);
+    await client.query(`insert into billing_audit_events(id,condominium_id,batch_id,actor_id,event_type,details) values($1,$2,$3,$4,'monthly_batch_created',$5)`,[randomUUID(),condominiumId,batchId,req.user?.id,JSON.stringify({referenceMonth,userIds})]);
+    return created;
+  });
+  return res.status(201).json({ batch: batch.rows[0], message: 'Lote salvo como rascunho. Nenhuma cobrança foi emitida.' });
+}));
+
+router.get('/batches', asyncHandler(async (req, res) => {
+  const result = await query(`select * from billing_batches where condominium_id=$1 and reference_month is not null order by reference_month desc,created_at desc`, [req.user?.condominiumId]);
+  return res.json({ batches: result.rows });
+}));
+
+router.get('/profiles', asyncHandler(async (req,res)=>{
+  const result=await query(
+    `select p.*,u.full_name,u.username,u.cpf,u.unit,ut.name unit_type_name,ut.fee_cents unit_type_fee_cents
+     from person_billing_profiles p join users u on u.id=p.user_id left join units un on un.id=u.unit_id left join unit_types ut on ut.id=un.unit_type_id
+     where p.condominium_id=$1 order by u.full_name,u.username`,[req.user?.condominiumId]);
+  return res.json({profiles:result.rows});
+}));
+
+const digits = (value: unknown) => String(value ?? '').replace(/\D/g, '');
+const textValue = (value: unknown) => String(value ?? '').trim();
+const moneyCents = (value: unknown) => {
+  if (typeof value === 'number') return Math.round(value * 100);
+  const clean = textValue(value).replace(/R\$/gi, '').replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
+  return Math.round(Number(clean || 0) * 100);
+};
+const isoDate = (value: unknown) => {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const raw = textValue(value);
+  const br = raw.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+};
+
+router.post('/imports/excel', upload.single('file'), asyncHandler(async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'Selecione um arquivo Excel.' });
+  if (!/\.xlsx$/i.test(req.file.originalname)) return res.status(400).json({ message: 'Use o arquivo .xlsx do modelo do Banco Inter.' });
+  const rawRows: Array<{ row:number; name:string; document:string; email:string; phone:string; street:string; number:string; complement:string; neighborhood:string; city:string; state:string; postalCode:string; amountCents:number; code:string; description:string; dueDate:string|null; config:any }> = [];
+  let targetSheetFound=false;
+  const reader=new ExcelJS.stream.xlsx.WorkbookReader(Readable.from(req.file.buffer) as any,{worksheets:'emit',sharedStrings:'cache',styles:'ignore',hyperlinks:'ignore'});
+  for await (const sheet of reader) {
+    const sheetKey=String((sheet as any).name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+    if(sheetKey!=='cobranca simples') continue;
+    targetSheetFound=true;
+    for await (const row of sheet) {
+    const rowNumber=row.number;
+    if (rowNumber < 4) continue;
+    const document = digits(row.getCell(2).value);
+    const name = textValue(row.getCell(1).text);
+    if (!document || (!name && !row.getCell(17).value)) continue;
+    if (name === 'Cliente Inter Nome' || document === '11122233344') continue;
+    rawRows.push({ row:rowNumber, name, document, email:textValue(row.getCell(3).text), phone:digits(row.getCell(4).text),
+      street:textValue(row.getCell(5).text), number:textValue(row.getCell(6).text), complement:textValue(row.getCell(7).text),
+      neighborhood:textValue(row.getCell(8).text), city:textValue(row.getCell(9).text), state:textValue(row.getCell(10).text).toUpperCase(),
+      postalCode:digits(row.getCell(11).text), amountCents:moneyCents(row.getCell(17).value ?? row.getCell(17).text),
+      code:textValue(row.getCell(18).text), description:textValue(row.getCell(19).text), dueDate:isoDate(row.getCell(20).value ?? row.getCell(20).text),
+      config:{ receivePix:/sim/i.test(textValue(row.getCell(15).text)), receiveBoleto:/boleto/i.test(textValue(row.getCell(16).text)),
+        allowAfterDue:/sim/i.test(textValue(row.getCell(21).text)), daysAfterDue:Number(row.getCell(22).value||0),
+        fineType:/percent|%/i.test(textValue(row.getCell(23).text))?'PERCENT':/R\$/i.test(textValue(row.getCell(23).text))?'FIXED':'NONE', fineValue:Number(textValue(row.getCell(24).text).replace(',','.')||0),
+        interestType:/percent|%/i.test(textValue(row.getCell(25).text))?'PERCENT_MONTH':/R\$/i.test(textValue(row.getCell(25).text))?'FIXED':'NONE', interestValue:Number(textValue(row.getCell(26).text).replace(',','.')||0),
+        discountType:/percent|%/i.test(textValue(row.getCell(27).text))?'PERCENT':/R\$/i.test(textValue(row.getCell(27).text))?'FIXED':'NONE', discountValue:Number(textValue(row.getCell(28).text).replace(',','.')||0), discountDays:Number(row.getCell(29).value||0) } });
+    }
+  }
+  if (!targetSheetFound) return res.status(400).json({ message: 'A planilha "Cobrança Simples" não foi encontrada.' });
+  if (!rawRows.length) return res.status(400).json({ message: 'Nenhuma linha preenchida foi encontrada.' });
+  const dueDates = [...new Set(rawRows.map(r=>r.dueDate).filter(Boolean))];
+  const documents = rawRows.map(r=>r.document);
+  const people = await query<any>(
+    `select u.id,u.full_name,u.cpf,u.email,u.phone,u.street,u.address_number,u.address_complement,u.neighborhood,u.city,u.state,u.postal_code,u.unit,ut.name unit_type_name,ut.fee_cents
+     from users u left join units un on un.id=u.unit_id left join unit_types ut on ut.id=un.unit_type_id
+     where u.condominium_id=$1 and regexp_replace(coalesce(u.cpf,''),'[^0-9]','','g')=any($2::text[])`,
+    [req.user?.condominiumId, documents],
+  );
+  const byDocument = new Map(people.rows.map((p:any)=>[digits(p.cpf),p]));
+  const seen = new Set<string>();
+  const batchId = randomUUID();
+  const items = [];
+  for (const row of rawRows) {
+    let person:any = byDocument.get(row.document);
+    const issues:string[] = [];
+    let status = 'valid';
+    if (!row.dueDate) { issues.push('Data de vencimento inválida ou não informada'); status='invalid'; }
+    if (seen.has(row.document)) { issues.push('Documento repetido dentro da planilha'); status='duplicate'; }
+    seen.add(row.document);
+    if (!person) {
+      if (!row.name || ![11,14].includes(row.document.length)) { issues.push('Nome e CPF/CNPJ válido são obrigatórios para criar a pessoa'); status='invalid'; }
+      else {
+        const newId=randomUUID(); const generatedUsername=`importado_${row.document}`;
+        const passwordHash=await bcrypt.hash(randomUUID(),10);
+        const created=await query<any>(
+          `insert into users(id,username,password_hash,role,condominium_id,full_name,cpf,email,phone,street,address_number,address_complement,neighborhood,city,state,postal_code,login_enabled)
+           values($1,$2,$3,'proprietario',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,false)
+           returning id,full_name,cpf,email,phone,street,address_number,address_complement,neighborhood,city,state,postal_code,unit,null::text unit_type_name,null::integer fee_cents`,
+          [newId,generatedUsername,passwordHash,req.user?.condominiumId,row.name,row.document,row.email||null,row.phone||null,row.street||null,row.number||null,row.complement||null,row.neighborhood||null,row.city||null,row.state||null,row.postalCode||null]);
+        person=created.rows[0]; byDocument.set(row.document,person);
+        issues.push('Pessoa criada pela importação; complete unidade e tipologia'); status='invalid';
+      }
+    }
+    if (person) {
+      await query(
+        `update users set full_name=coalesce(full_name,$1),email=coalesce(email,$2),phone=coalesce(phone,$3),street=coalesce(street,$4),address_number=coalesce(address_number,$5),address_complement=coalesce(address_complement,$6),neighborhood=coalesce(neighborhood,$7),city=coalesce(city,$8),state=coalesce(state,$9),postal_code=coalesce(postal_code,$10) where id=$11`,
+        [row.name||null,row.email||null,row.phone||null,row.street||null,row.number||null,row.complement||null,row.neighborhood||null,row.city||null,row.state||null,row.postalCode||null,person.id]);
+      await query(
+        `insert into person_billing_profiles(user_id,condominium_id,amount_override_cents,description,receive_boleto,receive_pix,allow_after_due,days_after_due,fine_type,fine_value,interest_type,interest_value,discount_type,discount_value,discount_days,source)
+         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'excel') on conflict(user_id) do update set amount_override_cents=excluded.amount_override_cents,description=excluded.description,receive_boleto=excluded.receive_boleto,receive_pix=excluded.receive_pix,allow_after_due=excluded.allow_after_due,days_after_due=excluded.days_after_due,fine_type=excluded.fine_type,fine_value=excluded.fine_value,interest_type=excluded.interest_type,interest_value=excluded.interest_value,discount_type=excluded.discount_type,discount_value=excluded.discount_value,discount_days=excluded.discount_days,source='excel',updated_at=now()`,
+        [person.id,req.user?.condominiumId,row.amountCents||null,row.description||null,row.config.receiveBoleto,row.config.receivePix,row.config.allowAfterDue,row.config.daysAfterDue,row.config.fineType,row.config.fineValue,row.config.interestType,row.config.interestValue,row.config.discountType,row.config.discountValue,row.config.discountDays]);
+      const diffs:Array<[string,string,string]> = [['nome',row.name,person.full_name],['email',row.email,person.email],['telefone',row.phone,digits(person.phone)],['logradouro',row.street,person.street],['número',row.number,person.address_number],['bairro',row.neighborhood,person.neighborhood],['cidade',row.city,person.city],['UF',row.state,person.state],['CEP',row.postalCode,digits(person.postal_code)]];
+      diffs.forEach(([label,sheetValue,masterValue])=>{ if(sheetValue && masterValue && sheetValue.toLowerCase()!==String(masterValue).toLowerCase()) issues.push(`${label} diverge; cadastro será utilizado`); });
+      if (!person.fee_cents) { issues.push('Tipologia sem valor'); status='invalid'; }
+      if (row.amountCents && row.amountCents !== person.fee_cents) issues.push('Valor da planilha ignorado; valor da tipologia será utilizado');
+      const duplicate = await query(`select 1 from invoices where user_id=$1 and due_date=$2 and status<>'canceled'`, [person.id, row.dueDate]);
+      if (duplicate.rows[0]) { issues.push('Cobrança já existente para este vencimento'); status='duplicate'; }
+    }
+    items.push({ ...row, person, issues, status });
+  }
+  const valid = items.filter(i=>i.status==='valid');
+  await query(`insert into billing_batches(id,condominium_id,due_date,description,status,total_items,total_amount_cents,created_by) values($1,$2,$3,$4,'validated',$5,$6,$7)`,
+    [batchId,req.user?.condominiumId,dueDates.length===1?dueDates[0]:null,valid[0]?.description||'Importação Excel',items.length,valid.reduce((s,i)=>s+Number(i.person?.fee_cents||0),0),req.user?.id]);
+  for (const item of items) await query(
+    `insert into billing_batch_items(id,batch_id,user_id,document,payer_name,amount_cents,due_date,source_row,status,issues,spreadsheet_data) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict(batch_id,document) do nothing`,
+    [randomUUID(),batchId,item.person?.id||null,item.document,item.person?.full_name||item.name,item.person?.fee_cents||item.amountCents,item.dueDate,item.row,item.status,JSON.stringify(item.issues),JSON.stringify(item)]);
+  await query(`insert into billing_audit_events(id,condominium_id,batch_id,actor_id,event_type,details) values($1,$2,$3,$4,'excel_imported',$5)`,
+    [randomUUID(),req.user?.condominiumId,batchId,req.user?.id,JSON.stringify({file:req.file.originalname,rows:items.length,valid:valid.length})]);
+  return res.status(201).json({ batchId, total:items.length, valid:valid.length, invalid:items.length-valid.length, items:items.map(i=>({row:i.row,document:i.document,name:i.person?.full_name||i.name,status:i.status,amountCents:i.person?.fee_cents||i.amountCents,issues:i.issues})) });
+}));
+
+router.get('/batches/:id/items', asyncHandler(async (req,res)=>{
+  const batch=await query(`select * from billing_batches where id=$1 and condominium_id=$2`,[req.params.id,req.user?.condominiumId]);
+  if(!batch.rows[0]) return res.status(404).json({message:'Lote não encontrado.'});
+  const items=await query(`select * from billing_batch_items where batch_id=$1 order by source_row nulls last,created_at`,[req.params.id]);
+  return res.json({batch:batch.rows[0],items:items.rows});
+}));
+
+router.patch('/batches/:batchId/items/:itemId/due-date', asyncHandler(async (req,res)=>{
+  const dueDate=String(req.body?.dueDate||'');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return res.status(400).json({message:'Informe o vencimento no formato DD/MM/AAAA.'});
+  if(dueDate<todayIso()) return res.status(400).json({message:`O vencimento deve ser igual ou posterior a ${formatDateBr(todayIso())}.`});
+  const previous=await query<any>(`select bi.due_date,bi.payer_name,b.condominium_id
+    from billing_batch_items bi join billing_batches b on b.id=bi.batch_id
+    where bi.id=$1 and bi.batch_id=$2 and b.condominium_id=$3 and bi.status='failed' and bi.invoice_id is null`,
+    [req.params.itemId,req.params.batchId,req.user?.condominiumId]);
+  if(!previous.rows[0]) return res.status(409).json({message:'Esta cobrança não está disponível para correção ou já foi emitida.'});
+  const updated=await query<any>(`update billing_batch_items set due_date=$1 where id=$2 and batch_id=$3 returning *`,
+    [dueDate,req.params.itemId,req.params.batchId]);
+  await query(`insert into billing_audit_events(id,condominium_id,batch_id,actor_id,event_type,details)
+    values($1,$2,$3,$4,'failed_item_due_date_adjusted',$5)`,[randomUUID(),req.user?.condominiumId,req.params.batchId,req.user?.id,
+      JSON.stringify({itemId:req.params.itemId,payerName:previous.rows[0].payer_name,oldDueDate:interDate(previous.rows[0].due_date),newDueDate:dueDate})]);
+  return res.json({item:updated.rows[0],message:`Vencimento de ${previous.rows[0].payer_name} alterado para ${formatDateBr(dueDate)}.`});
+}));
+
+router.post('/batches/:id/confirm', asyncHandler(async (req,res)=>{
+  const updated=await query(`update billing_batches set status='confirmed' where id=$1 and condominium_id=$2 and status in ('draft','validated') returning *`,[req.params.id,req.user?.condominiumId]);
+  if(!updated.rows[0]) return res.status(409).json({message:'Lote inexistente ou já confirmado.'});
+  await query(`update billing_batch_items set status='confirmed' where batch_id=$1 and status='valid'`,[req.params.id]);
+  await query(`insert into billing_audit_events(id,condominium_id,batch_id,actor_id,event_type,details) values($1,$2,$3,$4,'batch_confirmed_without_issuance',$5)`,[randomUUID(),req.user?.condominiumId,req.params.id,req.user?.id,JSON.stringify({issuance:false})]);
+  return res.json({batch:updated.rows[0],message:'Lote confirmado para revisão. Nenhum boleto foi emitido.'});
+}));
+
+router.post('/batches/:id/issue', asyncHandler(async (req,res)=>{
+  const condominiumId=req.user?.condominiumId;
+  const batchResult=await query<any>(`select * from billing_batches where id=$1 and condominium_id=$2 and status in ('confirmed','partial')`,[req.params.id,condominiumId]);
+  const batch=batchResult.rows[0];
+  if(!batch) return res.status(409).json({message:'O lote precisa estar confirmado antes do envio ao banco.'});
+  const integration=await getInterIntegration(condominiumId!);
+  if(!integration?.enabled) return res.status(400).json({message:'Integração Banco Inter não configurada ou desabilitada.'});
+  const items=await query<any>(
+    `select bi.*,u.full_name,u.username,u.cpf,u.email,u.phone,u.street,u.address_number,u.address_complement,u.neighborhood,u.city,u.state,u.postal_code,u.unit,
+            ut.name unit_type_name,ut.fee_cents
+     from billing_batch_items bi join users u on u.id=bi.user_id left join units un on un.id=u.unit_id left join unit_types ut on ut.id=un.unit_type_id
+     where bi.batch_id=$1 and bi.status in ('confirmed','failed') order by bi.created_at`,[batch.id]);
+  await query(`update billing_batches set status='processing' where id=$1`,[batch.id]);
+  let issued=0;let failed=0;const failures:Array<{payerName:string;reason:string}>=[];
+  for(const item of items.rows){
+    let reservationKey:string|null=null;
+    try{
+      if(!item.full_name||!item.cpf||!item.fee_cents||!item.street||!item.address_number||!item.neighborhood||!item.city||!item.state||!item.postal_code) throw new Error('Cadastro, endereço ou tipologia incompletos.');
+      const payerCpf=String(item.cpf).replace(/\D/g,'');
+      const allowedCpf=String(process.env.INTER_ISSUANCE_ALLOWED_CPF||'').replace(/\D/g,'');
+      if(!allowedCpf||payerCpf!==allowedCpf) throw new Error('CPF não autorizado para emissão no ambiente atual.');
+      reservationKey=randomUUID();
+      const reservation=await query(`insert into inter_issuance_guards(payer_cpf,user_id,reservation_key) values($1,$2,$3)
+        on conflict(payer_cpf) do update set user_id=excluded.user_id,invoice_id=null,reservation_key=excluded.reservation_key,reserved_at=now()
+        where (inter_issuance_guards.invoice_id is null and inter_issuance_guards.reservation_key is null)
+           or exists(select 1 from invoices previous where previous.id=inter_issuance_guards.invoice_id and previous.status='canceled')
+        returning payer_cpf`,[payerCpf,item.user_id,reservationKey]);
+      if(!reservation.rows[0]) throw new Error('Já existe uma cobrança ativa ou uma emissão reservada para este CPF.');
+      const dueDate=interDate(item.due_date);
+      if(dueDate<todayIso()) throw new Error(`O vencimento ${formatDateBr(dueDate)} já passou. Escolha um vencimento igual ou posterior a ${formatDateBr(todayIso())}.`);
+      const boleto=await createInterBoleto({payerName:item.full_name,payerDocument:item.cpf,amountCents:item.fee_cents,dueDate,description:batch.description||`Taxa condominial - ${item.unit_type_name||item.unit}`,payerEmail:item.email,payerPhone:item.phone,payerStreet:item.street,payerNumber:item.address_number,payerComplement:item.address_complement,payerNeighborhood:item.neighborhood,payerCity:item.city,payerState:item.state,payerPostalCode:item.postal_code,payerUnit:item.unit},integration);
+      const invoice=await query<any>(`insert into invoices(id,condominium_id,user_id,amount_cents,due_date,reference_month,batch_id,status,provider,external_id,digitable_line,pdf_url) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,[randomUUID(),condominiumId,item.user_id,item.fee_cents,item.due_date,batch.reference_month,batch.id,boleto.status==='issued'?'issued':'pending_provider',boleto.provider,boleto.externalId,boleto.digitableLine,boleto.pdfUrl]);
+      await query(`update billing_batch_items set status='issued',invoice_id=$1,issues='[]'::jsonb where id=$2`,[invoice.rows[0].id,item.id]);
+      await query(`update inter_issuance_guards set invoice_id=$1,reservation_key=null where payer_cpf=$2 and reservation_key=$3`,[invoice.rows[0].id,payerCpf,reservationKey]); issued+=1;
+    }catch(error:any){failed+=1;if(reservationKey)await query(`delete from inter_issuance_guards where payer_cpf=$1 and reservation_key=$2 and invoice_id is null`,[String(item.cpf).replace(/\D/g,''),reservationKey]);const reason=issuanceErrorMessage(error);console.error('Falha na emissão do item do lote',{batchId:batch.id,itemId:item.id,code:error?.code||null,reason});failures.push({payerName:item.full_name||item.username||item.payer_name,reason});await query(`update billing_batch_items set status='failed',issues=$1 where id=$2`,[JSON.stringify([reason]),item.id]);}
+  }
+  const status=failed===0?'completed':issued===0?'partial':'partial';
+  await query(`update billing_batches set status=$1 where id=$2`,[status,batch.id]);
+  await query(`insert into billing_audit_events(id,condominium_id,batch_id,actor_id,event_type,details) values($1,$2,$3,$4,'bank_issuance_finished',$5)`,[randomUUID(),condominiumId,batch.id,req.user?.id,JSON.stringify({issued,failed})]);
+  const message=failed===0
+    ? `${issued===1?'Boleto emitido':'Boletos emitidos'} com sucesso: ${issued}.`
+    : issued===0
+      ? `Nenhum boleto foi emitido. ${failures.map(item=>`${item.payerName}: ${item.reason}`).join(' | ')}`
+      : `${issued} emitido(s) com sucesso e ${failed} com falha. ${failures.map(item=>`${item.payerName}: ${item.reason}`).join(' | ')}`;
+  return res.json({message,issued,failed,status,failures});
+}));
+
+router.get('/batches/:id/export', asyncHandler(async (req,res)=>{
+  const batch=await query<any>(`select b.*,c.name condominium_name,c.cnpj condominium_cnpj
+    from billing_batches b join condominiums c on c.id=b.condominium_id
+    where b.id=$1 and b.condominium_id=$2`,[req.params.id,req.user?.condominiumId]);
+  if(!batch.rows[0]) return res.status(404).json({message:'Lote não encontrado.'});
+  const items=await query<any>(`select bi.*,u.email,u.phone,u.street,u.address_number,u.address_complement,u.neighborhood,u.city,u.state,u.postal_code from billing_batch_items bi left join users u on u.id=bi.user_id where bi.batch_id=$1 order by bi.source_row`,[req.params.id]);
+  const settings=await query<any>(`select * from billing_settings where condominium_id=$1`,[req.user?.condominiumId]);
+  const buffer=await createBillingTemplateWorkbook({batchId:batch.rows[0].id,referenceMonth:batch.rows[0].reference_month,
+    description:batch.rows[0].description,beneficiaryName:batch.rows[0].condominium_name,
+    beneficiaryDocument:batch.rows[0].condominium_cnpj,
+    settings:settings.rows[0]||null,items:items.rows});
+  res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition',`attachment; filename="lote-${req.params.id}.xlsx"`);
+  return res.send(buffer);
+}));
+
+export default router;

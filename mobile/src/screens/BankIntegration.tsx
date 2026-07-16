@@ -1,0 +1,98 @@
+import React, { useCallback, useContext, useEffect, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { apiRequest } from '../api/client';
+import { AuthContext } from '../context/AuthContext';
+import { AppButton, EmptyState, Panel } from '../ui/components';
+import { colors } from '../ui/theme';
+import ResponsiveShell from '../ui/ResponsiveShell';
+
+type Provider = { id:string; code:string; name:string; adapterKey:string|null; active:boolean; operational:boolean; requiredFields:string[] };
+type Condominium = { id:string; name:string; cnpj:string|null; bank_configuration_id:string|null; bank_configuration_name:string|null; bank_provider:string|null };
+type BankConfiguration = {
+  id:string; name:string; provider:string; bank_id:string; bank_name:string; adapter_key:string|null; client_id:string|null; cert_path:string|null; key_path:string|null;
+  base_url:string|null; token_path:string|null; scopes:string|null; extra_config:Record<string,unknown>;
+  enabled:boolean; condominiums:Array<{id:string;name:string}>;
+};
+
+const defaults:Record<string,{baseUrl:string;tokenPath:string;scopes:string}> = {
+  inter: { baseUrl:'https://cdpj.partners.bancointer.com.br', tokenPath:'/oauth/v2/token', scopes:'boleto-cobranca.write boleto-cobranca.read' },
+  banco_do_brasil: { baseUrl:'https://api.bb.com.br', tokenPath:'', scopes:'' },
+  bradesco: { baseUrl:'', tokenPath:'', scopes:'' },
+  outro: { baseUrl:'', tokenPath:'', scopes:'' },
+};
+
+export default function BankIntegration({ navigation, route }:any) {
+  const section = route?.params?.section || 'configurations';
+  const { userToken } = useContext(AuthContext);
+  const [providers,setProviders]=useState<Provider[]>([]);
+  const [configurations,setConfigurations]=useState<BankConfiguration[]>([]);
+  const [condominiums,setCondominiums]=useState<Condominium[]>([]);
+  const [editingId,setEditingId]=useState<string|null>(null);
+  const [name,setName]=useState(''); const [provider,setProvider]=useState('inter'); const [bankId,setBankId]=useState('');
+  const [newBankName,setNewBankName]=useState('');
+  const [clientId,setClientId]=useState(''); const [clientSecret,setClientSecret]=useState('');
+  const [certPath,setCertPath]=useState('./certs/inter.crt'); const [keyPath,setKeyPath]=useState('./certs/inter.key');
+  const [baseUrl,setBaseUrl]=useState(defaults.inter.baseUrl); const [tokenPath,setTokenPath]=useState(defaults.inter.tokenPath);
+  const [scopes,setScopes]=useState(defaults.inter.scopes); const [enabled,setEnabled]=useState(true);
+  const [selectedCondominiumId,setSelectedCondominiumId]=useState('');
+  const [selectedConfigurationId,setSelectedConfigurationId]=useState('');
+  const [loading,setLoading]=useState(false); const [error,setError]=useState(''); const [notice,setNotice]=useState('');
+  const [testingId,setTestingId]=useState<string|null>(null);
+  const [testResults,setTestResults]=useState<Record<string,{ok:boolean;message:string}>>({});
+
+  const load=useCallback(async()=>{if(!userToken)return;setLoading(true);setError('');try{
+    const [p,b,c]=await Promise.all([
+      apiRequest<{providers:Provider[]}>('/bank-configurations/providers',userToken),
+      apiRequest<{configurations:BankConfiguration[]}>('/bank-configurations',userToken),
+      apiRequest<{condominiums:Condominium[]}>('/condominiums',userToken),
+    ]);setProviders(p.providers);setConfigurations(b.configurations);setCondominiums(c.condominiums);if(!bankId){const initial=p.providers.find(x=>x.code==='inter')||p.providers[0];if(initial){setBankId(initial.id);setProvider(initial.adapterKey||'outro')}}
+  }catch(e){setError(e instanceof Error?e.message:'Falha ao carregar gestão bancária.')}finally{setLoading(false)}},[userToken,bankId]);
+  useEffect(()=>{load()},[load]);
+
+  const reset=()=>{setEditingId(null);setName('');setProvider('inter');setClientId('');setClientSecret('');setCertPath('./certs/inter.crt');setKeyPath('./certs/inter.key');setBaseUrl(defaults.inter.baseUrl);setTokenPath(defaults.inter.tokenPath);setScopes(defaults.inter.scopes);setEnabled(true)};
+  const chooseProvider=(id:string)=>{const bank=providers.find(x=>x.id===id);if(!bank)return;setBankId(id);const adapter=bank.adapterKey||'outro';setProvider(adapter);const value=defaults[adapter]||defaults.outro;setBaseUrl(value.baseUrl);setTokenPath(value.tokenPath);setScopes(value.scopes);if(adapter!=='inter'){setCertPath('');setKeyPath('')}};
+  const edit=(item:BankConfiguration)=>{setEditingId(item.id);setName(item.name);setBankId(item.bank_id);setProvider(item.adapter_key||item.provider);setClientId(item.client_id||'');setClientSecret('');setCertPath(item.cert_path||'');setKeyPath(item.key_path||'');setBaseUrl(item.base_url||'');setTokenPath(item.token_path||'');setScopes(item.scopes||'');setEnabled(item.enabled);setNotice('');setError('')};
+  const save=async()=>{if(!userToken||!name.trim())return;setLoading(true);setError('');setNotice('');try{
+    const path=editingId?`/bank-configurations/${editingId}`:'/bank-configurations';
+    await apiRequest(path,userToken,{method:editingId?'PUT':'POST',body:JSON.stringify({name:name.trim(),bankId,clientId:clientId.trim()||null,clientSecret:clientSecret.trim()||undefined,certPath:certPath.trim()||null,keyPath:keyPath.trim()||null,baseUrl:baseUrl.trim()||null,tokenPath:tokenPath.trim()||null,scopes:scopes.trim()||null,enabled,extraConfig:{}})});
+    setNotice('Configuração bancária salva.');reset();await load();
+  }catch(e){setError(e instanceof Error?e.message:'Falha ao salvar configuração.')}finally{setLoading(false)}};
+  const link=async()=>{if(!userToken||!selectedCondominiumId||!selectedConfigurationId)return;setLoading(true);setError('');try{
+    await apiRequest(`/bank-configurations/condominiums/${selectedCondominiumId}/link`,userToken,{method:'PUT',body:JSON.stringify({configurationId:selectedConfigurationId})});
+    setNotice('Banco vinculado ao condomínio. As operações do síndico usarão esta configuração.');await load();
+  }catch(e){setError(e instanceof Error?e.message:'Falha ao vincular banco.')}finally{setLoading(false)}};
+  const createBank=async()=>{if(!userToken||!newBankName.trim())return;setLoading(true);setError('');try{await apiRequest('/bank-configurations/banks',userToken,{method:'POST',body:JSON.stringify({name:newBankName.trim()})});setNewBankName('');setNotice('Banco cadastrado.');await load()}catch(e){setError(e instanceof Error?e.message:'Falha ao cadastrar banco.')}finally{setLoading(false)}};
+  const test=async(id:string)=>{if(!userToken)return;setTestingId(id);setError('');setNotice('');setTestResults(current=>({...current,[id]:{ok:false,message:'Testando conexão com o banco...'}}));try{await apiRequest(`/bank-configurations/${id}/test`,userToken,{method:'POST'});setTestResults(current=>({...current,[id]:{ok:true,message:'Conexão bancária validada com sucesso.'}}))}catch(e){const message=e instanceof Error?e.message:'Falha ao testar a conexão bancária.';setTestResults(current=>({...current,[id]:{ok:false,message}}))}finally{setTestingId(null)}};
+  const selectedProvider=providers.find(item=>item.id===bankId);
+
+  const pageTitle = section === 'banks' ? 'Cadastro de bancos' : section === 'link' ? 'Vincular banco ao condomínio' : 'Configurações bancárias';
+  const activeRoute = section === 'banks' ? 'Banks' : section === 'link' ? 'BankLink' : 'BankConfigurations';
+  return <ResponsiveShell activeRoute={activeRoute} navigation={navigation}><ScrollView contentContainerStyle={s.container}>
+    <Text style={s.eyebrow}>Admin geral</Text><Text style={s.title}>Gestão de bancos</Text>
+    <Text style={s.subtitle}>{pageTitle}</Text>
+    {error?<Text style={s.error}>{error}</Text>:null}{notice?<Text style={s.success}>{notice}</Text>:null}
+
+    {section==='banks'?<Panel><Text style={s.heading}>Cadastro de bancos</Text><Text style={s.meta}>Bancos cadastrados ficam disponíveis para criar configurações e realizar vínculos.</Text><TextInput value={newBankName} onChangeText={setNewBankName} placeholder="Nome do banco" style={s.input}/><AppButton title="Cadastrar banco" onPress={createBank} disabled={loading||!newBankName.trim()}/><View style={s.options}>{providers.map(item=><View key={item.id} style={s.option}><Text style={s.optionText}>{item.name}</Text><Text style={s.small}>{item.operational?'Integração operacional':item.adapterKey?'Adaptador pendente':'Banco cadastrado — adaptador pendente'}</Text></View>)}</View></Panel>:null}
+
+    {section==='configurations'?<><Panel><Text style={s.heading}>{editingId?'Editar configuração':'Nova configuração bancária'}</Text>
+      <Text style={s.label}>Banco cadastrado</Text><View style={s.options}>{providers.filter(item=>item.active).map(item=><Pressable key={item.id} onPress={()=>chooseProvider(item.id)} style={[s.option,bankId===item.id&&s.optionActive]}><Text style={bankId===item.id?s.optionTextActive:s.optionText}>{item.name}</Text><Text style={s.small}>{item.operational?'Operacional':'Adaptador pendente'}</Text></Pressable>)}</View>
+      <TextInput value={name} onChangeText={setName} placeholder="Nome da configuração, ex.: Templum - Banco Inter" style={s.input}/>
+      <TextInput value={clientId} onChangeText={setClientId} placeholder="Client ID / chave da aplicação" autoCapitalize="none" style={s.input}/>
+      <TextInput value={clientSecret} onChangeText={setClientSecret} placeholder={editingId?'Novo Client Secret (vazio mantém o atual)':'Client Secret'} secureTextEntry autoCapitalize="none" style={s.input}/>
+      {provider==='inter'?<><TextInput value={certPath} onChangeText={setCertPath} placeholder="Caminho do certificado" style={s.input}/><TextInput value={keyPath} onChangeText={setKeyPath} placeholder="Caminho da chave privada" style={s.input}/></>:null}
+      <TextInput value={baseUrl} onChangeText={setBaseUrl} placeholder="URL base da API" autoCapitalize="none" style={s.input}/>
+      <TextInput value={tokenPath} onChangeText={setTokenPath} placeholder="Endpoint de autenticação" autoCapitalize="none" style={s.input}/>
+      <TextInput value={scopes} onChangeText={setScopes} placeholder="Escopos da API" autoCapitalize="none" style={s.input}/>
+      {selectedProvider&&!selectedProvider.operational?<Text style={s.warning}>Esta configuração poderá ser vinculada, mas emissões ficarão bloqueadas até o adaptador de {selectedProvider.name} ser implementado.</Text>:null}
+      <View style={s.actions}><AppButton title={enabled?'Ativa — desabilitar':'Desabilitada — ativar'} onPress={()=>setEnabled(v=>!v)} variant="secondary"/><AppButton title={editingId?'Salvar alterações':'Cadastrar configuração'} onPress={save} disabled={loading||!name.trim()||!bankId}/>{editingId?<AppButton title="Cancelar" onPress={reset} variant="secondary"/>:null}</View>
+    </Panel>
+
+    <Text style={s.section}>Configurações cadastradas</Text>{configurations.length?configurations.map(item=><View key={item.id} style={s.card}><Text style={s.cardTitle}>{item.name}</Text><Text style={s.meta}>{item.bank_name||item.provider} · {item.enabled?'Ativa':'Desabilitada'}</Text><Text style={s.meta}>Vínculos: {item.condominiums.map(c=>c.name).join(', ')||'nenhum condomínio'}</Text><View style={s.actions}><AppButton title="Editar" onPress={()=>edit(item)} variant="secondary"/><AppButton title={testingId===item.id?'Testando conexão...':'Testar conexão'} onPress={()=>test(item.id)} disabled={Boolean(testingId)||item.provider!=='inter'||!item.enabled}/></View>{testResults[item.id]?<Text style={testResults[item.id].ok?s.testSuccess:s.testError}>{testResults[item.id].message}</Text>:null}{item.provider!=='inter'?<Text style={s.warning}>Teste indisponível: o adaptador deste banco ainda não foi implementado.</Text>:null}</View>):<EmptyState title="Nenhum banco configurado" description="Cadastre a primeira conexão bancária acima."/>}</>:null}
+
+    {section==='link'?<><Text style={s.section}>Vincular banco ao condomínio</Text><Panel><Text style={s.meta}>As opções abaixo vêm das configurações criadas em “Nova configuração bancária”.</Text><Text style={s.label}>1. Condomínio</Text><View style={s.options}>{condominiums.map(item=><Pressable key={item.id} onPress={()=>{setSelectedCondominiumId(item.id);setSelectedConfigurationId(item.bank_configuration_id||'')}} style={[s.option,selectedCondominiumId===item.id&&s.optionActive]}><Text style={selectedCondominiumId===item.id?s.optionTextActive:s.optionText}>{item.name}</Text><Text style={s.small}>Vínculo atual: {item.bank_configuration_name||'nenhuma configuração'}</Text></Pressable>)}</View>
+      <Text style={s.label}>2. Configuração bancária cadastrada</Text>{configurations.length===0?<EmptyState title="Nenhuma configuração bancária" description="Acesse Configurações bancárias e cadastre uma configuração antes de realizar o vínculo."/>:<View style={s.options}>{configurations.map(item=><Pressable key={item.id} onPress={()=>setSelectedConfigurationId(item.id)} style={[s.option,selectedConfigurationId===item.id&&s.optionActive]}><Text style={selectedConfigurationId===item.id?s.optionTextActive:s.optionText}>{item.name}</Text><Text style={s.small}>Banco: {item.bank_name||item.provider} · Situação: {item.enabled?'ativa':'desabilitada'}</Text><Text style={s.small}>Condomínios vinculados: {item.condominiums.map(c=>c.name).join(', ')||'nenhum'}</Text></Pressable>)}</View>}
+      <AppButton title="Salvar vínculo" onPress={link} disabled={loading||!selectedCondominiumId||!selectedConfigurationId}/></Panel></>:null}
+  </ScrollView></ResponsiveShell>;
+}
+
+const s=StyleSheet.create({container:{width:'100%',maxWidth:1180,alignSelf:'center',padding:24,paddingBottom:50,backgroundColor:colors.background},eyebrow:{color:colors.green,fontWeight:'800'},title:{fontSize:28,fontWeight:'900',color:colors.ink,marginTop:5},subtitle:{color:colors.muted,fontSize:17,lineHeight:23,marginVertical:8,marginBottom:18},heading:{fontSize:19,fontWeight:'900',color:colors.ink,marginBottom:12},section:{fontSize:20,fontWeight:'900',color:colors.ink,marginTop:24,marginBottom:10},label:{fontWeight:'800',color:colors.ink,marginBottom:8,marginTop:6},input:{minHeight:50,borderWidth:1,borderColor:colors.border,borderRadius:8,paddingHorizontal:12,backgroundColor:'#fff',marginBottom:10,color:colors.ink},options:{gap:8,marginBottom:12},option:{borderWidth:1,borderColor:colors.border,borderRadius:8,padding:11,backgroundColor:'#fff'},optionActive:{borderColor:colors.primary,backgroundColor:colors.softBlue},optionText:{fontWeight:'800',color:colors.ink},optionTextActive:{fontWeight:'900',color:colors.primaryDark},small:{fontSize:13,color:colors.muted,marginTop:3},warning:{color:colors.amber,fontWeight:'700',lineHeight:20,marginBottom:10},actions:{gap:8,marginTop:6},card:{borderWidth:1,borderColor:colors.border,borderRadius:8,backgroundColor:'#fff',padding:14,marginBottom:9},cardTitle:{fontSize:17,fontWeight:'900',color:colors.ink},meta:{color:colors.muted,marginTop:5},error:{color:colors.red,fontWeight:'700',marginBottom:10},success:{color:colors.green,fontWeight:'800',marginBottom:10},testSuccess:{color:colors.green,fontWeight:'900',marginTop:12},testError:{color:colors.red,fontWeight:'800',marginTop:12}});

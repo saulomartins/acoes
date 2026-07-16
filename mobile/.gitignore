@@ -1,0 +1,12 @@
+.expo/
+node_modules/
+web-build/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+*.jks
+*.keystore
+firebase-service-account*.json
+service-account*.json
