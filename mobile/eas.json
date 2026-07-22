@@ -13,19 +13,25 @@
       "distribution": "internal",
       "android": { "buildType": "apk" },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://acoes-production.up.railway.app"
+        "EXPO_PUBLIC_API_URL": "https://acoes-production.up.railway.app",
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "6c015dce-36b8-4c36-841b-23ea66a334ee"
       }
     },
     "production-apk": {
       "distribution": "internal",
       "android": { "buildType": "apk" },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://acoes-production.up.railway.app"
+        "EXPO_PUBLIC_API_URL": "https://acoes-production.up.railway.app",
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "6c015dce-36b8-4c36-841b-23ea66a334ee"
       }
     },
     "production": {
       "autoIncrement": true,
-      "android": { "buildType": "app-bundle" }
+      "android": { "buildType": "app-bundle" },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://acoes-production.up.railway.app",
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "6c015dce-36b8-4c36-841b-23ea66a334ee"
+      }
     }
   }
 }

@@ -65,12 +65,17 @@ export const AppDialog = ({ visible, title, message, tone = 'info', confirmLabel
 
 const styles = StyleSheet.create({
   button: {
-    minHeight: 54,
+    minHeight: 52,
     borderRadius: layout.controlRadius,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 20,
     backgroundColor: colors.primary,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 2,
   },
   secondaryButton: {
     backgroundColor: colors.teal,
@@ -88,8 +93,8 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#fff',
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '800',
   },
   disabledButtonText: {
     color: '#f7f9fb',
@@ -99,7 +104,7 @@ const styles = StyleSheet.create({
     borderRadius: layout.radius,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 20,
+    padding: 18,
     ...shadow,
   },
   empty: {

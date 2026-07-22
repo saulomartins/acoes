@@ -184,6 +184,72 @@ alter table invoices add column if not exists paid_amount_cents integer;
 alter table invoices add column if not exists batch_id uuid;
 alter table invoices add column if not exists reference_month date;
 
+create table if not exists debt_agreements (
+  id uuid primary key default gen_random_uuid(),
+  condominium_id uuid not null references condominiums(id) on delete cascade,
+  debtor_user_id uuid not null references users(id) on delete restrict,
+  unit_id uuid references units(id) on delete set null,
+  created_by uuid references users(id) on delete set null,
+  status text not null default 'draft' check (status in ('draft','sent','accepted','active','at_risk','breached','settled','rejected','expired','canceled')),
+  original_total_cents integer not null check (original_total_cents > 0),
+  negotiated_total_cents integer not null check (negotiated_total_cents > 0),
+  down_payment_cents integer not null default 0 check (down_payment_cents >= 0),
+  installment_count integer not null check (installment_count between 1 and 60),
+  first_due_date date not null,
+  notes text,
+  valid_until date,
+  sent_at timestamptz,
+  accepted_at timestamptz,
+  accepted_by uuid references users(id) on delete set null,
+  breached_at timestamptz,
+  breach_reason text,
+  settled_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists debt_agreement_items (
+  agreement_id uuid not null references debt_agreements(id) on delete cascade,
+  invoice_id uuid not null references invoices(id) on delete restrict,
+  principal_cents integer not null,
+  fine_cents integer not null,
+  interest_cents integer not null,
+  frozen_total_cents integer not null,
+  frozen_at date not null,
+  primary key (agreement_id,invoice_id)
+);
+
+create table if not exists debt_agreement_installments (
+  id uuid primary key default gen_random_uuid(),
+  agreement_id uuid not null references debt_agreements(id) on delete cascade,
+  installment_number integer not null,
+  amount_cents integer not null check (amount_cents > 0),
+  due_date date not null,
+  invoice_id uuid references invoices(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique(agreement_id,installment_number)
+);
+
+create table if not exists debt_communications (
+  id uuid primary key default gen_random_uuid(),
+  condominium_id uuid not null references condominiums(id) on delete cascade,
+  agreement_id uuid references debt_agreements(id) on delete set null,
+  user_id uuid not null references users(id) on delete cascade,
+  invoice_ids uuid[] not null default '{}',
+  channel text not null check (channel in ('whatsapp','app','email')),
+  message text not null,
+  status text not null default 'prepared' check (status in ('prepared','sent','delivered','read','failed')),
+  created_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+alter table invoices add column if not exists invoice_type text not null default 'regular';
+alter table invoices add column if not exists agreement_id uuid references debt_agreements(id) on delete set null;
+alter table invoices drop constraint if exists invoices_invoice_type_check;
+alter table invoices add constraint invoices_invoice_type_check check (invoice_type in ('regular','agreement'));
+create index if not exists debt_agreements_condominium_idx on debt_agreements(condominium_id,status,created_at desc);
+create index if not exists debt_communications_user_idx on debt_communications(user_id,created_at desc);
+
 create table if not exists billing_settings (
   condominium_id uuid primary key references condominiums(id) on delete cascade,
   description_template text not null default 'Taxa condominial - {tipologia}',

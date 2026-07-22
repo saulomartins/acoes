@@ -13,6 +13,7 @@
     "android": {
       "package": "com.appcond.condominio",
       "versionCode": 1,
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/lar-em-dia-logo.png",
         "backgroundColor": "#F6F8FA"
@@ -26,6 +27,12 @@
     "plugins": [
       "expo-secure-store",
       "expo-notifications"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6c015dce-36b8-4c36-841b-23ea66a334ee"
+      }
+    },
+    "owner": "saulomartins"
   }
 }

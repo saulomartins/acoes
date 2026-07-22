@@ -17,7 +17,7 @@ export default function Login({ navigation }: any) {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}>
       <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
         <View style={[styles.shell, desktop && styles.shellDesktop]}>
           <View style={[styles.presentation, desktop && styles.presentationDesktop]}>

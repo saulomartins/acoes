@@ -13,6 +13,7 @@ import reportRoutes from './routes/reportRoutes';
 import bankConfigurationRoutes from './routes/bankConfigurationRoutes';
 import accountabilityRoutes from './routes/accountabilityRoutes';
 import accountabilityAttachmentRoutes from './routes/accountabilityAttachmentRoutes';
+import agreementRoutes from './routes/agreementRoutes';
 import { config } from './config';
 
 export const app = express();
@@ -47,6 +48,7 @@ app.use('/unit-types', unitTypeRoutes);
 app.use('/units', unitRoutes);
 app.use('/invoices', invoiceRoutes);
 app.use('/debts', debtRoutes);
+app.use('/agreements', agreementRoutes);
 app.use('/billing', billingRoutes);
 app.use('/notifications', notificationRoutes);
 app.use('/reports', reportRoutes);

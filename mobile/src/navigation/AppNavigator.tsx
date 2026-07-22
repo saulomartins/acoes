@@ -102,7 +102,7 @@ export default function AppNavigator() {
   return (
     <View style={styles.container}>
       <NavigationContainer ref={navigationRef} linking={{ prefixes: ['laremdia://', 'appcond://'], config: { screens: { Login: 'login', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha' } } }}>
-        <Stack.Navigator>
+        <Stack.Navigator screenOptions={{ animation: 'fade', contentStyle: { backgroundColor: '#f5f7fb' } }}>
           {userToken ? (
             <>
               <Stack.Screen name="Home" component={Home} options={{ headerShown: false }} />
@@ -158,12 +158,17 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
     zIndex: 40,
-    borderRadius: 16,
+    borderRadius: 18,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: '#12314f',
+    backgroundColor: '#101a2e',
     borderWidth: 1,
-    borderColor: '#2f5f8f',
+    borderColor: '#31588c',
+    shadowColor: '#101a2e',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    elevation: 10,
   },
   inAppEyebrow: { color: '#9fd2ff', fontSize: 12, fontWeight: '900', letterSpacing: 0.8 },
   inAppTitle: { color: '#fff', fontSize: 16, fontWeight: '900', marginTop: 4 },

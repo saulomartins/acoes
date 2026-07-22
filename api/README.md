@@ -12,6 +12,17 @@ cp .env.example .env
 npm run dev
 ```
 
+Para o app web local, mantenha a API em modo de desenvolvimento:
+
+```env
+NODE_ENV=development
+APP_WEB_URL=http://localhost:8081
+CORS_ORIGINS=http://localhost:8081,http://127.0.0.1:8081
+```
+
+Em producao, configure `NODE_ENV=production`, `APP_WEB_URL` e `CORS_ORIGINS`
+com os dominios HTTPS reais no provedor de hospedagem.
+
 ## Banco de dados
 
 O schema inicial esta em `src/db/schema.sql`.

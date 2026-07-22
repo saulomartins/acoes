@@ -50,7 +50,7 @@ const dateTime = (value: string) =>
   });
 
 export default function Communications({ navigation }: any) {
-  const { user, userToken } = useContext(AuthContext);
+  const { user, userToken, pushStatus, pushError } = useContext(AuthContext);
   const manager = user?.role === "sindico" || user?.role === "subsindico";
   const [notices, setNotices] = useState<Notice[]>([]);
   const [sentHistory, setSentHistory] = useState<SentNotice[]>([]);
@@ -142,7 +142,7 @@ export default function Communications({ navigation }: any) {
     setConfirming(false);
     setSending(true);
     try {
-      const data = await apiRequest<{ message: string }>(
+      const data = await apiRequest<{ message: string; push: { status: string; requested: number; delivered: number; errors?: string[] } }>(
         "/notifications",
         userToken,
         {
@@ -162,8 +162,12 @@ export default function Communications({ navigation }: any) {
       setDialog({
         visible: true,
         title: "Mensagem enviada",
-        message: data.message,
-        tone: "success",
+        message: data.push.requested === 0
+          ? `${data.message}\n\nNenhum aparelho esta registrado para o destinatario. Ele precisa entrar no app e permitir notificacoes.`
+          : data.push.delivered === 0
+            ? `${data.message}\n\nO aviso ficou salvo, mas o push nativo falhou: ${data.push.errors?.join(', ') || 'falha no provedor Expo'}.`
+            : `${data.message}\n\nPush aceito pelo Expo para ${data.push.delivered} aparelho(s).`,
+        tone: data.push.requested > 0 && data.push.delivered === 0 ? "error" : "success",
       });
     } catch (error) {
       setDialog({
@@ -222,6 +226,12 @@ export default function Communications({ navigation }: any) {
             </Text>
           </View>
         </View>
+        {pushStatus !== 'registered' ? (
+          <View style={styles.pushWarning}>
+            <Text style={styles.pushWarningTitle}>Notificacoes deste aparelho: {pushStatus === 'registering' ? 'registrando...' : 'nao ativas'}</Text>
+            <Text style={styles.pushWarningText}>{pushError || 'Aguarde o registro do aparelho para receber avisos nativos.'}</Text>
+          </View>
+        ) : null}
         {manager ? (
           <Panel>
             <Text style={styles.panelTitle}>Nova comunicação</Text>
@@ -440,6 +450,9 @@ export default function Communications({ navigation }: any) {
   );
 }
 const styles = StyleSheet.create({
+  pushWarning: { backgroundColor: '#fff3d6', borderWidth: 1, borderColor: '#e9c46a', borderRadius: 10, padding: 13 },
+  pushWarningTitle: { color: '#7a4d00', fontSize: 14, fontWeight: '900' },
+  pushWarningText: { color: '#7a4d00', fontSize: 13, marginTop: 4 },
   sentCard: { backgroundColor: '#fff', borderWidth: 1, borderColor: colors.border, borderRadius: layout.radius, padding: 17 },
   historyBadge: { color: '#9a6700', backgroundColor: '#fff3d6', borderRadius: 9, overflow: 'hidden', paddingHorizontal: 8, paddingVertical: 5, fontSize: 12, fontWeight: '900' },
   historyBadgeRead: { color: colors.green, backgroundColor: '#e7f7f1' },

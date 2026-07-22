@@ -20,7 +20,7 @@ export default function Register({ navigation }: any) {
   const canSubmit = username.trim().length >= 3 && password.length >= 6 && !isLoading;
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={styles.hero}>
           <Text style={styles.appName}>Lar em Dia</Text>

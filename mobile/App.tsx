@@ -6,7 +6,7 @@ import { AuthProvider } from './src/context/AuthContext';
 export default function App() {
   return (
     <AuthProvider>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" translucent={false} />
       <AppNavigator />
     </AuthProvider>
   );

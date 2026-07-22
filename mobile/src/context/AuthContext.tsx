@@ -19,6 +19,8 @@ type AuthContextType = {
   userToken: string | null;
   isLoading: boolean;
   authError: string | null;
+  pushStatus: 'idle' | 'registering' | 'registered' | 'permission_denied' | 'error';
+  pushError: string | null;
   signIn: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   signUp: (username: string, password: string) => Promise<void>;
@@ -110,6 +112,8 @@ export const AuthContext = createContext<AuthContextType>({
   userToken: null,
   isLoading: false,
   authError: null,
+  pushStatus: 'idle',
+  pushError: null,
   signIn: async () => {},
   signOut: async () => {},
   signUp: async () => {},
@@ -120,6 +124,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [userToken, setUserToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [pushStatus, setPushStatus] = useState<AuthContextType['pushStatus']>('idle');
+  const [pushError, setPushError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -155,14 +161,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    if (!userToken || !user) return;
+    if (!userToken || !user) {
+      setPushStatus('idle');
+      setPushError(null);
+      return;
+    }
 
     let active = true;
+    setPushStatus('registering');
+    setPushError(null);
     registerForPushNotifications(userToken)
       .then(async pushToken => {
-        if (active && pushToken) await storage.set(PUSH_TOKEN_KEY, pushToken);
+        if (!active) return;
+        if (pushToken) {
+          await storage.set(PUSH_TOKEN_KEY, pushToken);
+          setPushStatus('registered');
+        } else {
+          setPushStatus('permission_denied');
+          setPushError('Permita as notificacoes nas configuracoes do aparelho.');
+        }
       })
-      .catch(error => console.warn('Failed to register push notifications', error));
+      .catch(error => {
+        if (!active) return;
+        const message = error instanceof Error ? error.message : 'Falha ao registrar este aparelho.';
+        setPushStatus('error');
+        setPushError(message);
+        console.warn('Failed to register push notifications', error);
+      });
 
     return () => { active = false; };
   }, [userToken, user?.id]);
@@ -230,7 +255,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, userToken, isLoading, authError, signIn, signOut, signUp }}>
+    <AuthContext.Provider value={{ user, userToken, isLoading, authError, pushStatus, pushError, signIn, signOut, signUp }}>
       {children}
     </AuthContext.Provider>
   );

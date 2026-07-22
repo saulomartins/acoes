@@ -80,7 +80,7 @@ router.get('/', asyncHandler(async (req, res) => {
             invoices.amount_cents, invoices.due_date, invoices.status, invoices.provider,
             invoices.external_id, invoices.digitable_line, invoices.pdf_url, invoices.created_at,
             invoices.barcode, invoices.pix_copy_paste, invoices.paid_at, invoices.paid_amount_cents, invoices.batch_id,
-            invoices.reference_month,
+            invoices.reference_month, invoices.invoice_type, invoices.agreement_id,
             users.username as user_username,
             users.full_name as user_full_name
      from invoices

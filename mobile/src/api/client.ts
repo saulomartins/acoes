@@ -91,6 +91,16 @@ export const apiUpload = async <T>(path:string, token:string, file:File | {uri:s
 
 export const downloadAuthenticated = async (path:string,token:string,filename:string) => {
   const accessToken=await authStorage.get('userToken') || token;
+  if (Platform.OS !== 'web') {
+    if (!FileSystem.cacheDirectory) throw new Error('Armazenamento temporário indisponível.');
+    const localUri = `${FileSystem.cacheDirectory}${Date.now()}-${filename.replace(/[^a-zA-Z0-9._-]/g,'-')}`;
+    const result = await FileSystem.downloadAsync(`${API_BASE_URL}${path}`, localUri, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (result.status < 200 || result.status >= 300) { await FileSystem.deleteAsync(localUri,{idempotent:true}).catch(()=>null); throw new Error('Falha ao baixar arquivo'); }
+    if (!(await Sharing.isAvailableAsync())) throw new Error('O compartilhamento de arquivos não está disponível neste aparelho.');
+    try { await Sharing.shareAsync(localUri,{dialogTitle:'Exportar arquivo'}); }
+    finally { await FileSystem.deleteAsync(localUri,{idempotent:true}).catch(()=>null); }
+    return;
+  }
   const response=await fetch(`${API_BASE_URL}${path}`,{headers:{Authorization:`Bearer ${accessToken}`}});
   if(!response.ok){const data=await response.json().catch(()=>null);throw new Error(data?.message||'Falha ao baixar arquivo');}
   const blob=await response.blob(); const url=URL.createObjectURL(blob); const anchor=document.createElement('a');

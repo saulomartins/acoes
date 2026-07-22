@@ -1,33 +1,33 @@
 export const colors = {
-  background: '#f3f6f8',
+  background: '#f5f7fb',
   surface: '#ffffff',
-  ink: '#17283e',
-  navy: '#12243b',
-  muted: '#6f7e8d',
-  border: '#e4e9ee',
-  primary: '#255eab',
-  primaryDark: '#1f4e91',
-  green: '#159b8b',
+  ink: '#172033',
+  navy: '#101a2e',
+  muted: '#667085',
+  border: '#e2e7f0',
+  primary: '#2563c5',
+  primaryDark: '#194d9d',
+  green: '#0f927f',
   amber: '#d89a2b',
   red: '#d65454',
   teal: '#159b8b',
   lilac: '#7c3aed',
   sky: '#0ea5e9',
-  softBlue: '#edf4ff',
-  softGreen: '#eaf7ef',
+  softBlue: '#eef4ff',
+  softGreen: '#eaf8f3',
 };
 
 export const shadow = {
   shadowColor: '#14243a',
   shadowOffset: { width: 0, height: 5 },
-  shadowOpacity: 0.06,
-  shadowRadius: 12,
-  elevation: 2,
+  shadowOpacity: 0.08,
+  shadowRadius: 16,
+  elevation: 3,
 };
 
 export const layout = {
   sidebarWidth: 286,
   contentMaxWidth: 1420,
-  radius: 15,
-  controlRadius: 11,
+  radius: 18,
+  controlRadius: 13,
 };
