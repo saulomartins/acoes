@@ -18,9 +18,15 @@ import { config } from './config';
 
 export const app = express();
 
+const originMatches = (origin: string, configuredOrigin: string) => {
+  if (!configuredOrigin.includes('*')) return origin === configuredOrigin;
+  const escaped = configuredOrigin.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[a-zA-Z0-9-]+');
+  return new RegExp(`^${escaped}$`).test(origin);
+};
+
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && config.allowedOrigins.includes(origin)) {
+  if (origin && config.allowedOrigins.some(configuredOrigin => originMatches(origin, configuredOrigin))) {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Vary', 'Origin');
   }
