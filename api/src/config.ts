@@ -27,6 +27,13 @@ export const config = {
     resendApiKey: process.env.RESEND_API_KEY || '',
     from: process.env.EMAIL_FROM || '',
     replyTo: process.env.EMAIL_REPLY_TO || '',
+    smtp: {
+      host: process.env.SMTP_HOST || '',
+      port: Number(process.env.SMTP_PORT || 465),
+      secure: (process.env.SMTP_SECURE || 'true').toLowerCase() === 'true',
+      user: process.env.SMTP_USER || '',
+      pass: process.env.SMTP_PASS || '',
+    },
   },
   inter: {
     clientId: process.env.INTER_CLIENT_ID || '',

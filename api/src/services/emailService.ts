@@ -1,11 +1,30 @@
 import { config } from '../config';
+import nodemailer from 'nodemailer';
 
 type EmailInput = { to: string; subject: string; html: string };
 
 export const sendEmail = async ({ to, subject, html }: EmailInput) => {
+  const smtp = config.email.smtp;
+  if (smtp.host && smtp.user && smtp.pass && config.email.from) {
+    const transporter = nodemailer.createTransport({
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
+      auth: { user: smtp.user, pass: smtp.pass },
+    });
+    const info = await transporter.sendMail({
+      from: config.email.from,
+      to,
+      subject,
+      html,
+      ...(config.email.replyTo ? { replyTo: config.email.replyTo } : {}),
+    });
+    return { status: 'sent' as const, data: { messageId: info.messageId, provider: 'smtp' } };
+  }
+
   if (!config.email.resendApiKey || !config.email.from) {
-    if (process.env.NODE_ENV === 'production') throw new Error('Email service is not configured');
-    console.warn(`Email not sent (Resend not configured): ${subject} -> ${to}`);
+    if (process.env.NODE_ENV === 'production') throw new Error('Email service is not configured (SMTP or Resend)');
+    console.warn(`Email not sent (SMTP/Resend not configured): ${subject} -> ${to}`);
     return { status: 'pending_configuration' as const };
   }
 
