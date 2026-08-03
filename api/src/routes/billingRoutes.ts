@@ -10,6 +10,7 @@ import { Readable } from 'stream';
 import { createInterBoleto } from '../services/interService';
 import { createBillingTemplateWorkbook } from '../services/billingTemplateService';
 import { getInterIntegration } from './invoiceRoutes';
+import { logAudit } from '../services/auditService';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -33,6 +34,47 @@ const todayIso = () => {
   return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
 };
 const formatDateBr = (iso: string) => `${iso.slice(8,10)}/${iso.slice(5,7)}/${iso.slice(0,4)}`;
+const REQUIRED_BILLING_FIELDS: Array<{ key: string; label: string }> = [
+  { key: 'full_name', label: 'nome completo' },
+  { key: 'cpf', label: 'CPF' },
+  { key: 'street', label: 'rua' },
+  { key: 'address_number', label: 'número do endereço' },
+  { key: 'neighborhood', label: 'bairro' },
+  { key: 'city', label: 'cidade' },
+  { key: 'state', label: 'estado' },
+  { key: 'postal_code', label: 'CEP' },
+];
+// item precisa trazer os campos de REQUIRED_BILLING_FIELDS (join com users) e hasAmount
+// já considerando valor manual/override, já que a tipologia sozinha pode não ter valor.
+const missingBillingFields = (item: Record<string, unknown>, hasAmount: boolean): string[] => {
+  const missing = REQUIRED_BILLING_FIELDS.filter(field => !item[field.key]).map(field => field.label);
+  if (!hasAmount) missing.push('valor da tipologia (ou informe um valor manual)');
+  return missing;
+};
+const missingBillingFieldsMessage = (item: Record<string, unknown>, hasAmount: boolean): string | null => {
+  const missing = missingBillingFields(item, hasAmount);
+  return missing.length ? `Cadastro incompleto: falta preencher ${missing.join(', ')}.` : null;
+};
+type ExtraChargeMapEntry = { sumCents: number; installmentIds: string[]; descriptions: string[] };
+const extraChargesByUnit = async (unitIds: (string | null | undefined)[], referenceMonthDate: string) => {
+  const ids = [...new Set(unitIds.filter((id): id is string => Boolean(id)))];
+  const map = new Map<string, ExtraChargeMapEntry>();
+  if (!ids.length) return map;
+  const rows = await query<{ unit_id: string; description: string; id: string; amount_cents: number }>(
+    `select ec.unit_id, ec.description, eci.id, eci.amount_cents
+     from unit_extra_charge_installments eci join unit_extra_charges ec on ec.id = eci.charge_id
+     where ec.unit_id = any($1::uuid[]) and eci.reference_month = $2::date and eci.status = 'pending'`,
+    [ids, referenceMonthDate],
+  );
+  for (const row of rows.rows) {
+    const entry = map.get(row.unit_id) || { sumCents: 0, installmentIds: [], descriptions: [] };
+    entry.sumCents += Number(row.amount_cents);
+    entry.installmentIds.push(row.id);
+    if (!entry.descriptions.includes(row.description)) entry.descriptions.push(row.description);
+    map.set(row.unit_id, entry);
+  }
+  return map;
+};
 router.use(authenticate, authorize('sindico', 'subsindico'));
 
 router.get('/settings', asyncHandler(async (req, res) => {
@@ -72,6 +114,7 @@ router.put('/settings', asyncHandler(async (req, res) => {
       body.fineType || 'NONE', Number(body.fineValue || 0), body.interestType || 'NONE', Number(body.interestValue || 0),
       body.discountType || 'NONE', Number(body.discountValue || 0), discountDays, req.user?.id],
   );
+  await logAudit(req, 'config_enviar_cobrancas', 'updated', 'Atualizou a configuração de cobranças');
   return res.json({ settings: result.rows[0] });
 }));
 
@@ -79,25 +122,32 @@ router.post('/batches/preview', asyncHandler(async (req, res) => {
   const condominiumId = req.user?.condominiumId;
   const referenceMonth = String(req.body?.referenceMonth || '');
   const userIds = Array.isArray(req.body?.userIds) ? req.body.userIds : [];
+  const amountOverrides: Record<string, number> = req.body?.amountOverrides && typeof req.body.amountOverrides === 'object' ? req.body.amountOverrides : {};
   if (!/^\d{4}-\d{2}$/.test(referenceMonth)) return res.status(400).json({ message: 'Informe o mês de referência no formato AAAA-MM.' });
   if (!userIds.length) return res.status(400).json({ message: 'Selecione ao menos uma pessoa.' });
   const result = await query<{
-    id: string; full_name: string | null; username: string; cpf: string | null; unit: string | null;
-    unit_type_name: string | null; fee_cents: number | null; address_complete: boolean; duplicate: boolean; billing_exempt:boolean; preferred_due_day:number;
+    id: string; full_name: string | null; username: string; cpf: string | null; unit: string | null; unit_id: string | null;
+    unit_type_name: string | null; fee_cents: number | null; street: string|null; address_number: string|null; neighborhood: string|null;
+    city: string|null; state: string|null; postal_code: string|null; duplicate: boolean; billing_exempt:boolean; preferred_due_day:number;
   }>(
-    `select u.id,u.full_name,u.username,u.cpf,u.unit,u.billing_exempt,u.preferred_due_day,ut.name unit_type_name,ut.fee_cents,
-       (u.full_name is not null and u.cpf is not null and u.street is not null and u.address_number is not null
-        and u.neighborhood is not null and u.city is not null and u.state is not null and u.postal_code is not null) address_complete,
+    `select u.id,u.full_name,u.username,u.cpf,u.unit,u.billing_exempt,u.preferred_due_day,
+       u.street,u.address_number,u.neighborhood,u.city,u.state,u.postal_code,
+       un.id unit_id,ut.name unit_type_name,ut.fee_cents,
        exists(select 1 from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status <> 'canceled') duplicate
      from users u left join units un on un.id=u.unit_id left join unit_types ut on ut.id=un.unit_type_id
      where u.condominium_id=$1 and u.id=any($2::uuid[]) order by u.full_name,u.username`,
     [condominiumId, userIds, `${referenceMonth}-01`],
   );
-  const items = result.rows.map(row => {const dueDate=`${referenceMonth}-${String(row.preferred_due_day).padStart(2,'0')}`;return ({ ...row, valid: Boolean(row.fee_cents && row.address_complete && !row.duplicate && !row.billing_exempt && dueDate>=todayIso()),
-    issues: [!row.fee_cents ? 'Sem valor de tipologia' : null, !row.address_complete ? 'Cadastro/endereço incompleto' : null,
+  const extraMap = await extraChargesByUnit(result.rows.map(row => row.unit_id), `${referenceMonth}-01`);
+  const items = result.rows.map(row => {const dueDate=`${referenceMonth}-${String(row.preferred_due_day).padStart(2,'0')}`;const extra=row.unit_id?extraMap.get(row.unit_id):undefined;
+    const override=Number(amountOverrides[row.id]); const hasOverride=Number.isInteger(override)&&override>0;
+    const feeCents=hasOverride?override:Number(row.fee_cents||0)+(extra?.sumCents||0);
+    const missingFields=missingBillingFields(row,Boolean(hasOverride||row.fee_cents));
+    return ({ ...row, extraChargeCents: extra?.sumCents||0, manualOverride: hasOverride, valid: Boolean(!missingFields.length && !row.duplicate && !row.billing_exempt && dueDate>=todayIso()),
+    issues: [missingFields.length ? `Cadastro incompleto: falta preencher ${missingFields.join(', ')}` : null,
       row.duplicate ? 'Cobrança já existente nesta referência' : null, row.billing_exempt ? 'Pessoa isenta de boleto' : null,
       dueDate<todayIso() ? `O vencimento ${formatDateBr(dueDate)} já passou` : null].filter(Boolean),
-      due_date:dueDate })});
+      due_date:dueDate, fee_cents:feeCents })});
   return res.json({ referenceMonth, items, validCount: items.filter(i => i.valid).length,
     totalAmountCents: items.filter(i => i.valid).reduce((sum, i) => sum + Number(i.fee_cents || 0), 0) });
 }));
@@ -105,6 +155,7 @@ router.post('/batches/preview', asyncHandler(async (req, res) => {
 router.post('/batches', asyncHandler(async (req, res) => {
   const condominiumId = req.user?.condominiumId;
   const { referenceMonth, description, userIds } = req.body || {};
+  const amountOverrides: Record<string, number> = req.body?.amountOverrides && typeof req.body.amountOverrides === 'object' ? req.body.amountOverrides : {};
   if (!/^\d{4}-\d{2}$/.test(String(referenceMonth || '')) || !Array.isArray(userIds) || !userIds.length) {
     return res.status(400).json({ message: 'Informe mês de referência e pessoas.' });
   }
@@ -113,33 +164,56 @@ router.post('/batches', asyncHandler(async (req, res) => {
   if(billingDescription.length>100) return res.status(400).json({message:'A descrição deve ter no máximo 100 caracteres.'});
   const condominium=await query<{name:string;cnpj:string|null}>(`select name,cnpj from condominiums where id=$1`,[condominiumId]);
   if(!condominium.rows[0]?.name||!condominium.rows[0]?.cnpj) return res.status(400).json({message:'Complete o nome e o CNPJ do condomínio antes de gerar boletos.'});
+  const overrideFor=(personId:string)=>{const value=Number(amountOverrides[personId]);return Number.isInteger(value)&&value>0?value:null;};
   const people = await query<any>(
-    `select u.id,u.full_name,u.username,u.cpf,u.preferred_due_day,ut.fee_cents,
+    `select u.id,u.full_name,u.username,u.cpf,u.preferred_due_day,un.id unit_id,ut.fee_cents,
        exists(select 1 from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status<>'canceled') duplicate
-     from users u join units un on un.id=u.unit_id join unit_types ut on ut.id=un.unit_type_id
+     from users u left join units un on un.id=u.unit_id left join unit_types ut on ut.id=un.unit_type_id
      where u.condominium_id=$1 and u.billing_exempt=false and u.id=any($2::uuid[])`,
     [condominiumId,userIds,`${referenceMonth}-01`],
   );
   if (people.rows.some((person:any)=>person.duplicate)) return res.status(409).json({ message:'Uma ou mais pessoas já possuem cobrança nesta referência.' });
+  const withoutAmount=people.rows.filter((person:any)=>!overrideFor(person.id)&&!person.fee_cents);
+  if (withoutAmount.length) return res.status(400).json({ message: `${withoutAmount.map((p:any)=>p.full_name||p.username).join(', ')} sem valor de tipologia. Informe um valor manual ou complete o cadastro da unidade.` });
+  const extraMap = await extraChargesByUnit(people.rows.map((p:any)=>p.unit_id), `${referenceMonth}-01`);
+  const amountFor=(person:any)=>overrideFor(person.id)??(Number(person.fee_cents||0)+(extraMap.get(person.unit_id)?.sumCents||0));
   const batch = await withTransaction(async client=>{
-    const batchId=randomUUID(); const total=people.rows.reduce((sum:number,p:any)=>sum+Number(p.fee_cents||0),0);
+    const batchId=randomUUID(); const total=people.rows.reduce((sum:number,p:any)=>sum+amountFor(p),0);
     const created=await client.query(
       `insert into billing_batches(id,condominium_id,reference_month,due_date,description,beneficiary_name,beneficiary_document,status,total_items,total_amount_cents,created_by)
        values($1,$2,$3,$4,$5,$6,$7,'validated',$8,$9,$10) returning *`,
       [batchId,condominiumId,`${referenceMonth}-01`,null,billingDescription,condominium.rows[0].name,condominium.rows[0].cnpj,people.rows.length,total,req.user?.id]);
     for(const person of people.rows) await client.query(
-      `insert into billing_batch_items(id,batch_id,user_id,document,payer_name,amount_cents,due_date,status)
-       values($1,$2,$3,$4,$5,$6,$7,'valid')`,
-      [randomUUID(),batchId,person.id,person.cpf||person.id,person.full_name||person.username,person.fee_cents,`${referenceMonth}-${String(person.preferred_due_day).padStart(2,'0')}`]);
-    await client.query(`insert into billing_audit_events(id,condominium_id,batch_id,actor_id,event_type,details) values($1,$2,$3,$4,'monthly_batch_created',$5)`,[randomUUID(),condominiumId,batchId,req.user?.id,JSON.stringify({referenceMonth,userIds})]);
+      `insert into billing_batch_items(id,batch_id,user_id,document,payer_name,amount_cents,amount_override_cents,due_date,status)
+       values($1,$2,$3,$4,$5,$6,$7,$8,'valid')`,
+      [randomUUID(),batchId,person.id,person.cpf||person.id,person.full_name||person.username,amountFor(person),overrideFor(person.id),`${referenceMonth}-${String(person.preferred_due_day).padStart(2,'0')}`]);
+    await client.query(`insert into billing_audit_events(id,condominium_id,batch_id,actor_id,event_type,details) values($1,$2,$3,$4,'monthly_batch_created',$5)`,[randomUUID(),condominiumId,batchId,req.user?.id,JSON.stringify({referenceMonth,userIds,hasManualOverrides:Object.keys(amountOverrides).length>0})]);
     return created;
   });
+  await logAudit(req, 'config_enviar_cobrancas', 'created', `Criou o lote de referência ${referenceMonth} (${people.rows.length} pessoa(s))`, { entityId: String((batch.rows[0] as any).id) });
   return res.status(201).json({ batch: batch.rows[0], message: 'Lote salvo como rascunho. Nenhuma cobrança foi emitida.' });
 }));
 
 router.get('/batches', asyncHandler(async (req, res) => {
   const result = await query(`select * from billing_batches where condominium_id=$1 and reference_month is not null order by reference_month desc,created_at desc`, [req.user?.condominiumId]);
   return res.json({ batches: result.rows });
+}));
+
+// Exclui a referência (lote) inteira, junto de tudo que faz referência a
+// ela: itens do lote e eventos de auditoria (ambos com "on delete cascade"
+// em billing_batches). Só é permitido quando NENHUM item do lote tem
+// boleto emitido — se algum já foi emitido, o registro em `invoices` é
+// financeiro e não pode simplesmente desaparecer; o síndico precisa
+// cancelar esses boletos primeiro em Gestão de cobranças.
+router.delete('/batches/:id', asyncHandler(async (req,res)=>{
+  const condominiumId=req.user?.condominiumId;
+  const batch=await query<any>(`select * from billing_batches where id=$1 and condominium_id=$2`,[req.params.id,condominiumId]);
+  if(!batch.rows[0]) return res.status(404).json({message:'Referência não encontrada.'});
+  const issued=await query<any>(`select count(*)::int as count from billing_batch_items where batch_id=$1 and invoice_id is not null`,[req.params.id]);
+  if(Number(issued.rows[0]?.count)>0) return res.status(409).json({message:'Não é possível excluir: esta referência já tem boleto(s) emitido(s) no banco. Cancele os boletos emitidos em Gestão de cobranças antes de excluir a referência.'});
+  await query(`delete from billing_batches where id=$1`,[req.params.id]);
+  await logAudit(req, 'config_enviar_cobrancas', 'deleted', `Excluiu a referência ${req.params.id}`, { entityId: req.params.id });
+  return res.json({message:'Referência excluída, junto com todas as cobranças pendentes desta competência.'});
 }));
 
 router.get('/profiles', asyncHandler(async (req,res)=>{
@@ -254,14 +328,79 @@ router.post('/imports/excel', upload.single('file'), asyncHandler(async (req, re
     [randomUUID(),batchId,item.person?.id||null,item.document,item.person?.full_name||item.name,item.person?.fee_cents||item.amountCents,item.dueDate,item.row,item.status,JSON.stringify(item.issues),JSON.stringify(item)]);
   await query(`insert into billing_audit_events(id,condominium_id,batch_id,actor_id,event_type,details) values($1,$2,$3,$4,'excel_imported',$5)`,
     [randomUUID(),req.user?.condominiumId,batchId,req.user?.id,JSON.stringify({file:req.file.originalname,rows:items.length,valid:valid.length})]);
+  await logAudit(req, 'config_enviar_cobrancas', 'imported', `Importou lote via Excel (${valid.length} de ${items.length} válidos)`, { entityId: batchId });
   return res.status(201).json({ batchId, total:items.length, valid:valid.length, invalid:items.length-valid.length, items:items.map(i=>({row:i.row,document:i.document,name:i.person?.full_name||i.name,status:i.status,amountCents:i.person?.fee_cents||i.amountCents,issues:i.issues})) });
 }));
 
 router.get('/batches/:id/items', asyncHandler(async (req,res)=>{
-  const batch=await query(`select * from billing_batches where id=$1 and condominium_id=$2`,[req.params.id,req.user?.condominiumId]);
+  const batch=await query<any>(`select * from billing_batches where id=$1 and condominium_id=$2`,[req.params.id,req.user?.condominiumId]);
   if(!batch.rows[0]) return res.status(404).json({message:'Lote não encontrado.'});
-  const items=await query(`select * from billing_batch_items where batch_id=$1 order by source_row nulls last,created_at`,[req.params.id]);
-  return res.json({batch:batch.rows[0],items:items.rows});
+  const items=await query<any>(
+    `select bi.*, un.id unit_id, coalesce(nullif(concat_ws(' - ',blk.name,un.number),''),u.unit) unit_label
+     from billing_batch_items bi left join users u on u.id=bi.user_id left join units un on un.id=u.unit_id left join blocks blk on blk.id=un.block_id
+     where bi.batch_id=$1 order by bi.source_row nulls last,bi.created_at`,[req.params.id]);
+  const extraMap=batch.rows[0].reference_month?await extraChargesByUnit(items.rows.map((item:any)=>item.unit_id),interDate(batch.rows[0].reference_month)):new Map();
+  const itemsWithBreakdown=items.rows.map((item:any)=>{
+    const hasOverride=Number.isInteger(item.amount_override_cents)&&item.amount_override_cents>0;
+    if(hasOverride) return {...item,manualOverride:true,extraChargeCents:0,extraChargeDescriptions:[],baseFeeCents:Number(item.amount_cents||0)};
+    const extra=item.unit_id?extraMap.get(item.unit_id):undefined;
+    const extraCents=extra?.sumCents||0;
+    return {...item,manualOverride:false,extraChargeCents:extraCents,extraChargeDescriptions:extra?.descriptions||[],baseFeeCents:Number(item.amount_cents||0)-extraCents};
+  });
+  return res.json({batch:batch.rows[0],items:itemsWithBreakdown});
+}));
+
+router.post('/batches/:batchId/items', asyncHandler(async (req,res)=>{
+  const condominiumId=req.user?.condominiumId;
+  const userId=String(req.body?.userId||'');
+  if(!userId) return res.status(400).json({message:'Selecione a pessoa a adicionar.'});
+  const batch=await query<any>(`select * from billing_batches where id=$1 and condominium_id=$2 and status<>'processing'`,[req.params.batchId,condominiumId]);
+  if(!batch.rows[0]) return res.status(409).json({message:'Lote não encontrado ou em processamento no momento.'});
+  if(!batch.rows[0].reference_month) return res.status(400).json({message:'Este lote não tem mês de referência (foi criado por importação) e não aceita adicionar unidades por aqui.'});
+  const referenceMonth=interDate(batch.rows[0].reference_month);
+  const person=await query<any>(
+    `select u.id,u.full_name,u.username,u.cpf,u.preferred_due_day,un.id unit_id,ut.fee_cents,
+       exists(select 1 from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status<>'canceled') duplicate,
+       exists(select 1 from billing_batch_items bi where bi.batch_id=$4 and bi.user_id=u.id) already_in_batch
+     from users u join units un on un.id=u.unit_id join unit_types ut on ut.id=un.unit_type_id
+     where u.id=$1 and u.condominium_id=$2 and u.billing_exempt=false`,
+    [userId,condominiumId,referenceMonth,req.params.batchId]);
+  if(!person.rows[0]) return res.status(404).json({message:'Pessoa não encontrada, isenta de boleto ou sem tipologia/unidade configurada.'});
+  if(person.rows[0].duplicate) return res.status(409).json({message:'Esta pessoa já possui cobrança nesta referência.'});
+  if(person.rows[0].already_in_batch) return res.status(409).json({message:'Esta pessoa já está neste lote.'});
+  const extraMap=await extraChargesByUnit([person.rows[0].unit_id],referenceMonth);
+  const amountCents=Number(person.rows[0].fee_cents||0)+(extraMap.get(person.rows[0].unit_id)?.sumCents||0);
+  const dueDate=`${referenceMonth.slice(0,7)}-${String(person.rows[0].preferred_due_day).padStart(2,'0')}`;
+  if(dueDate<todayIso()) return res.status(400).json({message:`O vencimento ${formatDateBr(dueDate)} já passou. Ajuste o dia preferido da pessoa antes de adicionar.`});
+  const item=await withTransaction(async client=>{
+    const inserted=await client.query(
+      `insert into billing_batch_items(id,batch_id,user_id,document,payer_name,amount_cents,due_date,status) values($1,$2,$3,$4,$5,$6,$7,'valid') returning *`,
+      [randomUUID(),req.params.batchId,person.rows[0].id,person.rows[0].cpf||person.rows[0].id,person.rows[0].full_name||person.rows[0].username,amountCents,dueDate]);
+    await client.query(`update billing_batches set total_items=total_items+1,total_amount_cents=total_amount_cents+$1 where id=$2`,[amountCents,req.params.batchId]);
+    return inserted.rows[0];
+  });
+  await query(`insert into billing_audit_events(id,condominium_id,batch_id,actor_id,event_type,details) values($1,$2,$3,$4,'batch_item_added',$5)`,
+    [randomUUID(),condominiumId,req.params.batchId,req.user?.id,JSON.stringify({userId,payerName:item.payer_name,amountCents})]);
+  await logAudit(req, 'config_enviar_cobrancas', 'updated', `Adicionou ${item.payer_name} a um lote`, { entityId: req.params.batchId });
+  return res.status(201).json({item,message:`${item.payer_name} adicionado(a) ao lote.`});
+}));
+
+router.delete('/batches/:batchId/items/:itemId', asyncHandler(async (req,res)=>{
+  const condominiumId=req.user?.condominiumId;
+  const item=await query<any>(
+    `select bi.* from billing_batch_items bi join billing_batches b on b.id=bi.batch_id
+     where bi.id=$1 and bi.batch_id=$2 and b.condominium_id=$3`,
+    [req.params.itemId,req.params.batchId,condominiumId]);
+  if(!item.rows[0]) return res.status(404).json({message:'Cobrança não encontrada.'});
+  if(item.rows[0].invoice_id||item.rows[0].status==='issued') return res.status(409).json({message:'Não é possível excluir: este boleto já foi emitido. Cancele o boleto em Gestão de cobranças.'});
+  await withTransaction(async client=>{
+    await client.query(`delete from billing_batch_items where id=$1`,[req.params.itemId]);
+    await client.query(`update billing_batches set total_items=total_items-1,total_amount_cents=total_amount_cents-$1 where id=$2`,[item.rows[0].amount_cents,req.params.batchId]);
+  });
+  await query(`insert into billing_audit_events(id,condominium_id,batch_id,actor_id,event_type,details) values($1,$2,$3,$4,'batch_item_removed',$5)`,
+    [randomUUID(),condominiumId,req.params.batchId,req.user?.id,JSON.stringify({itemId:req.params.itemId,payerName:item.rows[0].payer_name})]);
+  await logAudit(req, 'config_enviar_cobrancas', 'updated', `Removeu ${item.rows[0].payer_name} de um lote`, { entityId: req.params.batchId });
+  return res.json({message:`${item.rows[0].payer_name} removido(a) do lote.`});
 }));
 
 router.patch('/batches/:batchId/items/:itemId/due-date', asyncHandler(async (req,res)=>{
@@ -270,7 +409,7 @@ router.patch('/batches/:batchId/items/:itemId/due-date', asyncHandler(async (req
   if(dueDate<todayIso()) return res.status(400).json({message:`O vencimento deve ser igual ou posterior a ${formatDateBr(todayIso())}.`});
   const previous=await query<any>(`select bi.due_date,bi.payer_name,b.condominium_id
     from billing_batch_items bi join billing_batches b on b.id=bi.batch_id
-    where bi.id=$1 and bi.batch_id=$2 and b.condominium_id=$3 and bi.status='failed' and bi.invoice_id is null`,
+    where bi.id=$1 and bi.batch_id=$2 and b.condominium_id=$3 and bi.status in ('valid','confirmed','failed') and bi.invoice_id is null`,
     [req.params.itemId,req.params.batchId,req.user?.condominiumId]);
   if(!previous.rows[0]) return res.status(409).json({message:'Esta cobrança não está disponível para correção ou já foi emitida.'});
   const updated=await query<any>(`update billing_batch_items set due_date=$1 where id=$2 and batch_id=$3 returning *`,
@@ -278,6 +417,7 @@ router.patch('/batches/:batchId/items/:itemId/due-date', asyncHandler(async (req
   await query(`insert into billing_audit_events(id,condominium_id,batch_id,actor_id,event_type,details)
     values($1,$2,$3,$4,'failed_item_due_date_adjusted',$5)`,[randomUUID(),req.user?.condominiumId,req.params.batchId,req.user?.id,
       JSON.stringify({itemId:req.params.itemId,payerName:previous.rows[0].payer_name,oldDueDate:interDate(previous.rows[0].due_date),newDueDate:dueDate})]);
+  await logAudit(req, 'config_enviar_cobrancas', 'updated', `Alterou o vencimento de ${previous.rows[0].payer_name} para ${formatDateBr(dueDate)}`, { entityId: req.params.batchId });
   return res.json({item:updated.rows[0],message:`Vencimento de ${previous.rows[0].payer_name} alterado para ${formatDateBr(dueDate)}.`});
 }));
 
@@ -286,6 +426,7 @@ router.post('/batches/:id/confirm', asyncHandler(async (req,res)=>{
   if(!updated.rows[0]) return res.status(409).json({message:'Lote inexistente ou já confirmado.'});
   await query(`update billing_batch_items set status='confirmed' where batch_id=$1 and status='valid'`,[req.params.id]);
   await query(`insert into billing_audit_events(id,condominium_id,batch_id,actor_id,event_type,details) values($1,$2,$3,$4,'batch_confirmed_without_issuance',$5)`,[randomUUID(),req.user?.condominiumId,req.params.id,req.user?.id,JSON.stringify({issuance:false})]);
+  await logAudit(req, 'config_enviar_cobrancas', 'updated', `Confirmou o lote ${req.params.id} para revisão`, { entityId: req.params.id });
   return res.json({batch:updated.rows[0],message:'Lote confirmado para revisão. Nenhum boleto foi emitido.'});
 }));
 
@@ -297,19 +438,22 @@ router.post('/batches/:id/issue', asyncHandler(async (req,res)=>{
   const integration=await getInterIntegration(condominiumId!);
   if(!integration?.enabled) return res.status(400).json({message:'Integração Banco Inter não configurada ou desabilitada.'});
   const items=await query<any>(
-    `select bi.*,u.full_name,u.username,u.cpf,u.email,u.phone,u.street,u.address_number,u.address_complement,u.neighborhood,u.city,u.state,u.postal_code,u.unit,
+    `select bi.*,u.full_name,u.username,u.cpf,u.email,u.phone,u.street,u.address_number,u.address_complement,u.neighborhood,u.city,u.state,u.postal_code,u.unit,un.id unit_id,
             ut.name unit_type_name,ut.fee_cents
      from billing_batch_items bi join users u on u.id=bi.user_id left join units un on un.id=u.unit_id left join unit_types ut on ut.id=un.unit_type_id
      where bi.batch_id=$1 and bi.status in ('confirmed','failed') order by bi.created_at`,[batch.id]);
+  const extraMap=await extraChargesByUnit(items.rows.map((item:any)=>item.unit_id),batch.reference_month);
   await query(`update billing_batches set status='processing' where id=$1`,[batch.id]);
   let issued=0;let failed=0;const failures:Array<{payerName:string;reason:string}>=[];
   for(const item of items.rows){
     let reservationKey:string|null=null;
+    const extra=item.unit_id?extraMap.get(item.unit_id):undefined;
+    const hasOverride=Number.isInteger(item.amount_override_cents)&&item.amount_override_cents>0;
+    const amountCents=hasOverride?item.amount_override_cents:Number(item.fee_cents||0)+(extra?.sumCents||0);
     try{
-      if(!item.full_name||!item.cpf||!item.fee_cents||!item.street||!item.address_number||!item.neighborhood||!item.city||!item.state||!item.postal_code) throw new Error('Cadastro, endereço ou tipologia incompletos.');
+      const missingFieldsMessage=missingBillingFieldsMessage(item,Boolean(amountCents));
+      if(missingFieldsMessage) throw new Error(missingFieldsMessage);
       const payerCpf=String(item.cpf).replace(/\D/g,'');
-      const allowedCpf=String(process.env.INTER_ISSUANCE_ALLOWED_CPF||'').replace(/\D/g,'');
-      if(!allowedCpf||payerCpf!==allowedCpf) throw new Error('CPF não autorizado para emissão no ambiente atual.');
       reservationKey=randomUUID();
       const reservation=await query(`insert into inter_issuance_guards(payer_cpf,user_id,reservation_key) values($1,$2,$3)
         on conflict(payer_cpf) do update set user_id=excluded.user_id,invoice_id=null,reservation_key=excluded.reservation_key,reserved_at=now()
@@ -319,15 +463,19 @@ router.post('/batches/:id/issue', asyncHandler(async (req,res)=>{
       if(!reservation.rows[0]) throw new Error('Já existe uma cobrança ativa ou uma emissão reservada para este CPF.');
       const dueDate=interDate(item.due_date);
       if(dueDate<todayIso()) throw new Error(`O vencimento ${formatDateBr(dueDate)} já passou. Escolha um vencimento igual ou posterior a ${formatDateBr(todayIso())}.`);
-      const boleto=await createInterBoleto({payerName:item.full_name,payerDocument:item.cpf,amountCents:item.fee_cents,dueDate,description:batch.description||`Taxa condominial - ${item.unit_type_name||item.unit}`,payerEmail:item.email,payerPhone:item.phone,payerStreet:item.street,payerNumber:item.address_number,payerComplement:item.address_complement,payerNeighborhood:item.neighborhood,payerCity:item.city,payerState:item.state,payerPostalCode:item.postal_code,payerUnit:item.unit},integration);
-      const invoice=await query<any>(`insert into invoices(id,condominium_id,user_id,amount_cents,due_date,reference_month,batch_id,status,provider,external_id,digitable_line,pdf_url) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,[randomUUID(),condominiumId,item.user_id,item.fee_cents,item.due_date,batch.reference_month,batch.id,boleto.status==='issued'?'issued':'pending_provider',boleto.provider,boleto.externalId,boleto.digitableLine,boleto.pdfUrl]);
-      await query(`update billing_batch_items set status='issued',invoice_id=$1,issues='[]'::jsonb where id=$2`,[invoice.rows[0].id,item.id]);
-      await query(`update inter_issuance_guards set invoice_id=$1,reservation_key=null where payer_cpf=$2 and reservation_key=$3`,[invoice.rows[0].id,payerCpf,reservationKey]); issued+=1;
+      const description=(batch.description||`Taxa condominial - ${item.unit_type_name||item.unit}`)+(!hasOverride&&extra?.descriptions.length?` + ${extra.descriptions.join(', ')}`:'');
+      const boleto=await createInterBoleto({payerName:item.full_name,payerDocument:item.cpf,amountCents,dueDate,description,payerEmail:item.email,payerPhone:item.phone,payerStreet:item.street,payerNumber:item.address_number,payerComplement:item.address_complement,payerNeighborhood:item.neighborhood,payerCity:item.city,payerState:item.state,payerPostalCode:item.postal_code,payerUnit:item.unit},integration);
+      const invoice=await query<any>(`insert into invoices(id,condominium_id,user_id,amount_cents,due_date,reference_month,batch_id,status,provider,external_id,digitable_line,pdf_url) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,[randomUUID(),condominiumId,item.user_id,amountCents,item.due_date,batch.reference_month,batch.id,boleto.status==='issued'?'issued':'pending_provider',boleto.provider,boleto.externalId,boleto.digitableLine,boleto.pdfUrl]);
+      await query(`update billing_batch_items set status='issued',invoice_id=$1,amount_cents=$2,issues='[]'::jsonb where id=$3`,[invoice.rows[0].id,amountCents,item.id]);
+      await query(`update inter_issuance_guards set invoice_id=$1,reservation_key=null where payer_cpf=$2 and reservation_key=$3`,[invoice.rows[0].id,payerCpf,reservationKey]);
+      if(!hasOverride&&extra?.installmentIds.length) await query(`update unit_extra_charge_installments set status='applied',invoice_id=$1,applied_at=now() where id=any($2::uuid[])`,[invoice.rows[0].id,extra.installmentIds]);
+      issued+=1;
     }catch(error:any){failed+=1;if(reservationKey)await query(`delete from inter_issuance_guards where payer_cpf=$1 and reservation_key=$2 and invoice_id is null`,[String(item.cpf).replace(/\D/g,''),reservationKey]);const reason=issuanceErrorMessage(error);console.error('Falha na emissão do item do lote',{batchId:batch.id,itemId:item.id,code:error?.code||null,reason});failures.push({payerName:item.full_name||item.username||item.payer_name,reason});await query(`update billing_batch_items set status='failed',issues=$1 where id=$2`,[JSON.stringify([reason]),item.id]);}
   }
   const status=failed===0?'completed':issued===0?'partial':'partial';
   await query(`update billing_batches set status=$1 where id=$2`,[status,batch.id]);
   await query(`insert into billing_audit_events(id,condominium_id,batch_id,actor_id,event_type,details) values($1,$2,$3,$4,'bank_issuance_finished',$5)`,[randomUUID(),condominiumId,batch.id,req.user?.id,JSON.stringify({issued,failed})]);
+  await logAudit(req, 'config_enviar_cobrancas', 'issued', `Emitiu boletos do lote ${batch.id}: ${issued} com sucesso, ${failed} com falha`, { entityId: batch.id });
   const message=failed===0
     ? `${issued===1?'Boleto emitido':'Boletos emitidos'} com sucesso: ${issued}.`
     : issued===0
