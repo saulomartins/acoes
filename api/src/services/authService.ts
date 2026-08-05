@@ -107,7 +107,16 @@ export const refresh = async (refreshToken: string) => {
   );
   const session = sessionResult.rows[0];
 
-  if (!session || session.revoked_at || !(await bcrypt.compare(refreshToken, session.token_hash))) {
+  if (!session || !(await bcrypt.compare(refreshToken, session.token_hash))) {
+    return null;
+  }
+
+  if (session.revoked_at) {
+    // O hash bate com um token já rotacionado (revogado) — isso só acontece
+    // se alguém reapresentar um refresh token antigo que já foi trocado por
+    // um novo, sinal de que o token vazou. Resposta: derruba todas as
+    // sessões ativas do usuário, não só nega esta tentativa.
+    await query(`update refresh_tokens set revoked_at = now() where user_id = $1 and revoked_at is null`, [payload.sub]);
     return null;
   }
 

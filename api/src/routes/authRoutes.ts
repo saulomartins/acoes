@@ -16,6 +16,33 @@ const limit = (maximum: number, windowMs: number) => (req: Request, res: Respons
   if (entry.count > maximum) return res.status(429).json({ message: 'Muitas tentativas. Aguarde alguns minutos.' });
   return next();
 };
+
+// Bloqueio por conta (além do limite por IP acima): a senha inicial de
+// moradores é derivada de CPF/unidade (ver passwordRuleService), então um
+// limite só por IP não impede tentativas distribuídas contra a mesma conta.
+const LOGIN_MAX_FAILURES = 5;
+const LOGIN_FAILURE_WINDOW_MS = 15 * 60_000;
+const LOGIN_LOCKOUT_MS = 15 * 60_000;
+const loginFailuresByUsername = new Map<string, { count: number; windowResetAt: number; lockedUntil: number }>();
+
+const isLoginLocked = (username: string) => {
+  const entry = loginFailuresByUsername.get(username);
+  return !!entry && entry.lockedUntil > Date.now();
+};
+
+const registerLoginFailure = (username: string) => {
+  const now = Date.now();
+  const current = loginFailuresByUsername.get(username);
+  const entry = !current || current.windowResetAt <= now
+    ? { count: 0, windowResetAt: now + LOGIN_FAILURE_WINDOW_MS, lockedUntil: 0 }
+    : current;
+  entry.count += 1;
+  if (entry.count >= LOGIN_MAX_FAILURES) entry.lockedUntil = now + LOGIN_LOCKOUT_MS;
+  loginFailuresByUsername.set(username, entry);
+};
+
+const clearLoginFailures = (username: string) => loginFailuresByUsername.delete(username);
+
 router.post('/register', async (req, res) => {
   try {
     const { username, password } = req.body ?? {};
@@ -47,7 +74,7 @@ router.post('/register', async (req, res) => {
   }
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', limit(20, 15 * 60_000), async (req, res) => {
   try {
     const { username, password } = req.body ?? {};
 
@@ -55,11 +82,18 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'username and password are required' });
     }
 
+    const normalizedUsername = username.trim().toLowerCase();
+    if (isLoginLocked(normalizedUsername)) {
+      return res.status(429).json({ message: 'Muitas tentativas para este usuário. Aguarde alguns minutos e tente novamente.' });
+    }
+
     const response = await login(username, password);
     if (!response) {
+      registerLoginFailure(normalizedUsername);
       return res.status(401).json({ message: 'invalid credentials' });
     }
 
+    clearLoginFailures(normalizedUsername);
     return res.json(response);
   } catch (error) {
     console.error('Error on /auth/login', error);
