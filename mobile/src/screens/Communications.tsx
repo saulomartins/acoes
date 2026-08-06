@@ -12,8 +12,8 @@ import {
 import { apiRequest } from "../api/client";
 import { AuthContext } from "../context/AuthContext";
 import { AppButton, AppDialog, EmptyState, Panel } from "../ui/components";
-import ResponsiveShell from "../ui/ResponsiveShell";
 import { colors, layout } from "../ui/theme";
+import { useBreakpoint } from "../ui/responsive";
 import { emitNotificationsChanged } from "../services/notificationEvents";
 
 type Notice = {
@@ -50,6 +50,7 @@ const dateTime = (value: string) =>
   });
 
 export default function Communications({ navigation }: any) {
+  const { isDesktop } = useBreakpoint();
   const { user, userToken, pushStatus, pushError } = useContext(AuthContext);
   const manager = user?.role === "sindico" || user?.role === "subsindico";
   const [notices, setNotices] = useState<Notice[]>([]);
@@ -196,9 +197,9 @@ export default function Communications({ navigation }: any) {
   };
   const unread = notices.filter((item) => !item.read_at).length;
   return (
-    <ResponsiveShell activeRoute="Communications" navigation={navigation}>
+    <>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, isDesktop && styles.desktopCap]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         refreshControl={
@@ -446,7 +447,7 @@ export default function Communications({ navigation }: any) {
         {...dialog}
         onClose={() => setDialog((current) => ({ ...current, visible: false }))}
       />
-    </ResponsiveShell>
+    </>
   );
 }
 const styles = StyleSheet.create({
@@ -474,12 +475,12 @@ const styles = StyleSheet.create({
   noPerson: { color: colors.muted, fontSize: 14, padding: 12 },
   content: {
     width: "100%",
-    maxWidth: layout.contentMaxWidth,
     alignSelf: "center",
     padding: 28,
     gap: 18,
     paddingBottom: 70,
   },
+  desktopCap: { maxWidth: 860, alignSelf: "center", width: "100%" },
   heading: {
     flexDirection: "row",
     alignItems: "flex-start",

@@ -1,10 +1,11 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Alert, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
-import { AppButton, EmptyState, Panel } from '../ui/components';
+import { AppButton, AppDialog, EmptyState, Panel } from '../ui/components';
 import { colors } from '../ui/theme';
-import ResponsiveShell from '../ui/ResponsiveShell';
+import { useBreakpoint } from '../ui/responsive';
+import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
 
 type UserRole = 'admin_geral' | 'sindico' | 'subsindico' | 'proprietario' | 'inquilino';
 
@@ -27,6 +28,7 @@ type UserItem = {
   preferred_due_day?: 10 | 20;
   street?: string | null; address_number?: string | null; address_complement?: string | null;
   neighborhood?: string | null; city?: string | null; state?: string | null; postal_code?: string | null;
+  deleted_at?: string | null;
 };
 
 type UsersResponse = {
@@ -89,6 +91,13 @@ const formatPostalCode = (value: string) => {
   return digits.replace(/^(\d{5})(\d)/, '$1-$2');
 };
 
+const formatDate = (value?: string | null) => {
+  if (!value) return 'data desconhecida';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'data desconhecida';
+  return date.toLocaleDateString('pt-BR');
+};
+
 type ViaCepResponse = {
   cep?: string;
   logradouro?: string;
@@ -100,6 +109,7 @@ type ViaCepResponse = {
 };
 
 export default function Users({ navigation }: any) {
+  const { isMobile: mobile } = useBreakpoint();
   const { userToken, user } = useContext(AuthContext);
   const [items, setItems] = useState<UserItem[]>([]);
   const [username, setUsername] = useState('');
@@ -136,6 +146,23 @@ export default function Users({ navigation }: any) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<{ title: string; message: string; tone: 'info' | 'success' | 'error'; confirmLabel?: string; cancelLabel?: string; onConfirm?: () => void; scrollable?: boolean } | null>(null);
+  const [selectedForReset, setSelectedForReset] = useState<Set<string>>(new Set());
+  const [viewingDeleted, setViewingDeleted] = useState(false);
+  // Perfis adicionais (ex.: síndico que também é proprietário) da pessoa em
+  // edição — só faz sentido consultar/conceder para alguém já cadastrado.
+  const [personProfiles, setPersonProfiles] = useState<Array<{ id: string; role: UserRole; condominiumName: string | null }>>([]);
+  const [profilesLoading, setProfilesLoading] = useState(false);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
+  const [newProfileRole, setNewProfileRole] = useState<UserRole | ''>('');
+  const [newProfileUnitId, setNewProfileUnitId] = useState('');
+  const [grantingProfile, setGrantingProfile] = useState(false);
+  const isResidentRole = role === 'proprietario' || role === 'inquilino';
+  const isManagerRole = role === 'subsindico' || role === 'sindico';
+  const manager = user?.role === 'admin_geral' || user?.role === 'sindico' || user?.role === 'subsindico';
+  const canManageItem = (item: UserItem) => user?.role === 'admin_geral'
+    ? item.role === 'sindico' || item.role === 'subsindico'
+    : item.role === 'proprietario' || item.role === 'inquilino';
 
   const loadUnitTypes = useCallback(async (targetCondominiumId?: string) => {
     if (!userToken) return;
@@ -173,7 +200,8 @@ export default function Users({ navigation }: any) {
     setError(null);
     setSuccess(null);
     try {
-      const response = await apiRequest<UsersResponse>('/users', userToken);
+      const path = viewingDeleted ? '/users?deletedOnly=true' : '/users';
+      const response = await apiRequest<UsersResponse>(path, userToken);
       setItems(response.users);
       if (user?.role === 'admin_geral') {
         const condominiumResponse = await apiRequest<CondominiumResponse>('/condominiums', userToken);
@@ -193,7 +221,7 @@ export default function Users({ navigation }: any) {
     } finally {
       setIsLoading(false);
     }
-  }, [loadUnitTypes, user?.role, userToken]);
+  }, [loadUnitTypes, user?.role, userToken, viewingDeleted]);
 
   useEffect(() => {
     setFilterCondominiumId('');
@@ -238,9 +266,7 @@ export default function Users({ navigation }: any) {
     if (!userToken) return;
     if (!role) { setError('Selecione o perfil do usuário.'); return; }
     if (!username.trim()) { setError('Informe o usuário de acesso.'); return; }
-    if ((!editingId && password.length < 6) || (editingId && password.length > 0 && password.length < 6)) {
-      setError(editingId ? 'A nova senha deve ter pelo menos 6 caracteres ou ficar vazia para manter a atual.' : 'A senha inicial deve ter pelo menos 6 caracteres.'); return;
-    }
+    if (!editingId && !onlyDigits(cpf)) { setError('Informe o CPF — ele é necessário para gerar a senha inicial.'); return; }
     if (user?.role === 'admin_geral' && !condominiumId.trim()) { setError('Selecione o condomínio.'); return; }
     if (user?.role !== 'admin_geral' && (role === 'proprietario' || role === 'inquilino')) {
       if (!unitId) { setError('Selecione a unidade ou apartamento.'); return; }
@@ -250,11 +276,10 @@ export default function Users({ navigation }: any) {
     setIsLoading(true);
     setError(null);
     try {
-      await apiRequest(editingId ? `/users/${editingId}` : '/users', userToken, {
+      const response = await apiRequest<{ user: any; initialPassword?: string; emailSent?: boolean }>(editingId ? `/users/${editingId}` : '/users', userToken, {
         method: editingId ? 'PATCH' : 'POST',
         body: JSON.stringify({
           username: username.trim(),
-          password,
           role,
           condominiumId: user?.role === 'admin_geral' ? condominiumId.trim() : undefined,
           fullName: fullName.trim() || null,
@@ -271,6 +296,9 @@ export default function Users({ navigation }: any) {
           postalCode: onlyDigits(postalCode) || null,
         }),
       });
+      const createdName = fullName.trim() || username.trim();
+      const createdUsername = username.trim();
+      const createdEmail = email.trim();
       setUsername('');
       setPassword('');
       setFullName('');
@@ -287,7 +315,22 @@ export default function Users({ navigation }: any) {
       setCondominiumId('');
       setRole('');
       setEditingId(null);
-      setSuccess(editingId ? 'Cadastro atualizado.' : user?.role === 'admin_geral' ? 'Gestor cadastrado.' : 'Usuário cadastrado.');
+      if (response.initialPassword) {
+        const emailNote = response.emailSent
+          ? `E-mail enviado para ${createdEmail}.`
+          : createdEmail
+            ? 'Não foi possível enviar o e-mail — informe a senha manualmente.'
+            : 'Sem e-mail cadastrado — informe a senha manualmente.';
+        setDialog({
+          title: 'Senha inicial gerada',
+          message: `${createdName}\nUsuário: ${createdUsername}\nSenha inicial: ${response.initialPassword}\n\n${emailNote}\n\nAnote e informe ao morador — essa senha não será exibida novamente.`,
+          tone: 'success',
+          confirmLabel: 'Entendi',
+          onConfirm: () => setDialog(null),
+        });
+      } else {
+        setSuccess(editingId ? 'Cadastro atualizado.' : user?.role === 'admin_geral' ? 'Gestor cadastrado.' : 'Usuário cadastrado.');
+      }
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Falha ao cadastrar usuario');
@@ -296,8 +339,70 @@ export default function Users({ navigation }: any) {
     }
   };
 
+  const loadPersonProfiles = useCallback(async (personId: string) => {
+    if (!userToken) return;
+    setProfilesLoading(true);
+    setProfilesError(null);
+    try {
+      const response = await apiRequest<{ profiles: Array<{ id: string | null; role: UserRole; condominiumName: string | null }> }>(`/users/${personId}/profiles`, userToken);
+      // id null é o perfil padrão (a própria pessoa) — não é "removível" aqui, só os extras.
+      setPersonProfiles(response.profiles.filter((item): item is { id: string; role: UserRole; condominiumName: string | null } => item.id !== null));
+    } catch (e) {
+      setProfilesError(e instanceof Error ? e.message : 'Falha ao carregar perfis.');
+    } finally {
+      setProfilesLoading(false);
+    }
+  }, [userToken]);
+
+  const grantProfile = async (item: UserItem) => {
+    if (!userToken || !newProfileRole) return;
+    const isResident = newProfileRole === 'proprietario' || newProfileRole === 'inquilino';
+    const grantUnitId = item.unit_id || newProfileUnitId;
+    if (isResident && !grantUnitId) { setProfilesError('Selecione a unidade para o perfil de morador.'); return; }
+    setGrantingProfile(true);
+    setProfilesError(null);
+    try {
+      await apiRequest(`/users/${item.id}/profiles`, userToken, {
+        method: 'POST',
+        body: JSON.stringify({
+          role: newProfileRole,
+          unitId: isResident ? grantUnitId : undefined,
+          condominiumId: user?.role === 'admin_geral' ? item.condominium_id : undefined,
+        }),
+      });
+      setNewProfileRole('');
+      setNewProfileUnitId('');
+      setSuccess('Perfil adicional concedido.');
+      await loadPersonProfiles(item.id);
+    } catch (e) {
+      setProfilesError(e instanceof Error ? e.message : 'Falha ao conceder perfil.');
+    } finally {
+      setGrantingProfile(false);
+    }
+  };
+
+  const revokeProfile = async (item: UserItem, profileId: string) => {
+    if (!userToken) return;
+    setGrantingProfile(true);
+    setProfilesError(null);
+    try {
+      await apiRequest(`/users/${item.id}/profiles/${profileId}`, userToken, { method: 'DELETE' });
+      setSuccess('Perfil adicional removido.');
+      await loadPersonProfiles(item.id);
+    } catch (e) {
+      setProfilesError(e instanceof Error ? e.message : 'Falha ao remover perfil.');
+    } finally {
+      setGrantingProfile(false);
+    }
+  };
+
   const startEditing = (item: UserItem) => {
     setEditingId(item.id);
+    setPersonProfiles([]);
+    setNewProfileRole('');
+    setNewProfileUnitId('');
+    setProfilesError(null);
+    void loadPersonProfiles(item.id);
     setUsername(item.username);
     setPassword('');
     setFullName(item.full_name || '');
@@ -319,20 +424,171 @@ export default function Users({ navigation }: any) {
 
   const cancelEditing = () => {
     setEditingId(null); setUsername(''); setPassword(''); setFullName(''); setCpf(''); setEmail(''); setPhone(''); setUnit(''); setUnitId(''); setIsRepresentative(false); setBillingExempt(false); setPreferredDueDay(10); setCondominiumId(''); setUnitTypeId('');
+    setPersonProfiles([]); setNewProfileRole(''); setNewProfileUnitId(''); setProfilesError(null);
     setStreet(''); setAddressNumber(''); setAddressComplement(''); setNeighborhood(''); setCity(''); setAddressState(''); setPostalCode('');
     setRole('');
   };
 
   const selectRole = (nextRole: UserRole) => {
     if (nextRole !== 'proprietario') { setRole(nextRole); return; }
-    Alert.alert('Confirmar perfil Proprietário','Você tem certeza? O perfil Proprietário poderá visualizar o saldo bancário mensal do condomínio.',[
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Sim, selecionar', onPress: () => setRole('proprietario') },
-    ]);
+    setDialog({
+      title: 'Confirmar perfil Proprietário',
+      message: 'Você tem certeza? O perfil Proprietário poderá visualizar o saldo bancário mensal do condomínio.',
+      tone: 'info',
+      confirmLabel: 'Sim, selecionar',
+      cancelLabel: 'Cancelar',
+      onConfirm: () => { setDialog(null); setRole('proprietario'); },
+    });
+  };
+
+  const toggleSelectedForReset = (id: string) => setSelectedForReset((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const formatResetMessage = (results: Array<{ fullName: string | null; username: string; newPassword: string; emailSent: boolean }>, skipped: Array<{ fullName: string | null; reason: string }>) => {
+    const lines = results.map((r) => `${r.fullName || r.username} (${r.username}): ${r.newPassword}${r.emailSent ? ' · e-mail enviado' : ''}`);
+    const skipLines = skipped.map((s) => `${s.fullName || 'Pessoa'}: não foi possível gerar — ${s.reason}`);
+    return [...lines, ...skipLines].join('\n') || 'Nenhuma senha foi alterada.';
+  };
+
+  const performReset = async (payload: ({ role: 'proprietario' | 'inquilino' | 'sindico' | 'subsindico' | 'all' } | { ids: string[] }) & { condominiumId?: string }) => {
+    if (!userToken) return;
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const response = await apiRequest<{ results: Array<{ id: string; fullName: string | null; username: string; newPassword: string; emailSent: boolean }>; skipped: Array<{ id: string; fullName: string | null; reason: string }> }>('/users/reset-password', userToken, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      setSelectedForReset(new Set());
+      setDialog({
+        title: 'Senhas atualizadas',
+        message: formatResetMessage(response.results, response.skipped),
+        tone: 'success',
+        confirmLabel: 'Entendi',
+        scrollable: true,
+        onConfirm: () => setDialog(null),
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Falha ao resetar senha.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const confirmResetAllResidents = () => {
+    const count = items.filter((item) => item.role === 'proprietario' || item.role === 'inquilino').length;
+    setDialog({
+      title: 'Confirmar reset em massa',
+      message: `Isso vai gerar uma nova senha inicial para todos os proprietários e inquilinos deste condomínio (${count}). Continuar?`,
+      tone: 'error',
+      confirmLabel: 'Sim, resetar',
+      cancelLabel: 'Cancelar',
+      onConfirm: () => { setDialog(null); performReset({ role: 'all' }); },
+    });
+  };
+
+  const confirmResetAllManagers = () => {
+    if (!filterCondominiumId || filterCondominiumId === '__unlinked__') {
+      setError('Selecione um condomínio no filtro para resetar em massa.');
+      return;
+    }
+    const count = items.filter((item) => item.condominium_id === filterCondominiumId && (item.role === 'sindico' || item.role === 'subsindico')).length;
+    setDialog({
+      title: 'Confirmar reset em massa',
+      message: `Isso vai gerar uma nova senha inicial para todos os síndicos e subsíndicos de "${condominiumName(filterCondominiumId)}" (${count}). Continuar?`,
+      tone: 'error',
+      confirmLabel: 'Sim, resetar',
+      cancelLabel: 'Cancelar',
+      onConfirm: () => { setDialog(null); performReset({ role: 'all', condominiumId: filterCondominiumId }); },
+    });
+  };
+
+  const confirmResetSelected = () => {
+    const ids = [...selectedForReset];
+    if (!ids.length) return;
+    if (user?.role === 'admin_geral' && (!filterCondominiumId || filterCondominiumId === '__unlinked__')) {
+      setError('Selecione um condomínio no filtro para resetar os selecionados.');
+      return;
+    }
+    setDialog({
+      title: 'Confirmar reset de senha',
+      message: `Isso vai gerar uma nova senha inicial para ${ids.length} pessoa(s) selecionada(s). Continuar?`,
+      tone: 'error',
+      confirmLabel: 'Sim, resetar',
+      cancelLabel: 'Cancelar',
+      onConfirm: () => { setDialog(null); performReset(user?.role === 'admin_geral' ? { ids, condominiumId: filterCondominiumId } : { ids }); },
+    });
+  };
+
+  const confirmResetOne = (item: UserItem) => {
+    setDialog({
+      title: 'Confirmar reset de senha',
+      message: `Gerar uma nova senha inicial para ${item.full_name || item.username}?`,
+      tone: 'error',
+      confirmLabel: 'Sim, resetar',
+      cancelLabel: 'Cancelar',
+      onConfirm: () => { setDialog(null); performReset(user?.role === 'admin_geral' ? { ids: [item.id], condominiumId: item.condominium_id || undefined } : { ids: [item.id] }); },
+    });
+  };
+
+  const runManagerAction = async (path: string, method: 'POST' | 'DELETE', successMessage: string) => {
+    if (!userToken) return;
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await apiRequest(path, userToken, { method });
+      setSuccess(successMessage);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Falha ao processar a solicitação.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const confirmSoftDelete = (item: UserItem) => {
+    setDialog({
+      title: 'Confirmar exclusão lógica',
+      message: `Excluir logicamente ${item.full_name || item.username}? A pessoa deixa de aparecer na lista de ativos e não consegue mais entrar no app, mas o cadastro fica guardado e pode ser reativado depois na aba "Excluídos".`,
+      tone: 'error',
+      confirmLabel: 'Excluir',
+      cancelLabel: 'Cancelar',
+      onConfirm: () => { setDialog(null); runManagerAction(`/users/${item.id}/soft-delete`, 'POST', 'Pessoa excluída logicamente.'); },
+    });
+  };
+
+  const confirmHardDelete = (item: UserItem) => {
+    const isResidentItem = item.role === 'proprietario' || item.role === 'inquilino';
+    const consequence = isResidentItem
+      ? 'O vínculo com o condomínio e a unidade, os débitos, o histórico de acordos e os avisos/comunicações desta pessoa também serão apagados.'
+      : 'Se essa pessoa já respondeu chamados de moradores, essas respostas também serão apagadas do histórico de conversa.';
+    setDialog({
+      title: 'Confirmar exclusão física',
+      message: `Excluir PERMANENTEMENTE ${item.full_name || item.username}? Esta ação não pode ser desfeita. ${consequence}`,
+      tone: 'error',
+      confirmLabel: 'Excluir para sempre',
+      cancelLabel: 'Cancelar',
+      onConfirm: () => { setDialog(null); runManagerAction(`/users/${item.id}`, 'DELETE', 'Pessoa excluída permanentemente.'); },
+    });
+  };
+
+  const confirmReactivate = (item: UserItem) => {
+    setDialog({
+      title: 'Reativar pessoa',
+      message: `Reativar ${item.full_name || item.username}? O login volta a funcionar e a pessoa volta a aparecer na lista de ativos.`,
+      tone: 'info',
+      confirmLabel: 'Reativar',
+      cancelLabel: 'Cancelar',
+      onConfirm: () => { setDialog(null); runManagerAction(`/users/${item.id}/reactivate`, 'POST', 'Pessoa reativada.'); },
+    });
   };
 
   return (
-    <ResponsiveShell activeRoute="Users" navigation={navigation}>
     <ScrollView
       contentContainerStyle={styles.container}
       refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} />}
@@ -347,113 +603,199 @@ export default function Users({ navigation }: any) {
 
       <Panel>
         <View style={styles.formTitleRow}><Text style={styles.panelTitle}>{editingId ? 'Editar pessoa' : 'Novo usuário'}</Text>{editingId ? <Pressable onPress={cancelEditing} style={styles.cancelEdit}><Text style={styles.cancelEditText}>Cancelar edição</Text></Pressable> : null}</View>
-        <TextInput placeholder="Usuário de acesso único" value={username} onChangeText={setUsername} style={styles.input} autoCapitalize="none" />
-        <Text style={styles.fieldHint}>Este nome será usado no login e não pode ser igual ao de outro usuário.</Text>
-        <TextInput placeholder={editingId ? 'Nova senha (deixe vazio para manter)' : 'Senha inicial'} value={password} onChangeText={setPassword} secureTextEntry style={styles.input} />
-        <TextInput placeholder="Nome completo" value={fullName} onChangeText={setFullName} style={styles.input} />
-        <TextInput
-          placeholder="CPF ou CNPJ"
-          value={cpf}
-          onChangeText={(value) => setCpf(formatCpf(value))}
-          style={styles.input}
-          keyboardType="number-pad"
-          maxLength={18}
-        />
-        {user?.role === 'admin_geral' ? (
-          <View style={styles.condominiumPicker}>
-            <Text style={styles.label}>Condomínio que o gestor vai administrar</Text>
-            {condominiums.length === 0 ? (
-              <View style={styles.helperBox}>
-                <Text style={styles.helperText}>Cadastre um condomínio antes de criar o gestor.</Text>
-              </View>
-            ) : (
-              condominiums.map((item) => (
-                <Pressable
-                  key={item.id}
-                  onPress={() => setCondominiumId(item.id)}
-                  style={[styles.condominiumOption, condominiumId === item.id && styles.condominiumOptionActive]}
-                >
-                  <View style={styles.condominiumOptionTop}>
-                    <Text style={[styles.condominiumName, condominiumId === item.id && styles.condominiumNameActive]}>{item.name}</Text>
-                    <Text style={[styles.selectBadge, condominiumId === item.id && styles.selectBadgeActive]}>
-                      {condominiumId === item.id ? 'Selecionado' : 'Selecionar'}
-                    </Text>
+        {editingId ? (() => {
+          const editingItem = items.find((entry) => entry.id === editingId);
+          if (!editingItem) return null;
+          const heldRoles = new Set<UserRole>([editingItem.role, ...personProfiles.map((profile) => profile.role)]);
+          const grantableRoles = roles.filter((item) => (user?.role === 'admin_geral' ? item.value === 'sindico' || item.value === 'subsindico' : item.value === 'subsindico' || item.value === 'proprietario' || item.value === 'inquilino') && !heldRoles.has(item.value));
+          const needsUnitPicker = (newProfileRole === 'proprietario' || newProfileRole === 'inquilino') && !editingItem.unit_id;
+          return (
+            <View style={styles.profilesPanel}>
+              <Text style={styles.profilesPanelTitle}>Perfis desta pessoa</Text>
+              <Text style={styles.fieldHint}>Um mesmo usuário de acesso pode acumular mais de um perfil (ex.: síndico que também é proprietário). Ao entrar, a pessoa escolhe com qual perfil usar o app.</Text>
+
+              <View style={styles.profilesList}>
+                <View style={styles.profileChip}><Text style={styles.profileChipText}>{roleLabel(editingItem.role)} (padrão)</Text></View>
+                {profilesLoading ? <Text style={styles.fieldHint}>Carregando perfis...</Text> : personProfiles.map((profile) => (
+                  <View key={profile.id} style={styles.profileChip}>
+                    <Text style={styles.profileChipText}>{roleLabel(profile.role)}</Text>
+                    <Pressable onPress={() => revokeProfile(editingItem, profile.id)} disabled={grantingProfile}><Text style={styles.profileChipRemove}>Remover</Text></Pressable>
                   </View>
-                  <Text style={[styles.condominiumMeta, condominiumId === item.id && styles.condominiumMetaActive]}>
-                    {item.address || item.cnpj || 'Dados complementares nao informados'}
-                  </Text>
-                </Pressable>
-              ))
-            )}
+                ))}
+              </View>
+
+              {profilesError ? <Text style={styles.error}>{profilesError}</Text> : null}
+
+              {grantableRoles.length ? (
+                <View style={styles.profileGrantForm}>
+                  <Text style={styles.label}>Conceder novo perfil</Text>
+                  <View style={styles.roleGrid}>
+                    {grantableRoles.map((item) => (
+                      <Pressable key={item.value} onPress={() => setNewProfileRole(item.value)} style={[styles.roleButton, newProfileRole === item.value && styles.roleButtonActive]}>
+                        <Text style={[styles.roleText, newProfileRole === item.value && styles.roleTextActive]}>{item.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  {needsUnitPicker ? (
+                    managedUnits.length === 0 ? <View style={styles.helperBox}><Text style={styles.helperText}>Cadastre blocos e apartamentos antes de conceder um perfil de morador.</Text></View> : Platform.OS === 'web' ? React.createElement('select' as any, {
+                      value: newProfileUnitId,
+                      onChange: (event: any) => setNewProfileUnitId(event.target.value),
+                      style: { width: '100%', minHeight: 52, border: `1px solid ${colors.border}`, borderRadius: 8, padding: '0 12px', marginTop: 10, marginBottom: 10, backgroundColor: '#fff', color: colors.ink },
+                    }, [React.createElement('option' as any, { key: '', value: '' }, 'Selecione a unidade'), ...managedUnits.map((item) => React.createElement('option' as any, { key: item.id, value: item.id }, `${item.block_name} · Apartamento ${item.number}`))]) : (
+                      <View style={styles.roleGrid}>
+                        {managedUnits.map((item) => (
+                          <Pressable key={item.id} onPress={() => setNewProfileUnitId(item.id)} style={[styles.roleButton, newProfileUnitId === item.id && styles.roleButtonActive]}>
+                            <Text style={[styles.roleText, newProfileUnitId === item.id && styles.roleTextActive]}>{item.block_name} · {item.number}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )
+                  ) : null}
+                  <AppButton title={grantingProfile ? 'Concedendo...' : 'Conceder perfil'} onPress={() => grantProfile(editingItem)} disabled={grantingProfile || !newProfileRole || (needsUnitPicker && !newProfileUnitId)} variant="secondary" />
+                </View>
+              ) : null}
+            </View>
+          );
+        })() : null}
+        <FormGrid columns={{ mobile: 1, tablet: 2, desktop: 2 }}>
+          <View>
+            <TextInput placeholder="Usuário de acesso único" value={username} onChangeText={setUsername} style={styles.input} autoCapitalize="none" />
+            <Text style={styles.fieldHint}>Este nome será usado no login e não pode ser igual ao de outro usuário.</Text>
           </View>
+          <View>
+            <Text style={styles.fieldHint}>{editingId
+              ? 'A senha não é alterada aqui — use "Resetar senha" no card da pessoa.'
+              : isManagerRole
+                ? 'A senha inicial será gerada automaticamente (6 primeiros números do CPF) e exibida após salvar.'
+                : isResidentRole
+                  ? 'A senha inicial será gerada automaticamente (número do apartamento + 4 primeiros números do CPF) e exibida após salvar.'
+                  : 'A senha inicial será gerada automaticamente com base no CPF e exibida após salvar.'}</Text>
+          </View>
+          <View>
+            <TextInput placeholder="Nome completo" value={fullName} onChangeText={setFullName} style={styles.input} />
+          </View>
+          <View>
+            <TextInput
+              placeholder="CPF ou CNPJ"
+              value={cpf}
+              onChangeText={(value) => setCpf(formatCpf(value))}
+              style={styles.input}
+              keyboardType="number-pad"
+              maxLength={18}
+            />
+          </View>
+        </FormGrid>
+        {user?.role === 'admin_geral' ? (
+          <FormFieldFull>
+            <View style={styles.condominiumPicker}>
+              <Text style={styles.label}>Condomínio que o gestor vai administrar</Text>
+              {condominiums.length === 0 ? (
+                <View style={styles.helperBox}>
+                  <Text style={styles.helperText}>Cadastre um condomínio antes de criar o gestor.</Text>
+                </View>
+              ) : (
+                condominiums.map((item) => (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => setCondominiumId(item.id)}
+                    style={[styles.condominiumOption, condominiumId === item.id && styles.condominiumOptionActive]}
+                  >
+                    <View style={styles.condominiumOptionTop}>
+                      <Text style={[styles.condominiumName, condominiumId === item.id && styles.condominiumNameActive]}>{item.name}</Text>
+                      <Text style={[styles.selectBadge, condominiumId === item.id && styles.selectBadgeActive]}>
+                        {condominiumId === item.id ? 'Selecionado' : 'Selecionar'}
+                      </Text>
+                    </View>
+                    <Text style={[styles.condominiumMeta, condominiumId === item.id && styles.condominiumMetaActive]}>
+                      {item.address || item.cnpj || 'Dados complementares nao informados'}
+                    </Text>
+                  </Pressable>
+                ))
+              )}
+            </View>
+          </FormFieldFull>
         ) : null}
         <Text style={styles.label}>Perfil *</Text>
-        <View style={styles.roleGrid}>
-          {roles.filter((item) => user?.role === 'admin_geral' ? item.value === 'sindico' || item.value === 'subsindico' : item.value === 'subsindico' || item.value === 'proprietario' || item.value === 'inquilino').map((item) => (
-            <Pressable key={item.value} onPress={() => selectRole(item.value)} style={[styles.roleButton, role === item.value && styles.roleButtonActive]}>
-              <Text style={[styles.roleText, role === item.value && styles.roleTextActive]}>{item.label}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <FormFieldFull>
+          <View style={styles.roleGrid}>
+            {roles.filter((item) => user?.role === 'admin_geral' ? item.value === 'sindico' || item.value === 'subsindico' : item.value === 'subsindico' || item.value === 'proprietario' || item.value === 'inquilino').map((item) => (
+              <Pressable key={item.value} onPress={() => selectRole(item.value)} style={[styles.roleButton, role === item.value && styles.roleButtonActive]}>
+                <Text style={[styles.roleText, role === item.value && styles.roleTextActive]}>{item.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </FormFieldFull>
         {!role ? <Text style={styles.fieldHint}>Selecione o perfil para continuar o cadastro e informar a unidade.</Text> : null}
 
         {user?.role !== 'admin_geral' ? (
-          <View style={styles.condominiumPicker}>
-            <Text style={styles.label}>Geração de boleto</Text>
-            <Pressable onPress={() => setBillingExempt((value) => !value)} style={[styles.representativeOption, billingExempt && styles.exemptOptionActive]}>
-              <Text style={[styles.roleText, billingExempt && styles.roleTextActive]}>{billingExempt ? '✓ Pessoa isenta de boleto' : 'Pessoa não isenta — gerar boletos normalmente'}</Text>
-            </Pressable>
-            <Text style={styles.fieldHint}>{billingExempt ? 'Esta pessoa não aparecerá para geração de boletos.' : 'A pessoa poderá receber cobranças conforme a tipologia da unidade.'}</Text>
-            {!billingExempt ? <><Text style={styles.label}>Dia preferido para pagamento</Text><View style={styles.roleGrid}>{([10,20] as const).map(day=><Pressable key={day} onPress={()=>setPreferredDueDay(day)} style={[styles.roleButton,preferredDueDay===day&&styles.roleButtonActive]}><Text style={[styles.roleText,preferredDueDay===day&&styles.roleTextActive]}>Dia {day}</Text></Pressable>)}</View></> : null}
-          </View>
-        ) : null}
-        {user?.role !== 'admin_geral' ? (
-          <View style={styles.condominiumPicker}>
-            <Text style={styles.label}>Unidade / apartamento</Text>
-            {managedUnits.length === 0 ? <View style={styles.helperBox}><Text style={styles.helperText}>Cadastre blocos e apartamentos antes de cadastrar o morador.</Text></View> : Platform.OS === 'web' ? React.createElement('select' as any, {
-              value: unitId,
-              onChange: (event: any) => setUnitId(event.target.value),
-              style: { width: '100%', minHeight: 52, border: `1px solid ${colors.border}`, borderRadius: 8, padding: '0 12px', marginBottom: 10, backgroundColor: '#fff', color: colors.ink },
-            }, [React.createElement('option' as any, { key: '', value: '' }, 'Selecione a unidade'), ...managedUnits.map((item) => React.createElement('option' as any, { key: item.id, value: item.id }, `${item.block_name} · Apartamento ${item.number} · ${item.unit_type_name || 'Sem tipologia'}`))]) : managedUnits.map((item) => (
-              <Pressable key={item.id} onPress={() => setUnitId(item.id)} style={[styles.condominiumOption, unitId === item.id && styles.condominiumOptionActive]}>
-                <View style={styles.condominiumOptionTop}><Text style={[styles.condominiumName, unitId === item.id && styles.condominiumNameActive]}>{item.block_name} · Apartamento {item.number}</Text><Text style={[styles.selectBadge, unitId === item.id && styles.selectBadgeActive]}>{item.unit_type_name || 'Sem tipologia'}</Text></View>
+          <FormFieldFull>
+            <View style={styles.condominiumPicker}>
+              <Text style={styles.label}>Geração de boleto</Text>
+              <Pressable onPress={() => setBillingExempt((value) => !value)} style={[styles.representativeOption, billingExempt && styles.exemptOptionActive]}>
+                <Text style={[styles.roleText, billingExempt && styles.roleTextActive]}>{billingExempt ? '✓ Pessoa isenta de boleto' : 'Pessoa não isenta — gerar boletos normalmente'}</Text>
               </Pressable>
-            ))}
-            {unitId ? <Pressable onPress={() => setIsRepresentative((value) => !value)} style={[styles.representativeOption, isRepresentative && styles.representativeOptionActive]}><Text style={[styles.roleText, isRepresentative && styles.roleTextActive]}>{isRepresentative ? '✓ ' : ''}Morador representante desta unidade</Text></Pressable> : null}
-          </View>
-        ) : null}
-        {user?.role !== 'admin_geral' ? (
-          <View style={styles.addressPanel}>
-            <Text style={styles.label}>Endereço do pagador para emissão do boleto</Text>
-            <View style={styles.postalCodeRow}>
-              <TextInput
-                placeholder="CEP"
-                value={postalCode}
-                onChangeText={(value) => setPostalCode(formatPostalCode(value))}
-                onBlur={() => { if (onlyDigits(postalCode).length === 8 && !street) lookupPostalCode(); }}
-                style={[styles.input, styles.postalCodeInput]}
-                keyboardType="number-pad"
-                maxLength={9}
-              />
-              <Pressable onPress={lookupPostalCode} disabled={isLookingUpPostalCode} style={[styles.postalCodeButton, isLookingUpPostalCode && styles.postalCodeButtonDisabled]}>
-                <Text style={styles.postalCodeButtonText}>{isLookingUpPostalCode ? 'Buscando...' : 'Buscar CEP'}</Text>
-              </Pressable>
+              <Text style={styles.fieldHint}>{billingExempt ? 'Esta pessoa não aparecerá para geração de boletos.' : 'A pessoa poderá receber cobranças conforme a tipologia da unidade.'}</Text>
+              {!billingExempt ? <><Text style={styles.label}>Dia preferido para pagamento</Text><View style={styles.roleGrid}>{([10,20] as const).map(day=><Pressable key={day} onPress={()=>setPreferredDueDay(day)} style={[styles.roleButton,preferredDueDay===day&&styles.roleButtonActive]}><Text style={[styles.roleText,preferredDueDay===day&&styles.roleTextActive]}>Dia {day}</Text></Pressable>)}</View></> : null}
             </View>
-            <TextInput placeholder="Rua / avenida" value={street} onChangeText={setStreet} style={styles.input} />
-            <View style={styles.addressRow}><TextInput placeholder="Número" value={addressNumber} onChangeText={setAddressNumber} style={[styles.input, styles.addressNumber]} /><TextInput placeholder="Complemento" value={addressComplement} onChangeText={setAddressComplement} style={[styles.input, styles.addressComplement]} /></View>
-            <TextInput placeholder="Bairro" value={neighborhood} onChangeText={setNeighborhood} style={styles.input} />
-            <View style={styles.addressRow}><TextInput placeholder="Cidade" value={city} onChangeText={setCity} style={[styles.input, styles.addressComplement]} /><TextInput placeholder="UF" value={addressState} onChangeText={(value) => setAddressState(value.slice(0, 2).toUpperCase())} style={[styles.input, styles.stateInput]} autoCapitalize="characters" /></View>
-          </View>
+          </FormFieldFull>
         ) : null}
-        <TextInput placeholder="Email" value={email} onChangeText={setEmail} style={styles.input} autoCapitalize="none" />
-        <TextInput
-          placeholder="Telefone"
-          value={phone}
-          onChangeText={(value) => setPhone(formatPhone(value))}
-          style={styles.input}
-          keyboardType="phone-pad"
-          maxLength={15}
-        />
+        {user?.role !== 'admin_geral' ? (
+          <FormFieldFull>
+            <View style={styles.condominiumPicker}>
+              <Text style={styles.label}>Unidade / apartamento</Text>
+              {managedUnits.length === 0 ? <View style={styles.helperBox}><Text style={styles.helperText}>Cadastre blocos e apartamentos antes de cadastrar o morador.</Text></View> : Platform.OS === 'web' ? React.createElement('select' as any, {
+                value: unitId,
+                onChange: (event: any) => setUnitId(event.target.value),
+                style: { width: '100%', minHeight: 52, border: `1px solid ${colors.border}`, borderRadius: 8, padding: '0 12px', marginBottom: 10, backgroundColor: '#fff', color: colors.ink },
+              }, [React.createElement('option' as any, { key: '', value: '' }, 'Selecione a unidade'), ...managedUnits.map((item) => React.createElement('option' as any, { key: item.id, value: item.id }, `${item.block_name} · Apartamento ${item.number} · ${item.unit_type_name || 'Sem tipologia'}`))]) : managedUnits.map((item) => (
+                <Pressable key={item.id} onPress={() => setUnitId(item.id)} style={[styles.condominiumOption, unitId === item.id && styles.condominiumOptionActive]}>
+                  <View style={styles.condominiumOptionTop}><Text style={[styles.condominiumName, unitId === item.id && styles.condominiumNameActive]}>{item.block_name} · Apartamento {item.number}</Text><Text style={[styles.selectBadge, unitId === item.id && styles.selectBadgeActive]}>{item.unit_type_name || 'Sem tipologia'}</Text></View>
+                </Pressable>
+              ))}
+              {unitId ? <Pressable onPress={() => setIsRepresentative((value) => !value)} style={[styles.representativeOption, isRepresentative && styles.representativeOptionActive]}><Text style={[styles.roleText, isRepresentative && styles.roleTextActive]}>{isRepresentative ? '✓ ' : ''}Morador representante desta unidade</Text></Pressable> : null}
+            </View>
+          </FormFieldFull>
+        ) : null}
+        {user?.role !== 'admin_geral' ? (
+          <FormFieldFull>
+            <View style={styles.addressPanel}>
+              <Text style={styles.label}>Endereço do pagador para emissão do boleto</Text>
+              <View style={[styles.postalCodeRow, mobile && styles.postalCodeRowMobile]}>
+                <TextInput
+                  placeholder="CEP"
+                  value={postalCode}
+                  onChangeText={(value) => setPostalCode(formatPostalCode(value))}
+                  onBlur={() => { if (onlyDigits(postalCode).length === 8 && !street) lookupPostalCode(); }}
+                  style={[styles.input, styles.postalCodeInput]}
+                  keyboardType="number-pad"
+                  maxLength={9}
+                />
+                <Pressable onPress={lookupPostalCode} disabled={isLookingUpPostalCode} style={[styles.postalCodeButton, isLookingUpPostalCode && styles.postalCodeButtonDisabled, mobile && styles.postalCodeButtonMobile]}>
+                  <Text style={styles.postalCodeButtonText}>{isLookingUpPostalCode ? 'Buscando...' : 'Buscar CEP'}</Text>
+                </Pressable>
+              </View>
+              <TextInput placeholder="Rua / avenida" value={street} onChangeText={setStreet} style={styles.input} />
+              <View style={[styles.addressRow, mobile && styles.addressRowMobile]}><TextInput placeholder="Número" value={addressNumber} onChangeText={setAddressNumber} style={[styles.input, styles.addressNumber, mobile && styles.addressNumberMobile]} /><TextInput placeholder="Complemento" value={addressComplement} onChangeText={setAddressComplement} style={[styles.input, styles.addressComplement, mobile && styles.addressComplementMobile]} /></View>
+              <TextInput placeholder="Bairro" value={neighborhood} onChangeText={setNeighborhood} style={styles.input} />
+              <View style={[styles.addressRow, mobile && styles.addressRowMobile]}><TextInput placeholder="Cidade" value={city} onChangeText={setCity} style={[styles.input, styles.addressComplement, mobile && styles.addressComplementMobile]} /><TextInput placeholder="UF" value={addressState} onChangeText={(value) => setAddressState(value.slice(0, 2).toUpperCase())} style={[styles.input, styles.stateInput, mobile && styles.stateInputMobile]} autoCapitalize="characters" /></View>
+            </View>
+          </FormFieldFull>
+        ) : null}
+        <FormGrid columns={{ mobile: 1, tablet: 2, desktop: 2 }}>
+          <View>
+            <TextInput placeholder="Email" value={email} onChangeText={setEmail} style={styles.input} autoCapitalize="none" />
+          </View>
+          <View>
+            <TextInput
+              placeholder="Telefone"
+              value={phone}
+              onChangeText={(value) => setPhone(formatPhone(value))}
+              style={styles.input}
+              keyboardType="phone-pad"
+              maxLength={15}
+            />
+          </View>
+        </FormGrid>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {success ? <Text style={styles.success}>{success}</Text> : null}
@@ -521,15 +863,46 @@ export default function Users({ navigation }: any) {
           </> : null}
         </View>
 
+      {user?.role === 'admin_geral' ? (
+        <View style={styles.resetPanel}>
+          <Text style={styles.filterTitle}>Reset de senha em massa</Text>
+          <Text style={styles.filterSubtitle}>Gera uma nova senha inicial pela regra padrão (6 primeiros números do CPF). Selecione um condomínio no filtro acima para habilitar o reset de todos.</Text>
+          <View style={styles.resetActions}>
+            <AppButton title="Resetar todos deste condomínio" onPress={confirmResetAllManagers} variant="secondary" disabled={!filterCondominiumId || filterCondominiumId === '__unlinked__'} />
+            <AppButton title={`Resetar selecionados (${selectedForReset.size})`} onPress={confirmResetSelected} disabled={selectedForReset.size === 0} />
+          </View>
+        </View>
+      ) : user?.role === 'sindico' || user?.role === 'subsindico' ? (
+        <View style={styles.resetPanel}>
+          <Text style={styles.filterTitle}>Reset de senha em massa</Text>
+          <Text style={styles.filterSubtitle}>Gera uma nova senha inicial pela regra padrão (número do apartamento + 4 primeiros números do CPF).</Text>
+          <View style={styles.resetActions}>
+            <AppButton title="Resetar todos os moradores" onPress={confirmResetAllResidents} variant="secondary" />
+            <AppButton title={`Resetar selecionados (${selectedForReset.size})`} onPress={confirmResetSelected} disabled={selectedForReset.size === 0} />
+          </View>
+        </View>
+      ) : null}
+
+      {manager ? (
+        <View style={styles.tabRow}>
+          <Pressable onPress={() => setViewingDeleted(false)} style={[styles.tabButton, !viewingDeleted && styles.tabButtonActive]}>
+            <Text style={[styles.tabButtonText, !viewingDeleted && styles.tabButtonTextActive]}>Ativos</Text>
+          </Pressable>
+          <Pressable onPress={() => setViewingDeleted(true)} style={[styles.tabButton, viewingDeleted && styles.tabButtonActive]}>
+            <Text style={[styles.tabButtonText, viewingDeleted && styles.tabButtonTextActive]}>Excluídos</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{user?.role === 'admin_geral' ? 'Gestores cadastrados' : 'Cadastrados'}</Text>
+        <Text style={styles.sectionTitle}>{viewingDeleted ? 'Excluídos logicamente' : user?.role === 'admin_geral' ? 'Gestores cadastrados' : 'Cadastrados'}</Text>
         <Text style={styles.counter}>{filteredItems.length}/{items.length}</Text>
       </View>
 
       {filteredItems.length === 0 ? (
-        <EmptyState title={items.length === 0 ? 'Nenhum usuário ainda' : 'Nenhum usuário encontrado'} description={items.length === 0 ? 'Os usuários cadastrados aparecerão aqui.' : 'Altere ou limpe os filtros para visualizar outros cadastros.'} />
+        <EmptyState title={items.length === 0 ? (viewingDeleted ? 'Nenhum excluído' : 'Nenhum usuário ainda') : 'Nenhum usuário encontrado'} description={items.length === 0 ? (viewingDeleted ? 'Pessoas excluídas logicamente aparecerão aqui.' : 'Os usuários cadastrados aparecerão aqui.') : 'Altere ou limpe os filtros para visualizar outros cadastros.'} />
       ) : (
-        <View style={styles.list}>
+        <CardGrid columns={{ mobile: 1, tablet: 2, desktop: 3 }}>
           {filteredItems.map((item) => (
             <View key={item.id} style={styles.card}>
               <View style={styles.cardTop}>
@@ -546,18 +919,42 @@ export default function Users({ navigation }: any) {
               <Text style={styles.cardLine}>
                 {item.email || (item.phone ? formatPhone(item.phone) : 'Contato nao informado')}
               </Text>
-              <Pressable onPress={() => startEditing(item)} style={styles.editButton}><Text style={styles.editButtonText}>Editar pessoa</Text></Pressable>
+              {viewingDeleted ? (
+                <>
+                  <Text style={styles.cardLine}>Excluído em: {formatDate(item.deleted_at)}</Text>
+                  {canManageItem(item) ? <Pressable onPress={() => confirmReactivate(item)} style={styles.editButton}><Text style={styles.editButtonText}>Reativar</Text></Pressable> : null}
+                </>
+              ) : (
+                <>
+                  <Pressable onPress={() => startEditing(item)} style={styles.editButton}><Text style={styles.editButtonText}>Editar pessoa</Text></Pressable>
+                  {canManageItem(item) ? (
+                    <View style={styles.resetRow}>
+                      <Pressable onPress={() => toggleSelectedForReset(item.id)} style={styles.checkboxRow}>
+                        <Text style={selectedForReset.has(item.id) ? styles.checkboxChecked : styles.checkboxUnchecked}>{selectedForReset.has(item.id) ? '☑' : '☐'}</Text>
+                        <Text style={styles.checkboxLabel}>Selecionar</Text>
+                      </Pressable>
+                      <Pressable onPress={() => confirmResetOne(item)} style={styles.resetButton}><Text style={styles.resetButtonText}>Resetar senha</Text></Pressable>
+                    </View>
+                  ) : null}
+                  {canManageItem(item) ? (
+                    <View style={styles.resetRow}>
+                      <Pressable onPress={() => confirmSoftDelete(item)} style={styles.resetButton}><Text style={styles.resetButtonText}>Excluir logicamente</Text></Pressable>
+                      <Pressable onPress={() => confirmHardDelete(item)} style={styles.resetButton}><Text style={styles.resetButtonText}>Excluir fisicamente</Text></Pressable>
+                    </View>
+                  ) : null}
+                </>
+              )}
             </View>
           ))}
-        </View>
+        </CardGrid>
       )}
+      <AppDialog visible={Boolean(dialog)} title={dialog?.title || ''} message={dialog?.message || ''} tone={dialog?.tone} confirmLabel={dialog?.confirmLabel} cancelLabel={dialog?.cancelLabel} onConfirm={dialog?.onConfirm} onClose={() => setDialog(null)} scrollable={dialog?.scrollable} />
     </ScrollView>
-    </ResponsiveShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { width: '100%', maxWidth: 1180, alignSelf: 'center', padding: 24, paddingBottom: 40, backgroundColor: colors.background },
+  container: { width: '100%', alignSelf: 'center', padding: 24, paddingBottom: 40, backgroundColor: colors.background },
   grow: { flex: 1 },
   eyebrow: { color: colors.amber, fontWeight: '800', letterSpacing: 0, marginBottom: 6 },
   title: { color: colors.ink, fontSize: 28, fontWeight: '900' },
@@ -573,6 +970,13 @@ const styles = StyleSheet.create({
   unitTypeName: { color: colors.ink, fontWeight: '900' },
   unitTypeDescription: { color: colors.muted, fontSize: 14, marginTop: 3 },
   unitTypeValue: { color: colors.primaryDark, fontWeight: '900' },
+  profilesPanel: { borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, padding: 16, marginTop: 14, marginBottom: 6 },
+  profilesPanelTitle: { color: colors.ink, fontSize: 16, fontWeight: '900', marginBottom: 4 },
+  profilesList: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10, marginBottom: 4 },
+  profileChip: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 8, backgroundColor: colors.softBlue, paddingHorizontal: 12, paddingVertical: 8 },
+  profileChipText: { color: colors.ink, fontWeight: '800', fontSize: 13 },
+  profileChipRemove: { color: colors.red, fontWeight: '800', fontSize: 12 },
+  profileGrantForm: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
   input: {
     minHeight: 52,
     borderWidth: 1,
@@ -587,10 +991,13 @@ const styles = StyleSheet.create({
   requiredNotice: { borderRadius: 8, borderWidth: 1, borderColor: '#f4d49b', backgroundColor: '#fff8e8', padding: 10, marginBottom: 10 },
   requiredNoticeText: { color: colors.amber, fontSize: 14, lineHeight: 18, fontWeight: '800' },
   addressPanel: { borderRadius: 9, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 10 },
-  addressRow: { flexDirection: 'row', gap: 10 }, addressNumber: { flex: .4 }, addressComplement: { flex: 1 }, stateInput: { width: 72 },
-  postalCodeRow: { flexDirection: 'row', gap: 10 },
+  addressRow: { flexDirection: 'row', gap: 10 }, addressRowMobile: { flexDirection: 'column', gap: 0 },
+  addressNumber: { flex: .4 }, addressNumberMobile: { flex: 1 },
+  addressComplement: { flex: 1 }, addressComplementMobile: { flex: 1 },
+  stateInput: { width: 72 }, stateInputMobile: { width: '100%' },
+  postalCodeRow: { flexDirection: 'row', gap: 10 }, postalCodeRowMobile: { flexDirection: 'column', gap: 0 },
   postalCodeInput: { flex: 1 },
-  postalCodeButton: { minHeight: 52, borderRadius: 8, backgroundColor: colors.primary, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
+  postalCodeButton: { minHeight: 52, borderRadius: 8, backgroundColor: colors.primary, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' }, postalCodeButtonMobile: { minHeight: 48 },
   postalCodeButtonDisabled: { opacity: .6 },
   postalCodeButtonText: { color: '#fff', fontWeight: '900' },
   label: { color: colors.ink, fontSize: 16, fontWeight: '800', marginBottom: 8 },
@@ -643,6 +1050,20 @@ const styles = StyleSheet.create({
   sectionTitle: { color: colors.ink, fontSize: 19, fontWeight: '900' },
   counter: { color: colors.primary, fontWeight: '900' },
   filterPanel: { borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, padding: 16, marginBottom: 14 },
+  tabRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  tabButton: { minHeight: 40, paddingHorizontal: 16, borderRadius: 8, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
+  tabButtonActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tabButtonText: { color: colors.muted, fontWeight: '800' },
+  tabButtonTextActive: { color: '#fff' },
+  resetPanel: { borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, padding: 16, marginBottom: 14, gap: 4 },
+  resetActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  resetRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 8 },
+  checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  checkboxChecked: { fontSize: 17, color: colors.green },
+  checkboxUnchecked: { fontSize: 17, color: colors.muted },
+  checkboxLabel: { color: colors.muted, fontWeight: '700', fontSize: 13 },
+  resetButton: { borderRadius: 8, backgroundColor: '#fff1f1', paddingHorizontal: 11, paddingVertical: 8 },
+  resetButtonText: { color: colors.red, fontSize: 14, fontWeight: '900' },
   filterHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 16 },
   filterTitle: { color: colors.ink, fontSize: 17, fontWeight: '900' },
   filterSubtitle: { color: colors.muted, fontSize: 14, lineHeight: 19, marginTop: 3 },
@@ -656,7 +1077,7 @@ const styles = StyleSheet.create({
   filterInput: { minHeight: 52, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 12, backgroundColor: '#fff', color: colors.ink },
   filterInputSpacing: { marginBottom: 14 },
   filterStatusLabel: { color: colors.ink, fontSize: 16, fontWeight: '800', marginTop: 14, marginBottom: 8 },
-  list: { gap: 10 },
+  list: {},
   card: {
     borderRadius: 8,
     borderWidth: 1,

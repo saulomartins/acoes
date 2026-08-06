@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { query } from '../db';
+import { query, withTransaction } from '../db';
 import { getInterAccessToken, type InterIntegrationConfig } from '../services/interService';
 
 const router = Router();
@@ -120,19 +120,50 @@ router.post('/:id/test', asyncHandler(async (req, res) => {
 
 router.put('/condominiums/:condominiumId/link', asyncHandler(async (req, res) => {
   const configurationId = String(req.body?.configurationId || '');
+  const syncMode = req.body?.syncMode === 'from_period' ? 'from_period' : 'all';
+  const syncStartPeriod = String(req.body?.syncStartPeriod || '');
+  if (syncMode === 'from_period' && !/^\d{4}-\d{2}-01$/.test(syncStartPeriod)) {
+    return res.status(400).json({ message: 'Informe um período inicial válido (mês/ano) para a busca de boletos.' });
+  }
   const [condominium, configuration] = await Promise.all([
     query(`select id from condominiums where id=$1`, [req.params.condominiumId]),
     query(`select id from bank_configurations where id=$1`, [configurationId]),
   ]);
   if (!condominium.rows[0]) return res.status(404).json({ message: 'Condomínio não encontrado.' });
   if (!configuration.rows[0]) return res.status(404).json({ message: 'Configuração bancária não encontrada.' });
-  await query(
-    `insert into condominium_bank_configurations(condominium_id,bank_configuration_id,linked_by,linked_at)
-     values($1,$2,$3,now()) on conflict(condominium_id) do update set
-       bank_configuration_id=excluded.bank_configuration_id,linked_by=excluded.linked_by,linked_at=now()`,
-    [req.params.condominiumId, configurationId, req.user?.id],
-  );
-  return res.json({ ok: true });
+
+  // Ao restringir a busca a partir de um período, o admin geral também pediu
+  // para excluir permanentemente (não só deixar de buscar) o que já estava
+  // importado antes desse mês, inclusive boletos pagos. Boletos vinculados a
+  // um acordo de débito negociado (debt_agreement_items, ON DELETE RESTRICT)
+  // são preservados — apagá-los quebraria o parcelamento em andamento.
+  const result = await withTransaction(async client => {
+    await client.query(
+      `insert into condominium_bank_configurations(condominium_id,bank_configuration_id,linked_by,linked_at,boleto_sync_mode,boleto_sync_start_period)
+       values($1,$2,$3,now(),$4,$5) on conflict(condominium_id) do update set
+         bank_configuration_id=excluded.bank_configuration_id,linked_by=excluded.linked_by,linked_at=now(),
+         boleto_sync_mode=excluded.boleto_sync_mode,boleto_sync_start_period=excluded.boleto_sync_start_period`,
+      [req.params.condominiumId, configurationId, req.user?.id, syncMode, syncMode === 'from_period' ? syncStartPeriod : null],
+    );
+    if (syncMode !== 'from_period') return { deleted: 0, preserved: 0 };
+
+    const preserved = await client.query<{ count: number }>(
+      `select count(*)::int as count from invoices i
+       where i.condominium_id=$1 and i.due_date < $2
+         and exists (select 1 from debt_agreement_items dai where dai.invoice_id = i.id)`,
+      [req.params.condominiumId, syncStartPeriod],
+    );
+    const deleted = await client.query(
+      `delete from invoices
+       where condominium_id=$1 and due_date < $2
+         and not exists (select 1 from debt_agreement_items dai where dai.invoice_id = invoices.id)
+       returning id`,
+      [req.params.condominiumId, syncStartPeriod],
+    );
+    return { deleted: deleted.rows.length, preserved: preserved.rows[0]?.count || 0 };
+  });
+
+  return res.json({ ok: true, deleted: result.deleted, preserved: result.preserved });
 }));
 
 router.delete('/condominiums/:condominiumId/link', asyncHandler(async (req, res) => {

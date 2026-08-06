@@ -11,8 +11,8 @@ import {
 import { apiRequest } from "../api/client";
 import { AuthContext } from "../context/AuthContext";
 import { AppButton, AppDialog, EmptyState, Panel } from "../ui/components";
-import ResponsiveShell from "../ui/ResponsiveShell";
 import { colors, layout } from "../ui/theme";
+import { useBreakpoint } from "../ui/responsive";
 type Report = {
   id: string;
   category: string;
@@ -46,6 +46,7 @@ const dt = (v: string) =>
     timeStyle: "short",
   });
 export default function Reports({ navigation }: any) {
+  const { isDesktop } = useBreakpoint();
   const { user, userToken } = useContext(AuthContext);
   const manager = ["sindico", "subsindico"].includes(user?.role || "");
   const [reports, setReports] = useState<Report[]>([]);
@@ -153,8 +154,8 @@ export default function Reports({ navigation }: any) {
     await load();
   };
   return (
-    <ResponsiveShell activeRoute="Reports" navigation={navigation}>
-      <ScrollView contentContainerStyle={styles.content}>
+    <>
+      <ScrollView contentContainerStyle={[styles.content, isDesktop && styles.desktopCap]}>
         <View>
           <Text style={styles.eyebrow}>CANAL PRIVADO</Text>
           <Text style={styles.title}>Relatos e solicitações</Text>
@@ -347,18 +348,18 @@ export default function Reports({ navigation }: any) {
         {...dialog}
         onClose={() => setDialog((x) => ({ ...x, visible: false }))}
       />
-    </ResponsiveShell>
+    </>
   );
 }
 const styles = StyleSheet.create({
   content: {
     width: "100%",
-    maxWidth: layout.contentMaxWidth,
     alignSelf: "center",
     padding: 28,
     paddingBottom: 70,
     gap: 16,
   },
+  desktopCap: { maxWidth: 860, alignSelf: "center", width: "100%" },
   eyebrow: { color: colors.primary, fontSize: 13, fontWeight: "900" },
   title: { color: colors.ink, fontSize: 27, fontWeight: "900", marginTop: 5 },
   subtitle: { color: colors.muted, fontSize: 15, marginTop: 5 },

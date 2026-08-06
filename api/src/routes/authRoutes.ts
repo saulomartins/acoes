@@ -1,10 +1,13 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { authenticate } from '../middleware/auth';
-import { login, refresh, register, requestPasswordReset, resetPassword, revokeRefreshToken } from '../services/authService';
+import { changePassword, listProfiles, login, refresh, register, requestPasswordReset, resetPassword, revokeRefreshToken, switchProfile } from '../services/authService';
 import { query } from '../db';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { FEATURE_KEYS, type FeatureKey } from '../services/featureCatalog';
 
 const router = Router();
+export const CURRENT_TERMS_VERSION = '2026-08-04';
+export const CURRENT_TOUR_VERSION = '2026-08-04-1';
 const attempts = new Map<string, { count: number; resetAt: number }>();
 const limit = (maximum: number, windowMs: number) => (req: Request, res: Response, next: NextFunction) => {
   const key = `${req.ip}:${req.path}`;
@@ -155,12 +158,77 @@ router.post('/logout', async (req, res) => {
   }
 });
 
+router.get('/profiles', authenticate, asyncHandler(async (req, res) => {
+  return res.json({ profiles: await listProfiles(req.user!.id) });
+}));
+
+// Sem `authenticate`: a prova de sessão válida é o próprio refreshToken no
+// corpo (mesmo padrão de /auth/refresh, validado em switchProfile() com a
+// mesma detecção de reuso) — não depende de um access token ainda válido.
+router.post('/switch-profile', asyncHandler(async (req, res) => {
+  const { refreshToken, profileId } = req.body ?? {};
+
+  if (!refreshToken || typeof refreshToken !== 'string') {
+    return res.status(400).json({ message: 'refreshToken is required' });
+  }
+
+  try {
+    const response = await switchProfile(refreshToken, profileId ? String(profileId) : null);
+    if (!response) return res.status(401).json({ message: 'invalid refresh token or profile' });
+    return res.json(response);
+  } catch {
+    return res.status(401).json({ message: 'invalid refresh token or profile' });
+  }
+}));
+
+router.post('/change-password', authenticate, asyncHandler(async (req, res) => {
+  const password = String(req.body?.password || '');
+  if (password.length < 8) return res.status(400).json({ message: 'A nova senha deve ter pelo menos 8 caracteres.' });
+  const user = await changePassword(req.user!.id, password);
+  if (!user) return res.status(404).json({ message: 'Usuário não encontrado.' });
+  return res.json({ user });
+}));
+
+router.post('/terms/accept', authenticate, asyncHandler(async (req, res) => {
+  if (req.body?.accepted !== true || req.body?.version !== CURRENT_TERMS_VERSION) return res.status(400).json({ message: 'Confirme a leitura e aceitação da versão atual dos Termos de Uso.' });
+  const ipAddress = req.ip || req.socket.remoteAddress || null;
+  const userAgent = String(req.headers['user-agent'] || '').slice(0, 500) || null;
+  await query(`insert into user_terms_acceptances(id,user_id,terms_version,ip_address,user_agent) values(gen_random_uuid(),$1,$2,$3,$4) on conflict(user_id,terms_version) do nothing`,[req.user!.id,CURRENT_TERMS_VERSION,ipAddress,userAgent]);
+  // `req.user` vem do JWT emitido no login/refresh e pode carregar um
+  // `mustChangePassword` desatualizado (ex.: senha trocada depois que esse
+  // token foi emitido, já que a troca de senha não reemite token). Por isso
+  // sempre buscamos o valor atual no banco em vez de espalhar `...req.user`.
+  const result=await query<{terms_accepted_at:Date;must_change_password:boolean}>(`update users set terms_accepted_version=$1,terms_accepted_at=now() where id=$2 returning terms_accepted_at,must_change_password`,[CURRENT_TERMS_VERSION,req.user!.id]);
+  return res.json({user:{...req.user,mustChangePassword:result.rows[0].must_change_password,termsAcceptedVersion:CURRENT_TERMS_VERSION,termsAcceptedAt:result.rows[0].terms_accepted_at.toISOString()}});
+}));
+
+router.post('/tour/complete', authenticate, asyncHandler(async (req, res) => {
+  if (req.body?.version !== CURRENT_TOUR_VERSION) return res.status(400).json({ message: 'Versão do tour inválida.' });
+  await query(`insert into user_tour_completions(id,user_id,tour_version) values(gen_random_uuid(),$1,$2) on conflict(user_id,tour_version) do nothing`,[req.user!.id,CURRENT_TOUR_VERSION]);
+  // Mesmo motivo do /terms/accept acima: não confiar no `mustChangePassword` do JWT antigo.
+  const result=await query<{tour_completed_at:Date;terms_accepted_version:string|null;terms_accepted_at:Date|null;must_change_password:boolean}>(`update users set tour_completed_version=$1,tour_completed_at=now() where id=$2 returning tour_completed_at,terms_accepted_version,terms_accepted_at,must_change_password`,[CURRENT_TOUR_VERSION,req.user!.id]);
+  return res.json({user:{...req.user,mustChangePassword:result.rows[0].must_change_password,termsAcceptedVersion:result.rows[0].terms_accepted_version,termsAcceptedAt:result.rows[0].terms_accepted_at?.toISOString()||null,tourCompletedVersion:CURRENT_TOUR_VERSION,tourCompletedAt:result.rows[0].tour_completed_at.toISOString()}});
+}));
+
 router.get('/me', authenticate, asyncHandler(async (req, res) => {
-  const result = await query<{ condominium_name:string|null }>(
-    `select c.name condominium_name from users u left join condominiums c on c.id=u.condominium_id where u.id=$1`,
+  const result = await query<{ condominium_name:string|null;terms_accepted_version:string|null;terms_accepted_at:Date|null;tour_completed_version:string|null;tour_completed_at:Date|null;must_change_password:boolean }>(
+    `select c.name condominium_name,u.terms_accepted_version,u.terms_accepted_at,u.tour_completed_version,u.tour_completed_at,u.must_change_password from users u left join condominiums c on c.id=u.condominium_id where u.id=$1`,
     [req.user?.id],
   );
-  return res.json({ user: { ...req.user, condominiumName:result.rows[0]?.condominium_name || null } });
+
+  // admin_geral não está preso a um condomínio só — não faz sentido filtrar
+  // o próprio menu dele por funcionalidades de um condomínio específico.
+  let condominiumFeatures: Record<FeatureKey, boolean> | null = null;
+  if (req.user?.role !== 'admin_geral' && req.user?.condominiumId) {
+    const features = await query<Record<FeatureKey, boolean>>(
+      `select ${FEATURE_KEYS.join(', ')} from condominium_features where condominium_id=$1`,
+      [req.user.condominiumId],
+    );
+    const row = features.rows[0];
+    condominiumFeatures = Object.fromEntries(FEATURE_KEYS.map(key => [key, row ? row[key] : true])) as Record<FeatureKey, boolean>;
+  }
+
+  return res.json({ user: { ...req.user, mustChangePassword:result.rows[0]?.must_change_password ?? req.user?.mustChangePassword, condominiumName:result.rows[0]?.condominium_name || null,termsAcceptedVersion:result.rows[0]?.terms_accepted_version||null,termsAcceptedAt:result.rows[0]?.terms_accepted_at?.toISOString()||null,tourCompletedVersion:result.rows[0]?.tour_completed_version||null,tourCompletedAt:result.rows[0]?.tour_completed_at?.toISOString()||null }, condominiumFeatures });
 }));
 
 export default router;

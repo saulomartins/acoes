@@ -2,23 +2,34 @@ import bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
+import { requireFeature } from '../middleware/requireFeature';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { query } from '../db';
+import { query, withTransaction } from '../db';
 import type { UserRole } from '../types';
+import { buildInitialPassword, buildManagerInitialPassword } from '../services/passwordRuleService';
+import { sendWelcomeEmail, sendPasswordResetByAdminEmail } from '../services/emailService';
+import { logAudit } from '../services/auditService';
+import { listProfiles } from '../services/authService';
 
 const router = Router();
 const validRoles: UserRole[] = ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'];
 const managerCreatedRoles: UserRole[] = ['subsindico', 'proprietario', 'inquilino'];
 
 router.use(authenticate);
+// GET / fica de fora do gate: é usada como diretório de pessoas por outras
+// funcionalidades já gateadas separadamente (ex.: busca de destinatário em
+// Avisos e comunicação, lista de cobrança em Config. e enviar cobranças).
+// Só as ações de gestão de cadastro (criar/editar/excluir/redefinir senha)
+// são de fato o módulo "Pessoas".
 
 router.get('/', asyncHandler(async (req, res) => {
   const condominiumId = req.user?.role === 'admin_geral' ? req.query.condominiumId : req.user?.condominiumId;
+  const deletedOnly = req.query.deletedOnly === 'true';
 
   const result = await query(
     `select users.id, users.username, users.full_name, users.cpf, users.email, users.phone, users.role,
             users.condominium_id, users.unit_id, coalesce(blocks.name || ' / ' || units.number, users.unit) as unit, units.unit_type_id, users.billing_exempt, users.preferred_due_day, users.created_at,
-            users.street, users.address_number, users.address_complement, users.neighborhood, users.city, users.state, users.postal_code,
+            users.street, users.address_number, users.address_complement, users.neighborhood, users.city, users.state, users.postal_code, users.deleted_at,
             unit_types.name as unit_type_name, unit_types.fee_cents as condominium_fee_cents,
             exists(select 1 from unit_occupancies uo where uo.user_id=users.id and uo.unit_id=users.unit_id and uo.ended_at is null and uo.is_representative=true) as is_unit_representative
      from users
@@ -27,19 +38,22 @@ router.get('/', asyncHandler(async (req, res) => {
      left join unit_types on unit_types.id = units.unit_type_id
      where ($1::uuid is null or users.condominium_id = $1)
        and ($2::boolean = false or users.role in ('sindico','subsindico'))
+       and (($3::boolean and users.deleted_at is not null) or (not $3::boolean and users.deleted_at is null))
      order by users.created_at desc`,
-    [condominiumId || null, req.user?.role === 'admin_geral'],
+    [condominiumId || null, req.user?.role === 'admin_geral', deletedOnly],
   );
 
   return res.json({ users: result.rows });
 }));
 
-router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), asyncHandler(async (req, res) => {
+router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
   const { username, password, role, condominiumId, fullName, cpf, email, phone, unitId, isRepresentative, billingExempt, preferredDueDay,
     street, addressNumber, addressComplement, neighborhood, city, state, postalCode } = req.body ?? {};
 
-  if (!username || !password || !role || typeof username !== 'string' || typeof password !== 'string') {
-    return res.status(400).json({ message: 'username, password and role are required' });
+  const isResident = role === 'proprietario' || role === 'inquilino';
+
+  if (!username || !role || typeof username !== 'string') {
+    return res.status(400).json({ message: 'username and role are required' });
   }
 
   if (!validRoles.includes(role)) {
@@ -71,6 +85,9 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), asyncHandler
   if (cpfDigits && ![11, 14].includes(cpfDigits.length)) {
     return res.status(400).json({ message: 'CPF deve ter 11 dígitos ou CNPJ deve ter 14 dígitos' });
   }
+  if (!cpfDigits) {
+    return res.status(400).json({ message: 'Informe o CPF — ele é necessário para gerar a senha inicial.' });
+  }
 
   const existingUsername = await query(`select id from users where lower(username) = $1`, [normalizedUsername]);
   if (existingUsername.rows[0]) {
@@ -84,17 +101,21 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), asyncHandler
     }
   }
 
-  if ((role === 'proprietario' || role === 'inquilino') && !unitId) {
+  if (isResident && !unitId) {
     return res.status(400).json({ message: 'Selecione a unidade do morador.' });
   }
   const selectedUnit = unitId ? await query<{id:string;number:string;unit_type_id:string|null}>(`select id,number,unit_type_id from units where id=$1 and condominium_id=$2 and active=true`,[unitId,targetCondominiumId]) : null;
   if (unitId && !selectedUnit?.rows[0]) return res.status(400).json({ message:'Unidade inválida para o condomínio.' });
 
-  const passwordHash = await bcrypt.hash(password, 10);
+  const condominium = await query<{ name: string }>(`select name from condominiums where id=$1`, [targetCondominiumId]);
+  const condominiumName = condominium.rows[0]?.name || '';
+  const plainPassword = isResident ? buildInitialPassword(selectedUnit!.rows[0].number, cpfDigits!) : buildManagerInitialPassword(cpfDigits!);
+  const initialPassword = plainPassword;
+  const passwordHash = await bcrypt.hash(plainPassword, 10);
   const result = await query(
     `insert into users (id, username, password_hash, role, condominium_id, full_name, cpf, email, phone, unit, unit_id, billing_exempt, preferred_due_day,
-       street, address_number, address_complement, neighborhood, city, state, postal_code)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+       street, address_number, address_complement, neighborhood, city, state, postal_code, must_change_password)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
      returning id, username, full_name, cpf, email, phone, role, condominium_id, unit, unit_id, billing_exempt, preferred_due_day, created_at`,
     [
       randomUUID(),
@@ -113,6 +134,7 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), asyncHandler
       street || null, addressNumber || null, addressComplement || null, neighborhood || null,
       city || null, state ? String(state).trim().toUpperCase() : null,
       postalCode ? String(postalCode).replace(/\D/g, '') : null,
+      true,
     ],
   );
 
@@ -121,10 +143,21 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), asyncHandler
     await query(`insert into unit_occupancies(unit_id,user_id,is_representative) values($1,$2,$3)`,[unitId,(result.rows[0] as any).id,Boolean(isRepresentative)]);
   }
 
-  return res.status(201).json({ user: result.rows[0] });
+  let emailSent = false;
+  if (email) {
+    try {
+      const emailResult = await sendWelcomeEmail(email, fullName || normalizedUsername, normalizedUsername, plainPassword, condominiumName);
+      emailSent = emailResult.status === 'sent';
+    } catch (error) {
+      console.error('Failed to send welcome email', error);
+    }
+  }
+
+  await logAudit(req, 'pessoas', 'created', `Cadastrou ${fullName || normalizedUsername} (${role})`, { entityId: String((result.rows[0] as any).id) });
+  return res.status(201).json({ user: result.rows[0], initialPassword, emailSent });
 }));
 
-router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), asyncHandler(async (req, res) => {
+router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
   const { username, password, role, condominiumId, fullName, cpf, email, phone, unitId, isRepresentative, billingExempt, preferredDueDay,
     street, addressNumber, addressComplement, neighborhood, city, state, postalCode } = req.body ?? {};
   const current = await query<{ id: string; role: UserRole; condominium_id: string | null; unit_id:string|null }>(
@@ -168,15 +201,15 @@ router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), asyncHan
   const selectedUnit = unitId ? await query<{id:string;number:string;unit_type_id:string|null}>(`select id,number,unit_type_id from units where id=$1 and condominium_id=$2 and active=true`,[unitId,targetCondominiumId]) : null;
   if (unitId && !selectedUnit?.rows[0]) return res.status(400).json({ message:'Unidade inválida para o condomínio.' });
 
-  const passwordHash = password ? await bcrypt.hash(String(password), 10) : null;
   const result = await query(
-    `update users set username = $1, password_hash = coalesce($2, password_hash), role = $3,
-       condominium_id = $4, full_name = $5, cpf = $6, email = $7, phone = $8, unit = $9, unit_id=$10, unit_type_id = null, billing_exempt=$11, preferred_due_day=$12,
-       street = $13, address_number = $14, address_complement = $15, neighborhood = $16,
-       city = $17, state = $18, postal_code = $19
-     where id = $20
+    `update users set username = $1, role = $2,
+       condominium_id = $3, full_name = $4, cpf = $5, email = $6, phone = $7, unit = $8, unit_id=$9, unit_type_id = null, billing_exempt=$10, preferred_due_day=$11,
+       street = $12, address_number = $13, address_complement = $14, neighborhood = $15,
+       city = $16, state = $17, postal_code = $18,
+       login_enabled = case when deleted_at is null then true else login_enabled end
+     where id = $19
      returning id, username, full_name, cpf, email, phone, role, condominium_id, unit, unit_id, billing_exempt, preferred_due_day, created_at`,
-    [normalizedUsername, passwordHash, nextRole, targetCondominiumId, fullName || null, cpfDigits, email || null, phoneDigits,
+    [normalizedUsername, nextRole, targetCondominiumId, fullName || null, cpfDigits, email || null, phoneDigits,
       selectedUnit?.rows[0]?.number || null, unitId || null, Boolean(billingExempt), Number(preferredDueDay) === 20 ? 20 : 10, street || null, addressNumber || null, addressComplement || null,
       neighborhood || null, city || null, state ? String(state).trim().toUpperCase() : null,
       postalCode ? String(postalCode).replace(/\D/g, '') : null, req.params.id],
@@ -186,7 +219,220 @@ router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), asyncHan
     if (isRepresentative) await query(`update unit_occupancies set is_representative=false where unit_id=$1 and ended_at is null`,[unitId]);
     await query(`insert into unit_occupancies(unit_id,user_id,is_representative) values($1,$2,$3) on conflict (unit_id,user_id) where ended_at is null do update set is_representative=excluded.is_representative`,[unitId,req.params.id,Boolean(isRepresentative)]);
   }
+  await logAudit(req, 'pessoas', 'updated', `Editou ${result.rows[0].full_name || result.rows[0].username}`, { entityId: req.params.id });
   return res.json({ user: result.rows[0] });
+}));
+
+router.post('/reset-password', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
+  const isAdmin = req.user?.role === 'admin_geral';
+  const allowedRoles = isAdmin ? ['sindico', 'subsindico'] : ['proprietario', 'inquilino'];
+  const condominiumId = isAdmin ? String(req.body?.condominiumId || '') : req.user?.condominiumId;
+  if (!condominiumId) {
+    return res.status(400).json({ message: isAdmin ? 'Selecione um condomínio para resetar em massa.' : 'Usuário sem condomínio.' });
+  }
+
+  const { role, ids } = req.body ?? {};
+  const hasRole = role === 'all' || allowedRoles.includes(role);
+  const hasIds = Array.isArray(ids) && ids.length > 0;
+  if (hasRole === hasIds) {
+    return res.status(400).json({ message: `Informe role (${allowedRoles.join(', ')} ou all) ou uma lista de ids, não os dois.` });
+  }
+
+  const targets = await query<{ id: string; username: string; full_name: string | null; cpf: string | null; unit_id: string | null; email: string | null; role: UserRole }>(
+    hasIds
+      ? `select id, username, full_name, cpf, unit_id, email, role from users where condominium_id=$1 and role::text = any($2::text[]) and id = any($3::uuid[])`
+      : role === 'all'
+        ? `select id, username, full_name, cpf, unit_id, email, role from users where condominium_id=$1 and role::text = any($2::text[])`
+        : `select id, username, full_name, cpf, unit_id, email, role from users where condominium_id=$1 and role=$2`,
+    hasIds ? [condominiumId, allowedRoles, ids] : role === 'all' ? [condominiumId, allowedRoles] : [condominiumId, role],
+  );
+
+  if (!targets.rows.length) return res.json({ results: [], skipped: [] });
+
+  const condominium = await query<{ name: string }>(`select name from condominiums where id=$1`, [condominiumId]);
+  const condoName = condominium.rows[0]?.name || '';
+
+  const unitIds = [...new Set(targets.rows.map((person) => person.unit_id).filter(Boolean))] as string[];
+  const units = unitIds.length ? await query<{ id: string; number: string }>(`select id, number from units where id = any($1::uuid[])`, [unitIds]) : { rows: [] as Array<{ id: string; number: string }> };
+  const unitNumberById = new Map(units.rows.map((unit) => [unit.id, unit.number]));
+
+  const results: Array<{ id: string; fullName: string | null; username: string; newPassword: string; emailSent: boolean }> = [];
+  const skipped: Array<{ id: string; fullName: string | null; reason: string }> = [];
+
+  for (const person of targets.rows) {
+    const cpfDigits = person.cpf ? String(person.cpf).replace(/\D/g, '') : '';
+    const isPersonResident = person.role === 'proprietario' || person.role === 'inquilino';
+    if (!cpfDigits) {
+      skipped.push({ id: person.id, fullName: person.full_name, reason: 'Cadastro sem CPF — não é possível gerar a senha.' });
+      continue;
+    }
+    let newPassword: string;
+    if (isPersonResident) {
+      const unitNumber = person.unit_id ? unitNumberById.get(person.unit_id) : null;
+      if (!unitNumber) {
+        skipped.push({ id: person.id, fullName: person.full_name, reason: 'Cadastro sem unidade — não é possível gerar a senha.' });
+        continue;
+      }
+      newPassword = buildInitialPassword(unitNumber, cpfDigits);
+    } else {
+      newPassword = buildManagerInitialPassword(cpfDigits);
+    }
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await query(
+      `update users set password_hash=$1, must_change_password=true,
+         login_enabled=case when deleted_at is null then true else login_enabled end
+       where id=$2`,
+      [passwordHash, person.id],
+    );
+    await query(`update refresh_tokens set revoked_at=now() where user_id=$1 and revoked_at is null`, [person.id]);
+    let emailSent = false;
+    if (person.email) {
+      try {
+        const emailResult = await sendPasswordResetByAdminEmail(person.email, person.full_name || person.username, person.username, newPassword, condoName);
+        emailSent = emailResult.status === 'sent';
+      } catch (error) {
+        console.error('Failed to send password reset notification email', error);
+      }
+    }
+    results.push({ id: person.id, fullName: person.full_name, username: person.username, newPassword, emailSent });
+  }
+
+  if (results.length) await logAudit(req, 'pessoas', 'reset_password', `Resetou a senha de ${results.length} pessoa(s)`, { details: { ids: results.map((r) => r.id) } });
+  return res.json({ results, skipped });
+}));
+
+// admin_geral gerencia sindico/subsindico; sindico/subsindico gerenciam proprietario/inquilino do próprio condomínio.
+const findDeletableTarget = async (req: any, id: string) => {
+  const isAdmin = req.user?.role === 'admin_geral';
+  const allowedRoles: UserRole[] = isAdmin ? ['sindico', 'subsindico'] : ['proprietario', 'inquilino'];
+  const result = await query<{ id: string; role: UserRole; condominium_id: string | null; deleted_at: Date | null; full_name: string | null; username: string }>(
+    `select id, role, condominium_id, deleted_at, full_name, username from users where id = $1`, [id],
+  );
+  const target = result.rows[0];
+  if (!target || !allowedRoles.includes(target.role)) return null;
+  if (!isAdmin && target.condominium_id !== req.user?.condominiumId) return null;
+  return target;
+};
+
+router.delete('/:id', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
+  const target = await findDeletableTarget(req, req.params.id);
+  if (!target) return res.status(404).json({ message: 'Pessoa não encontrada.' });
+  const isResident = target.role === 'proprietario' || target.role === 'inquilino';
+  try {
+    if (isResident) {
+      const openDebt = await query<{ count: number }>(
+        `select count(*)::int as count from invoices where user_id=$1 and status not in ('paid','canceled')`,
+        [target.id],
+      );
+      if (openDebt.rows[0].count > 0) {
+        return res.status(409).json({ message: 'Não é possível excluir fisicamente: esta pessoa tem débito em aberto com o condomínio. Quite ou cancele os débitos antes de excluir.' });
+      }
+      await withTransaction(async (client) => {
+        await client.query(`delete from inter_issuance_guards where user_id=$1`, [target.id]);
+        await client.query(`delete from debt_agreements where debtor_user_id=$1`, [target.id]);
+        await client.query(`delete from users where id=$1`, [target.id]);
+      });
+    } else {
+      await query(`delete from users where id=$1`, [target.id]);
+    }
+  } catch (error: any) {
+    if (error?.code === '23503') {
+      return res.status(409).json({ message: 'Não é possível excluir: existem registros vinculados a esta pessoa que impedem a exclusão física.' });
+    }
+    throw error;
+  }
+  await logAudit(req, 'pessoas', 'deleted', `Excluiu fisicamente ${target.full_name || target.username}`, { entityId: target.id });
+  return res.status(204).send();
+}));
+
+router.post('/:id/soft-delete', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
+  const target = await findDeletableTarget(req, req.params.id);
+  if (!target) return res.status(404).json({ message: 'Pessoa não encontrada.' });
+  await query(`update users set deleted_at=now(), login_enabled=false where id=$1`, [target.id]);
+  await query(`update refresh_tokens set revoked_at=now() where user_id=$1 and revoked_at is null`, [target.id]);
+  await logAudit(req, 'pessoas', 'soft_deleted', `Excluiu logicamente ${target.full_name || target.username}`, { entityId: target.id });
+  return res.status(204).send();
+}));
+
+router.post('/:id/reactivate', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
+  const target = await findDeletableTarget(req, req.params.id);
+  if (!target) return res.status(404).json({ message: 'Pessoa não encontrada.' });
+  await query(`update users set deleted_at=null, login_enabled=true where id=$1`, [target.id]);
+  await logAudit(req, 'pessoas', 'reactivated', `Reativou ${target.full_name || target.username}`, { entityId: target.id });
+  return res.status(204).send();
+}));
+
+// Perfis extras de um mesmo login (ex.: síndico que também é proprietário
+// de uma unidade), trocados manualmente pelo usuário via POST
+// /auth/switch-profile — ver authService.ts. MVP: restrito ao mesmo
+// condomínio e (para papéis de morador) à mesma unidade já cadastrada.
+const profileRoles: UserRole[] = ['sindico', 'subsindico', 'proprietario', 'inquilino'];
+
+router.get('/:id/profiles', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
+  return res.json({ profiles: await listProfiles(req.params.id) });
+}));
+
+router.post('/:id/profiles', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
+  const role = req.body?.role as UserRole;
+  const unitId = req.body?.unitId ? String(req.body.unitId) : null;
+  if (!profileRoles.includes(role)) return res.status(400).json({ message: 'Perfil inválido.' });
+  // Mesma regra de quem pode atribuir qual papel já usada na criação normal
+  // de pessoas (POST /users) — sem isso um subsíndico poderia conceder a si
+  // mesmo ou a outra pessoa um perfil extra de síndico.
+  if (req.user?.role === 'admin_geral' && role !== 'sindico' && role !== 'subsindico') {
+    return res.status(403).json({ message: 'Administrador geral pode conceder somente perfis de síndico e subsíndico.' });
+  }
+  if (req.user?.role !== 'admin_geral' && !managerCreatedRoles.includes(role)) {
+    return res.status(403).json({ message: 'Gestores do condomínio podem conceder somente perfis de subsíndico, proprietário ou inquilino.' });
+  }
+
+  const targetCondominiumId = req.user?.role === 'admin_geral' ? String(req.body?.condominiumId || '') : req.user?.condominiumId;
+  if (!targetCondominiumId) return res.status(400).json({ message: 'condominiumId is required' });
+
+  const target = await query<{ id: string; unit_id: string | null; condominium_id: string | null; full_name: string | null; username: string }>(
+    `select id, unit_id, condominium_id, full_name, username from users where id=$1`, [req.params.id],
+  );
+  const person = target.rows[0];
+  if (!person) return res.status(404).json({ message: 'Pessoa não encontrada.' });
+  if (person.condominium_id && person.condominium_id !== targetCondominiumId) {
+    return res.status(400).json({ message: 'Perfis adicionais só são permitidos dentro do mesmo condomínio nesta versão.' });
+  }
+
+  const isResidentProfile = role === 'proprietario' || role === 'inquilino';
+  if (isResidentProfile && !unitId) return res.status(400).json({ message: 'Selecione a unidade para o perfil de morador.' });
+  if (isResidentProfile && person.unit_id && unitId && person.unit_id !== unitId) {
+    return res.status(409).json({ message: 'Esta pessoa já possui outra unidade como principal; perfis de morador adicionais precisam apontar para a mesma unidade.' });
+  }
+
+  const result = await query(
+    `insert into user_profiles(user_id, role, condominium_id, created_by) values($1,$2,$3,$4)
+     on conflict (user_id, role, condominium_id) do nothing
+     returning id, role, condominium_id`,
+    [req.params.id, role, targetCondominiumId, req.user?.id],
+  );
+  if (!result.rows[0]) return res.status(409).json({ message: 'Esta pessoa já tem esse perfil.' });
+
+  if (isResidentProfile && unitId && !person.unit_id) {
+    const unit = await query<{ number: string }>(`select number from units where id=$1 and condominium_id=$2 and active=true`, [unitId, targetCondominiumId]);
+    if (!unit.rows[0]) return res.status(400).json({ message: 'Unidade inválida para o condomínio.' });
+    await query(`update users set unit_id=$1, unit=$2, condominium_id=coalesce(condominium_id,$3) where id=$4`, [unitId, unit.rows[0].number, targetCondominiumId, req.params.id]);
+    const occupancy = await query(`select id from unit_occupancies where unit_id=$1 and user_id=$2 and ended_at is null`, [unitId, req.params.id]);
+    if (!occupancy.rows[0]) await query(`insert into unit_occupancies(unit_id,user_id) values($1,$2)`, [unitId, req.params.id]);
+  }
+
+  await logAudit(req, 'pessoas', 'updated', `Concedeu o perfil adicional de ${role} a ${person.full_name || person.username}`, { entityId: req.params.id });
+  return res.status(201).json({ profile: result.rows[0] });
+}));
+
+router.delete('/:id/profiles/:profileId', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
+  const deleted = await query(`delete from user_profiles where id=$1 and user_id=$2 returning id`, [req.params.profileId, req.params.id]);
+  if (!deleted.rows[0]) return res.status(404).json({ message: 'Perfil não encontrado.' });
+  // Sessões usando esse perfil precisam ser revogadas — senão continuam
+  // válidas com um perfil que acabou de ser removido até o access token
+  // expirar (até 15 min).
+  await query(`update refresh_tokens set revoked_at=now() where user_id=$1 and active_profile_id=$2 and revoked_at is null`, [req.params.id, req.params.profileId]);
+  await logAudit(req, 'pessoas', 'updated', `Removeu um perfil adicional`, { entityId: req.params.id });
+  return res.status(204).send();
 }));
 
 export default router;

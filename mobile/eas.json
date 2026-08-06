@@ -19,6 +19,7 @@
     },
     "production-apk": {
       "distribution": "internal",
+      "autoIncrement": true,
       "android": { "buildType": "apk" },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://acoes-production.up.railway.app",

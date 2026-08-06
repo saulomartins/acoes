@@ -1,12 +1,18 @@
 import {randomUUID} from 'crypto';
 import {Router} from 'express';
 import {authenticate,authorize} from '../middleware/auth';
+import {requireFeature} from '../middleware/requireFeature';
 import {asyncHandler} from '../middleware/asyncHandler';
 import {query,withTransaction} from '../db';
 import {sendPushNotification} from '../services/notificationService';
 
 const router=Router();
 router.use(authenticate);
+// Sem gate de router inteiro aqui: registro de push, inbox e marcar-como-lida
+// são infraestrutura usada por avisos de QUALQUER módulo (lembrete de
+// boleto, ocorrência, notificação de infração), não só pela funcionalidade
+// "Avisos e comunicação" em si. Só compor um aviso manual e ver o histórico
+// de envios são essa funcionalidade de fato — gate por rota abaixo.
 
 router.post('/devices',asyncHandler(async(req,res)=>{
   const {pushToken,fcmToken,platform}=req.body??{};
@@ -35,7 +41,7 @@ router.get('/',asyncHandler(async(req,res)=>{
   return res.json({notifications:result.rows});
 }));
 
-router.get('/history/sent',authorize('sindico','subsindico'),asyncHandler(async(req,res)=>{
+router.get('/history/sent',authorize('sindico','subsindico'),requireFeature('avisos_comunicacao'),asyncHandler(async(req,res)=>{
   const result=await query(`select n.id,n.title,n.body,n.audience_type,n.created_at,n.provider_status,
       sender.full_name created_by_name,sender.username created_by_username,
       count(nr.user_id)::int recipient_count,
@@ -59,7 +65,7 @@ router.patch('/:id/read',asyncHandler(async(req,res)=>{
   return res.json({readAt:result.rows[0].read_at});
 }));
 
-router.post('/',authorize('sindico','subsindico'),asyncHandler(async(req,res)=>{
+router.post('/',authorize('sindico','subsindico'),requireFeature('avisos_comunicacao'),asyncHandler(async(req,res)=>{
   const condominiumId=req.user?.condominiumId;
   const senderId=req.user?.id;
   const title=String(req.body?.title||'').trim();

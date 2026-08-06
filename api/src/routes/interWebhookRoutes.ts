@@ -2,6 +2,7 @@ import { randomUUID, timingSafeEqual } from 'crypto';
 import { Router } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { query } from '../db';
+import { mapInterStatus } from '../services/interService';
 
 const router = Router();
 const safeEqual = (received:string,expected:string) => {
@@ -17,8 +18,7 @@ router.post('/:secret', asyncHandler(async (req,res)=>{
   for(const callback of callbacks){
     const externalId=String(callback?.codigoSolicitacao||'');
     if(!externalId) continue;
-    const statusMap:Record<string,string>={RECEBIDO:'paid',A_RECEBER:'issued',ATRASADO:'overdue',CANCELADO:'canceled',EXPIRADO:'canceled'};
-    const status=statusMap[String(callback.situacao||'')]||'pending_provider';
+    const status=mapInterStatus(String(callback.situacao||''));
     const paidCents=status==='paid'?Math.round(Number(String(callback.valorTotalRecebido||'0').replace(',','.'))*100):null;
     const result=await query<any>(
       `update invoices set status=$1,digitable_line=coalesce($2,digitable_line),barcode=coalesce($3,barcode),

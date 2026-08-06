@@ -27,7 +27,7 @@ export const shadow = {
 
 export const layout = {
   sidebarWidth: 286,
-  contentMaxWidth: 1420,
-  radius: 18,
-  controlRadius: 13,
+  contentMaxWidth: 1440,
+  radius: 14,
+  controlRadius: 12,
 };

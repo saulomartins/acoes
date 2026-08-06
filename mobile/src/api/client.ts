@@ -8,8 +8,15 @@ const defaultApiUrlByPlatform =
 
 const productionApiUrlFallback = 'https://acoes-production.up.railway.app';
 
+const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL;
+const isProductionBuild = typeof __DEV__ !== 'undefined' && !__DEV__;
+const configuredUrlIsLocal =
+  !!configuredApiUrl && /^http:\/\/(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?$/i.test(configuredApiUrl);
+
 export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || ((typeof __DEV__ !== 'undefined' && __DEV__) ? defaultApiUrlByPlatform : productionApiUrlFallback);
+  isProductionBuild && configuredUrlIsLocal
+    ? productionApiUrlFallback
+    : configuredApiUrl || (isProductionBuild ? productionApiUrlFallback : defaultApiUrlByPlatform);
 
 const authStorage = {
   get: async (key: string) =>
@@ -89,7 +96,30 @@ export const apiUpload = async <T>(path:string, token:string, file:File | {uri:s
   return data as T;
 };
 
-export const downloadAuthenticated = async (path:string,token:string,filename:string) => {
+export const apiFormUpload = async <T>(
+  path: string,
+  token: string,
+  fields: Record<string, string>,
+  file?: File | { uri: string; name: string; mimeType?: string },
+): Promise<T> => {
+  const form = new FormData();
+  Object.entries(fields).forEach(([key, value]) => form.append(key, value));
+  if (file) {
+    if ('uri' in file) form.append('file', { uri: file.uri, name: file.name, type: file.mimeType || 'application/vnd.android.package-archive' } as any);
+    else form.append('file', file);
+  }
+  const accessToken = await authStorage.get('userToken') || token;
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(data?.message || 'Falha ao publicar versão.');
+  return data as T;
+};
+
+export const downloadAuthenticated = async (path:string,token:string,filename:string,options?:{awaitCompletion?:boolean}) => {
   const accessToken=await authStorage.get('userToken') || token;
   if (Platform.OS !== 'web') {
     if (!FileSystem.cacheDirectory) throw new Error('Armazenamento temporário indisponível.');
@@ -101,10 +131,37 @@ export const downloadAuthenticated = async (path:string,token:string,filename:st
     finally { await FileSystem.deleteAsync(localUri,{idempotent:true}).catch(()=>null); }
     return;
   }
-  const response=await fetch(`${API_BASE_URL}${path}`,{headers:{Authorization:`Bearer ${accessToken}`}});
-  if(!response.ok){const data=await response.json().catch(()=>null);throw new Error(data?.message||'Falha ao baixar arquivo');}
-  const blob=await response.blob(); const url=URL.createObjectURL(blob); const anchor=document.createElement('a');
-  anchor.href=url;anchor.download=filename;anchor.click();URL.revokeObjectURL(url);
+  if (options?.awaitCompletion) {
+    // Baixa o arquivo inteiro via fetch()+blob() antes de salvar, para que a
+    // Promise só resolva quando o download de fato terminar (o link direto
+    // abaixo resolve assim que o clique acontece, antes do arquivo chegar,
+    // então o loading do caller não teria como refletir o download real).
+    // Reservado para exports de tamanho pequeno/médio — arquivos grandes
+    // (ex.: APK) continuam usando o link direto, ver comentário abaixo.
+    const response = await fetch(`${API_BASE_URL}${path}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null) as { message?: string } | null;
+      throw new Error(data?.message || 'Falha ao baixar arquivo.');
+    }
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl; anchor.download = filename; anchor.rel = 'noopener';
+    document.body.appendChild(anchor); anchor.click(); document.body.removeChild(anchor);
+    URL.revokeObjectURL(blobUrl);
+    return;
+  }
+  // Arquivos grandes (ex.: APK) via fetch()+blob() exigem baixar tudo pra
+  // memória do navegador antes de salvar — qualquer instabilidade de rede no
+  // meio do download derruba tudo, sem retomar (aparece como "Failed to
+  // fetch"). Um link direto deixa o navegador cuidar do download nativamente
+  // (grava em disco aos poucos, mais resiliente). Como a navegação direta não
+  // permite header Authorization, o token vai por query string — a rota
+  // aceita esse fallback especificamente para downloads.
+  const url=`${API_BASE_URL}${path}${path.includes('?')?'&':'?'}token=${encodeURIComponent(accessToken)}`;
+  const anchor=document.createElement('a');
+  anchor.href=url;anchor.download=filename;anchor.rel='noopener';
+  document.body.appendChild(anchor);anchor.click();document.body.removeChild(anchor);
 };
 
 export const openAuthenticatedPdf = async (path:string,token:string) => {

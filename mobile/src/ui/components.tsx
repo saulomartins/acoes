@@ -1,27 +1,31 @@
 import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors, layout, shadow } from './theme';
 
 type ButtonProps = {
   title: string;
   onPress: () => void;
   disabled?: boolean;
+  loading?: boolean;
   variant?: 'primary' | 'secondary' | 'danger';
 };
 
-export const AppButton = ({ title, onPress, disabled, variant = 'primary' }: ButtonProps) => (
+export const AppButton = ({ title, onPress, disabled, loading, variant = 'primary' }: ButtonProps) => (
   <Pressable
     onPress={onPress}
-    disabled={disabled}
+    disabled={disabled || loading}
     style={({ pressed }) => [
       styles.button,
       variant === 'secondary' && styles.secondaryButton,
       variant === 'danger' && styles.dangerButton,
-      disabled && styles.disabledButton,
-      pressed && !disabled && styles.pressed,
+      (disabled || loading) && styles.disabledButton,
+      pressed && !disabled && !loading && styles.pressed,
     ]}
   >
-    <Text style={[styles.buttonText, disabled && styles.disabledButtonText]}>{title}</Text>
+    <View style={styles.buttonContent}>
+      {loading ? <ActivityIndicator size="small" color="#fff" style={styles.buttonSpinner} /> : null}
+      <Text style={[styles.buttonText, (disabled || loading) && styles.disabledButtonText]}>{title}</Text>
+    </View>
   </Pressable>
 );
 
@@ -43,17 +47,22 @@ type DialogProps = {
   cancelLabel?: string;
   onConfirm?: () => void;
   onClose: () => void;
+  scrollable?: boolean;
 };
 
-export const AppDialog = ({ visible, title, message, tone = 'info', confirmLabel = 'Entendi', cancelLabel, onConfirm, onClose }: DialogProps) => (
+export const AppDialog = ({ visible, title, message, tone = 'info', confirmLabel = 'Entendi', cancelLabel, onConfirm, onClose, scrollable = false }: DialogProps) => (
   <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
     <View style={styles.dialogBackdrop}>
-      <View style={styles.dialogCard}>
+      <View style={[styles.dialogCard, scrollable && styles.dialogCardScrollable]}>
         <View style={[styles.dialogIcon, tone === 'success' && styles.dialogIconSuccess, tone === 'error' && styles.dialogIconError]}>
           <Text style={styles.dialogIconText}>{tone === 'success' ? '✓' : tone === 'error' ? '!' : 'i'}</Text>
         </View>
         <Text style={styles.dialogTitle}>{title}</Text>
-        <Text style={styles.dialogMessage}>{message}</Text>
+        {scrollable ? (
+          <ScrollView style={styles.dialogMessageScroll}><Text style={[styles.dialogMessage, styles.dialogMessageLeft]}>{message}</Text></ScrollView>
+        ) : (
+          <Text style={styles.dialogMessage}>{message}</Text>
+        )}
         <View style={styles.dialogActions}>
           {cancelLabel ? <Pressable onPress={onClose} style={styles.dialogCancel}><Text style={styles.dialogCancelText}>{cancelLabel}</Text></Pressable> : null}
           <Pressable onPress={onConfirm || onClose} style={[styles.dialogConfirm, tone === 'error' && styles.dialogConfirmError]}><Text style={styles.dialogConfirmText}>{confirmLabel}</Text></Pressable>
@@ -91,6 +100,14 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.99 }],
     opacity: 0.9,
   },
+  buttonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buttonSpinner: {
+    marginRight: 10,
+  },
   buttonText: {
     color: '#fff',
     fontSize: 16,
@@ -127,6 +144,9 @@ const styles = StyleSheet.create({
   },
   dialogBackdrop: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.55)', alignItems: 'center', justifyContent: 'center', padding: 20 },
   dialogCard: { width: '100%', maxWidth: 430, borderRadius: 16, backgroundColor: '#fff', padding: 22, alignItems: 'center', ...shadow },
+  dialogCardScrollable: { maxHeight: '80%' },
+  dialogMessageScroll: { alignSelf: 'stretch', maxHeight: 280, marginTop: 9 },
+  dialogMessageLeft: { textAlign: 'left', marginTop: 0 },
   dialogIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   dialogIconSuccess: { backgroundColor: colors.green },
   dialogIconError: { backgroundColor: colors.red },

@@ -1,12 +1,12 @@
 import React, { useContext, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AuthContext } from '../context/AuthContext';
 import { AppButton } from '../ui/components';
 import { colors, layout, shadow } from '../ui/theme';
+import { useBreakpoint } from '../ui/responsive';
 
 export default function Login({ navigation }: any) {
-  const { width } = useWindowDimensions();
-  const desktop = width >= 820;
+  const { isDesktop: desktop } = useBreakpoint();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const { signIn, isLoading, authError } = useContext(AuthContext);
@@ -68,7 +68,7 @@ export default function Login({ navigation }: any) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background }, page: { flexGrow: 1 }, shell: { flex: 1, minHeight: 700, overflow: 'hidden' }, shellDesktop: { flexDirection: 'row' },
   presentation: { alignSelf: 'stretch', minWidth: 0, overflow: 'hidden', backgroundColor: colors.navy, paddingHorizontal: 24, paddingTop: 28, paddingBottom: 34 }, presentationDesktop: { flex: 1.05, minHeight: '100%', paddingHorizontal: 64, paddingTop: 48, paddingBottom: 40, justifyContent: 'space-between' },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: 12 }, brandLogo: { width: 46, height: 46 }, brandName: { color: '#fff', fontSize: 19, fontWeight: '900', letterSpacing: .3 }, brandCaption: { color: '#93a6ba', fontSize: 14, marginTop: 2 },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: 14 }, brandLogo: { width: 60, height: 60 }, brandName: { color: '#fff', fontSize: 26, fontWeight: '900', letterSpacing: .2 }, brandCaption: { color: '#a9bbcc', fontSize: 15, marginTop: 3, fontWeight: '600' },
   heroContent: { alignSelf: 'stretch', maxWidth: 560, minWidth: 0, marginTop: 54 }, eyebrow: { color: '#65c7b6', fontSize: 14, fontWeight: '900', letterSpacing: 1.4, marginBottom: 14 }, heroTitle: { flexShrink: 1, color: '#fff', fontSize: 30, lineHeight: 38, fontWeight: '900', letterSpacing: -.6 }, heroTitleDesktop: { fontSize: 47, lineHeight: 55 }, heroText: { flexShrink: 1, color: '#b9c6d3', fontSize: 17, lineHeight: 23, marginTop: 17 },
   featureList: { marginTop: 30, gap: 14 }, feature: { flexDirection: 'row', alignItems: 'center', gap: 11 }, check: { width: 25, height: 25, borderRadius: 8, backgroundColor: '#173e4a', alignItems: 'center', justifyContent: 'center' }, checkText: { color: '#61c9b5', fontSize: 15, fontWeight: '900' }, featureText: { flex: 1, flexShrink: 1, color: '#d7e0e8', fontSize: 15, fontWeight: '600' }, presentationFooter: { color: '#71859a', fontSize: 13 },
   loginArea: { alignSelf: 'stretch', minWidth: 0, padding: 16, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }, loginAreaDesktop: { flex: .95, paddingHorizontal: 60, paddingVertical: 50 }, loginCard: { alignSelf: 'stretch', minWidth: 0, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: layout.radius, padding: 20, overflow: 'hidden', ...shadow }, loginCardDesktop: { width: '100%', maxWidth: 430 }, mobileBrand: { display: 'none' }, mobileBrandLogo: { width: 38, height: 38 }, mobileBrandName: { color: colors.navy, fontWeight: '900', fontSize: 17 },

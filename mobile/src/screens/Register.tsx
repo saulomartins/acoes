@@ -67,8 +67,11 @@ export default function Register({ navigation }: any) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
-  container: { flexGrow: 1, padding: 20, paddingTop: 54, justifyContent: 'center' },
+  container: { flexGrow: 1, padding: 20, paddingTop: 54, justifyContent: 'center', alignItems: 'center' },
   hero: {
+    width: '100%',
+    maxWidth: 460,
+    alignSelf: 'center',
     borderRadius: 8,
     backgroundColor: colors.primaryDark,
     padding: 22,
@@ -79,6 +82,9 @@ const styles = StyleSheet.create({
   title: { color: '#fff', fontSize: 28, lineHeight: 34, fontWeight: '900' },
   subtitle: { color: '#dbeafe', marginTop: 10, lineHeight: 21, fontWeight: '600' },
   card: {
+    width: '100%',
+    maxWidth: 460,
+    alignSelf: 'center',
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,

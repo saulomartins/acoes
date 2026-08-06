@@ -1,0 +1,11 @@
+# Cloudflare Pages Redirects Configuration
+# Proxy API requests to Railway backend
+
+# API requests - proxy to Railway
+/api/*  https://acoes-production.up.railway.app/api/:splat  200
+
+# Health check
+/health  https://acoes-production.up.railway.app/health  200
+
+# SPA fallback - all other requests go to index.html
+/*  /index.html  200

@@ -1,3 +1,6 @@
+import { randomUUID } from 'crypto';
+import { query, withTransaction } from '../db';
+
 type PushInput = {
   tokens: string[];
   title: string;
@@ -54,4 +57,46 @@ export const sendPushNotification = async (input: PushInput) => {
     errors,
     invalidTokens: Array.from(invalidTokens),
   };
+};
+
+// Cria um aviso no inbox do app (Comunicação) para cada destinatário e, em
+// paralelo, tenta o push nativo — usado sempre que uma ação de um lado
+// (síndico/subsíndico ou morador) gera algo que a outra parte precisa ver.
+// Nunca lança: falha de notificação não pode derrubar a ação principal.
+export const notifyUsers = async (input: {
+  condominiumId: string;
+  senderId?: string | null;
+  recipientIds: string[];
+  title: string;
+  body: string;
+  screen?: string;
+}) => {
+  const recipientIds = Array.from(new Set(input.recipientIds));
+  if (!recipientIds.length) return;
+
+  const devices = await query<{ fcm_token: string }>(`select distinct fcm_token from device_tokens where user_id = any($1::uuid[])`, [recipientIds]);
+  const tokens = devices.rows.map(row => row.fcm_token).filter(Boolean);
+  let push: { status: string; invalidTokens?: string[]; errors?: string[] };
+  try {
+    push = await sendPushNotification({ tokens, title: input.title, body: input.body, data: { screen: input.screen || 'Communications' } });
+    if (push.invalidTokens?.length) await query(`delete from device_tokens where fcm_token = any($1::text[])`, [push.invalidTokens]);
+  } catch (error) {
+    console.warn('notifyUsers push failed', error);
+    push = { status: 'provider_error' };
+  }
+
+  try {
+    await withTransaction(async client => {
+      const notificationId = randomUUID();
+      await client.query(
+        `insert into notifications(id,condominium_id,title,body,created_by,provider_status,audience_type) values($1,$2,$3,$4,$5,$6,'personal')`,
+        [notificationId, input.condominiumId, input.title, input.body, input.senderId || null, push.status],
+      );
+      for (const userId of recipientIds) {
+        await client.query(`insert into notification_recipients(notification_id,user_id) values($1,$2) on conflict do nothing`, [notificationId, userId]);
+      }
+    });
+  } catch (error) {
+    console.error('notifyUsers failed to record in-app notification', error);
+  }
 };

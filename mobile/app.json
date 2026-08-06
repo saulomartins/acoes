@@ -3,7 +3,7 @@
     "name": "Lar em Dia",
     "slug": "lar-em-dia",
     "scheme": "laremdia",
-    "version": "1.0.0",
+    "version": "1.2.1",
     "orientation": "portrait",
     "icon": "./assets/lar-em-dia-logo.png",
     "ios": {
@@ -13,6 +13,7 @@
     "android": {
       "package": "com.appcond.condominio",
       "versionCode": 1,
+      "googleServicesFile": "./google-services.json",
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/lar-em-dia-logo.png",
@@ -26,7 +27,14 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-notifications"
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/lar-em-dia-logo.png",
+          "color": "#2563c5",
+          "defaultChannel": "default"
+        }
+      ]
     ],
     "extra": {
       "eas": {

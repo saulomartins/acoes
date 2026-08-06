@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "936204217828",
+    "project_id": "lar-em-dia-bc118",
+    "storage_bucket": "lar-em-dia-bc118.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:936204217828:android:30956a53864a6dce3f6bf1",
+        "android_client_info": {
+          "package_name": "com.appcond.condominio"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCWOqfWr7xxl7IfYO61YfcOdnuEOgR2LZ4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

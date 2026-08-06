@@ -12,7 +12,33 @@ type AuthUser = {
   role: UserRole;
   condominiumId: string | null;
   condominiumName?: string | null;
+  fullName?: string | null;
+  mustChangePassword?: boolean;
+  termsAcceptedVersion?: string | null;
+  termsAcceptedAt?: string | null;
+  tourCompletedVersion?: string | null;
+  tourCompletedAt?: string | null;
+  // null = perfil padrão. Setado = um dos perfis extras listados em `profiles`.
+  activeProfileId?: string | null;
 };
+
+// Um login pode ter mais de um perfil (ex.: síndico que também é
+// proprietário de uma unidade) — id null é sempre o perfil padrão.
+export type Profile = {
+  id: string | null;
+  role: UserRole;
+  condominiumId: string | null;
+  condominiumName: string | null;
+};
+
+// Chaves de externals/api/src/services/featureCatalog.ts — mantidas em
+// sincronia manualmente (mesmo padrão já usado para outros pequenos
+// vocabulários compartilhados entre backend e mobile neste projeto).
+export type FeatureKey =
+  | 'pessoas' | 'tipologias' | 'blocos_unidades' | 'prestacao_contas'
+  | 'gestao_cobrancas' | 'gestao_debitos' | 'historico_acordos'
+  | 'config_enviar_cobrancas' | 'cobrancas_adicionais'
+  | 'avisos_comunicacao' | 'relatos_solicitacoes' | 'enquetes' | 'reserva_espacos' | 'regimento_ocorrencias';
 
 type AuthContextType = {
   user: AuthUser | null;
@@ -21,9 +47,23 @@ type AuthContextType = {
   authError: string | null;
   pushStatus: 'idle' | 'registering' | 'registered' | 'permission_denied' | 'error';
   pushError: string | null;
+  // null = admin_geral (sem condomínio único) ou ainda carregando — nesses
+  // casos nada deve ser escondido por funcionalidade, só por papel.
+  condominiumFeatures: Record<FeatureKey, boolean> | null;
+  // Sempre tem ao menos o perfil padrão quando autenticado. Um seletor de
+  // perfil só faz sentido exibir quando profiles.length > 1.
+  profiles: Profile[];
+  // true logo após um login explícito (usuário/senha) quando a pessoa tem
+  // mais de um perfil — AppNavigator usa isso pra mostrar a tela "Entrar
+  // como" antes do painel. Nunca fica true numa retomada silenciosa de
+  // sessão (reabrir o app), só em signIn().
+  needsProfileSelection: boolean;
   signIn: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   signUp: (username: string, password: string) => Promise<void>;
+  updateUser: (user: AuthUser) => Promise<void>;
+  switchProfile: (profileId: string | null) => Promise<void>;
+  selectProfile: (profileId: string | null) => Promise<void>;
 };
 
 type AuthResponse = {
@@ -107,6 +147,32 @@ const refreshAuth = async (refreshToken: string) => {
   return data;
 };
 
+const fetchProfiles = async (token: string): Promise<Profile[]> => {
+  const response = await fetch(`${API_BASE_URL}/auth/profiles`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) return [];
+  const data = (await response.json().catch(() => null)) as { profiles?: Profile[] } | null;
+  return data?.profiles ?? [];
+};
+
+const switchProfileRequest = async (refreshToken: string, profileId: string | null) => {
+  const response = await fetch(`${API_BASE_URL}/auth/switch-profile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken, profileId }),
+  });
+
+  const data = (await response.json().catch(() => null)) as AuthResponse | { message?: string } | null;
+  if (!response.ok) {
+    const message = data && 'message' in data && data.message ? data.message : 'Não foi possível trocar de perfil.';
+    throw new Error(message);
+  }
+  if (!data || !('token' in data) || !data.token || !('user' in data)) {
+    throw new Error('Resposta inválida do servidor');
+  }
+
+  return data;
+};
+
 export const AuthContext = createContext<AuthContextType>({
   user: null,
   userToken: null,
@@ -114,9 +180,15 @@ export const AuthContext = createContext<AuthContextType>({
   authError: null,
   pushStatus: 'idle',
   pushError: null,
+  condominiumFeatures: null,
+  profiles: [],
+  needsProfileSelection: false,
   signIn: async () => {},
   signOut: async () => {},
   signUp: async () => {},
+  updateUser: async () => {},
+  switchProfile: async () => {},
+  selectProfile: async () => {},
 });
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -126,6 +198,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [pushStatus, setPushStatus] = useState<AuthContextType['pushStatus']>('idle');
   const [pushError, setPushError] = useState<string | null>(null);
+  const [condominiumFeatures, setCondominiumFeatures] = useState<Record<FeatureKey, boolean> | null>(null);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [needsProfileSelection, setNeedsProfileSelection] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -192,6 +267,40 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => { active = false; };
   }, [userToken, user?.id]);
 
+  useEffect(() => {
+    if (!userToken || !user) {
+      setCondominiumFeatures(null);
+      return;
+    }
+    if (user.role === 'admin_geral') {
+      setCondominiumFeatures(null);
+      return;
+    }
+    let active = true;
+    const loadFeatures = () => fetch(`${API_BASE_URL}/auth/me`, { headers: { Authorization: `Bearer ${userToken}` } })
+      .then(response => response.ok ? response.json() : null)
+      .then((data: { condominiumFeatures?: Record<FeatureKey, boolean> | null } | null) => {
+        if (active) setCondominiumFeatures(data?.condominiumFeatures ?? ({} as Record<FeatureKey,boolean>));
+      })
+      .catch(() => { if (active) setCondominiumFeatures({} as Record<FeatureKey,boolean>); });
+    setCondominiumFeatures(null);
+    loadFeatures();
+    const timer=setInterval(loadFeatures,60_000);
+    return () => { active = false; clearInterval(timer); };
+  }, [userToken, user?.id, user?.role]);
+
+  useEffect(() => {
+    if (!userToken || !user) {
+      setProfiles([]);
+      return;
+    }
+    let active = true;
+    fetchProfiles(userToken)
+      .then(list => { if (active) setProfiles(list); })
+      .catch(() => { if (active) setProfiles([]); });
+    return () => { active = false; };
+  }, [userToken, user?.id]);
+
   const applyAuthResponse = async (response: AuthResponse) => {
     await saveAuth(response);
     setUserToken(response.token);
@@ -204,6 +313,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const response = await requestAuth('/auth/login', username.trim(), password);
       await applyAuthResponse(response);
+      // Login explícito (não retomada de sessão): se a pessoa tem mais de um
+      // perfil, o AppNavigator mostra a tela "Entrar como" antes do painel.
+      const list = await fetchProfiles(response.token).catch(() => []);
+      setProfiles(list);
+      setNeedsProfileSelection(list.length > 1);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Falha ao entrar';
       setAuthError(message);
@@ -228,6 +342,41 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const updateUser = async (nextUser: AuthUser) => {
+    await storage.set('authUser', JSON.stringify(nextUser));
+    setUser(nextUser);
+  };
+
+  const switchProfile = async (profileId: string | null) => {
+    const refreshToken = await storage.get('refreshToken');
+    if (!refreshToken) throw new Error('Sessão expirada. Entre novamente.');
+    setIsLoading(true);
+    setAuthError(null);
+    try {
+      const response = await switchProfileRequest(refreshToken, profileId);
+      await applyAuthResponse(response);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Não foi possível trocar de perfil.';
+      setAuthError(message);
+      throw e;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Usada pela tela "Entrar como" logo após o login (quando há mais de um
+  // perfil). Diferente de switchProfile (troca a qualquer momento dentro do
+  // app), esta só resolve a seleção pendente do login atual.
+  const selectProfile = async (profileId: string | null) => {
+    try {
+      if (profileId !== (user?.activeProfileId ?? null)) {
+        await switchProfile(profileId);
+      }
+    } finally {
+      setNeedsProfileSelection(false);
+    }
+  };
+
   const signOut = async () => {
     setIsLoading(true);
     setAuthError(null);
@@ -249,13 +398,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       await clearAuth();
       setUserToken(null);
       setUser(null);
+      setNeedsProfileSelection(false);
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, userToken, isLoading, authError, pushStatus, pushError, signIn, signOut, signUp }}>
+    <AuthContext.Provider value={{ user, userToken, isLoading, authError, pushStatus, pushError, condominiumFeatures, profiles, needsProfileSelection, signIn, signOut, signUp, updateUser, switchProfile, selectProfile }}>
       {children}
     </AuthContext.Provider>
   );

@@ -6,6 +6,15 @@ export type AuthenticatedUser = {
   role: UserRole;
   condominiumId: string | null;
   condominiumName?: string | null;
+  fullName?: string | null;
+  mustChangePassword: boolean;
+  termsAcceptedVersion?: string | null;
+  termsAcceptedAt?: string | null;
+  tourCompletedVersion?: string | null;
+  tourCompletedAt?: string | null;
+  // null = perfil padrão (role/condominiumId direto da linha em `users`).
+  // Setado = um dos perfis extras em `user_profiles` (ver authService.switchProfile).
+  activeProfileId?: string | null;
 };
 
 export type AccessTokenPayload = AuthenticatedUser & {

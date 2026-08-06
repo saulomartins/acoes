@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
+import { requireFeature } from '../middleware/requireFeature';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { query, withTransaction } from '../db';
 import multer from 'multer';
@@ -10,6 +11,7 @@ import { Readable } from 'stream';
 import { createInterBoleto } from '../services/interService';
 import { createBillingTemplateWorkbook } from '../services/billingTemplateService';
 import { getInterIntegration } from './invoiceRoutes';
+import { notifyNewInvoice } from '../services/invoiceReminderService';
 import { logAudit } from '../services/auditService';
 
 const router = Router();
@@ -75,7 +77,7 @@ const extraChargesByUnit = async (unitIds: (string | null | undefined)[], refere
   }
   return map;
 };
-router.use(authenticate, authorize('sindico', 'subsindico'));
+router.use(authenticate, authorize('sindico', 'subsindico'), requireFeature('config_enviar_cobrancas'));
 
 router.get('/settings', asyncHandler(async (req, res) => {
   const [result, condominium] = await Promise.all([query(
@@ -129,11 +131,14 @@ router.post('/batches/preview', asyncHandler(async (req, res) => {
     id: string; full_name: string | null; username: string; cpf: string | null; unit: string | null; unit_id: string | null;
     unit_type_name: string | null; fee_cents: number | null; street: string|null; address_number: string|null; neighborhood: string|null;
     city: string|null; state: string|null; postal_code: string|null; duplicate: boolean; billing_exempt:boolean; preferred_due_day:number;
+    existing_amount_cents: number|null; existing_status: string|null;
   }>(
     `select u.id,u.full_name,u.username,u.cpf,u.unit,u.billing_exempt,u.preferred_due_day,
        u.street,u.address_number,u.neighborhood,u.city,u.state,u.postal_code,
        un.id unit_id,ut.name unit_type_name,ut.fee_cents,
-       exists(select 1 from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status <> 'canceled') duplicate
+       exists(select 1 from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status <> 'canceled') duplicate,
+       (select i.amount_cents from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status <> 'canceled' order by i.created_at desc limit 1) existing_amount_cents,
+       (select i.status from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status <> 'canceled' order by i.created_at desc limit 1) existing_status
      from users u left join units un on un.id=u.unit_id left join unit_types ut on ut.id=un.unit_type_id
      where u.condominium_id=$1 and u.id=any($2::uuid[]) order by u.full_name,u.username`,
     [condominiumId, userIds, `${referenceMonth}-01`],
@@ -143,9 +148,15 @@ router.post('/batches/preview', asyncHandler(async (req, res) => {
     const override=Number(amountOverrides[row.id]); const hasOverride=Number.isInteger(override)&&override>0;
     const feeCents=hasOverride?override:Number(row.fee_cents||0)+(extra?.sumCents||0);
     const missingFields=missingBillingFields(row,Boolean(hasOverride||row.fee_cents));
-    return ({ ...row, extraChargeCents: extra?.sumCents||0, manualOverride: hasOverride, valid: Boolean(!missingFields.length && !row.duplicate && !row.billing_exempt && dueDate>=todayIso()),
+    // Duplicidade não bloqueia mais a validade: uma pessoa pode ter mais de um
+    // boleto na mesma referência (ex.: cobrança extra). O front decide se pede
+    // confirmação extra mostrando existingAmountCents/existingStatus.
+    return ({ ...row, extraChargeCents: extra?.sumCents||0, manualOverride: hasOverride,
+    existingAmountCents: row.existing_amount_cents, existingStatus: row.existing_status,
+    valid: Boolean(!missingFields.length && !row.billing_exempt && dueDate>=todayIso()),
     issues: [missingFields.length ? `Cadastro incompleto: falta preencher ${missingFields.join(', ')}` : null,
-      row.duplicate ? 'Cobrança já existente nesta referência' : null, row.billing_exempt ? 'Pessoa isenta de boleto' : null,
+      row.duplicate ? `Já existe cobrança de ${(Number(row.existing_amount_cents||0)/100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} nesta referência (não impede uma nova emissão)` : null,
+      row.billing_exempt ? 'Pessoa isenta de boleto' : null,
       dueDate<todayIso() ? `O vencimento ${formatDateBr(dueDate)} já passou` : null].filter(Boolean),
       due_date:dueDate, fee_cents:feeCents })});
   return res.json({ referenceMonth, items, validCount: items.filter(i => i.valid).length,
@@ -166,13 +177,14 @@ router.post('/batches', asyncHandler(async (req, res) => {
   if(!condominium.rows[0]?.name||!condominium.rows[0]?.cnpj) return res.status(400).json({message:'Complete o nome e o CNPJ do condomínio antes de gerar boletos.'});
   const overrideFor=(personId:string)=>{const value=Number(amountOverrides[personId]);return Number.isInteger(value)&&value>0?value:null;};
   const people = await query<any>(
-    `select u.id,u.full_name,u.username,u.cpf,u.preferred_due_day,un.id unit_id,ut.fee_cents,
-       exists(select 1 from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status<>'canceled') duplicate
+    `select u.id,u.full_name,u.username,u.cpf,u.preferred_due_day,un.id unit_id,ut.fee_cents
      from users u left join units un on un.id=u.unit_id left join unit_types ut on ut.id=un.unit_type_id
      where u.condominium_id=$1 and u.billing_exempt=false and u.id=any($2::uuid[])`,
-    [condominiumId,userIds,`${referenceMonth}-01`],
+    [condominiumId,userIds],
   );
-  if (people.rows.some((person:any)=>person.duplicate)) return res.status(409).json({ message:'Uma ou mais pessoas já possuem cobrança nesta referência.' });
+  // Uma pessoa pode ter mais de uma cobrança na mesma referência (ex.: cobrança
+  // extra/avulsa) — não bloqueamos aqui. O aviso já foi mostrado na prévia
+  // (/batches/preview) para o síndico confirmar antes de chegar neste ponto.
   const withoutAmount=people.rows.filter((person:any)=>!overrideFor(person.id)&&!person.fee_cents);
   if (withoutAmount.length) return res.status(400).json({ message: `${withoutAmount.map((p:any)=>p.full_name||p.username).join(', ')} sem valor de tipologia. Informe um valor manual ou complete o cadastro da unidade.` });
   const extraMap = await extraChargesByUnit(people.rows.map((p:any)=>p.unit_id), `${referenceMonth}-01`);
@@ -455,12 +467,16 @@ router.post('/batches/:id/issue', asyncHandler(async (req,res)=>{
       if(missingFieldsMessage) throw new Error(missingFieldsMessage);
       const payerCpf=String(item.cpf).replace(/\D/g,'');
       reservationKey=randomUUID();
+      // A trava é só contra corrida (clique duplo/requisições concorrentes) durante
+      // a emissão em si — uma pessoa pode ter várias cobranças ativas ao longo do
+      // tempo. Por isso só bloqueia se já existe uma reserva em andamento (feita há
+      // menos de 2 minutos); reservas concluídas (reservation_key volta a null) ou
+      // travadas há mais tempo liberam uma nova tentativa.
       const reservation=await query(`insert into inter_issuance_guards(payer_cpf,user_id,reservation_key) values($1,$2,$3)
         on conflict(payer_cpf) do update set user_id=excluded.user_id,invoice_id=null,reservation_key=excluded.reservation_key,reserved_at=now()
-        where (inter_issuance_guards.invoice_id is null and inter_issuance_guards.reservation_key is null)
-           or exists(select 1 from invoices previous where previous.id=inter_issuance_guards.invoice_id and previous.status='canceled')
+        where inter_issuance_guards.reservation_key is null or inter_issuance_guards.reserved_at < now() - interval '2 minutes'
         returning payer_cpf`,[payerCpf,item.user_id,reservationKey]);
-      if(!reservation.rows[0]) throw new Error('Já existe uma cobrança ativa ou uma emissão reservada para este CPF.');
+      if(!reservation.rows[0]) throw new Error('Já existe uma emissão em andamento para este CPF. Aguarde alguns instantes e tente novamente.');
       const dueDate=interDate(item.due_date);
       if(dueDate<todayIso()) throw new Error(`O vencimento ${formatDateBr(dueDate)} já passou. Escolha um vencimento igual ou posterior a ${formatDateBr(todayIso())}.`);
       const description=(batch.description||`Taxa condominial - ${item.unit_type_name||item.unit}`)+(!hasOverride&&extra?.descriptions.length?` + ${extra.descriptions.join(', ')}`:'');
@@ -469,6 +485,7 @@ router.post('/batches/:id/issue', asyncHandler(async (req,res)=>{
       await query(`update billing_batch_items set status='issued',invoice_id=$1,amount_cents=$2,issues='[]'::jsonb where id=$3`,[invoice.rows[0].id,amountCents,item.id]);
       await query(`update inter_issuance_guards set invoice_id=$1,reservation_key=null where payer_cpf=$2 and reservation_key=$3`,[invoice.rows[0].id,payerCpf,reservationKey]);
       if(!hasOverride&&extra?.installmentIds.length) await query(`update unit_extra_charge_installments set status='applied',invoice_id=$1,applied_at=now() where id=any($2::uuid[])`,[invoice.rows[0].id,extra.installmentIds]);
+      await notifyNewInvoice({id:invoice.rows[0].id,condominiumId:condominiumId!,userId:item.user_id,amountCents,dueDate:item.due_date});
       issued+=1;
     }catch(error:any){failed+=1;if(reservationKey)await query(`delete from inter_issuance_guards where payer_cpf=$1 and reservation_key=$2 and invoice_id is null`,[String(item.cpf).replace(/\D/g,''),reservationKey]);const reason=issuanceErrorMessage(error);console.error('Falha na emissão do item do lote',{batchId:batch.id,itemId:item.id,code:error?.code||null,reason});failures.push({payerName:item.full_name||item.username||item.payer_name,reason});await query(`update billing_batch_items set status='failed',issues=$1 where id=$2`,[JSON.stringify([reason]),item.id]);}
   }

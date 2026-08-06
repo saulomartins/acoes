@@ -1,11 +1,12 @@
 import {randomUUID} from 'crypto';
 import {Router} from 'express';
 import {authenticate,authorize} from '../middleware/auth';
+import {requireFeature} from '../middleware/requireFeature';
 import {asyncHandler} from '../middleware/asyncHandler';
 import {query,withTransaction} from '../db';
 import {sendPushNotification} from '../services/notificationService';
 
-const router=Router();router.use(authenticate);
+const router=Router();router.use(authenticate);router.use(requireFeature('relatos_solicitacoes'));
 const manager=(role?:string)=>role==='sindico'||role==='subsindico';
 const access=async(id:string,user:any)=>{const result=await query<any>(`select r.*,u.full_name resident_name,u.username resident_username,coalesce(b.name || ' / ' || un.number,u.unit) unit from resident_reports r join users u on u.id=r.created_by left join units un on un.id=u.unit_id left join blocks b on b.id=un.block_id where r.id=$1 and r.condominium_id=$2 and ($3::boolean=true or r.created_by=$4)`,[id,user.condominiumId,manager(user.role),user.id]);return result.rows[0];};
 const trimMessage=(value:string,max=120)=>value.length>max?`${value.slice(0,max-1)}…`:value;

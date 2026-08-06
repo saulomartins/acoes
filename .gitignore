@@ -3,3 +3,8 @@ dist
 .env
 .env.local
 .DS_Store
+releases/*.apk
+releases/*.json
+releases/*.log
+mobile/web-run.err.log
+mobile/web-run.out.log

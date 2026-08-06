@@ -1,0 +1,32 @@
+{
+  "name": "condominio-app",
+  "type": "javascript",
+  "account_id": "",
+  "main": "dist/index.js",
+  "build": {
+    "command": "npm run build:web",
+    "cwd": "./",
+    "watch_paths": ["src/**/*.{ts,tsx}"]
+  },
+  "env": {
+    "production": {
+      "vars": {
+        "EXPO_PUBLIC_API_URL": "https://acoes-production.up.railway.app"
+      }
+    },
+    "preview": {
+      "vars": {
+        "EXPO_PUBLIC_API_URL": "https://acoes-production.up.railway.app"
+      }
+    }
+  },
+  "site": {
+    "bucket": "./dist"
+  },
+  "routes": [
+    {
+      "pattern": "**",
+      "zone_name": "gestaolaremdia.com"
+    }
+  ]
+}

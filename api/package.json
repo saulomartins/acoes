@@ -7,19 +7,25 @@
     "start": "node dist/index.js",
     "build": "tsc -p .",
     "db:setup": "ts-node --files src/scripts/setupDatabase.ts",
+    "releases:seed-android": "ts-node --files src/scripts/seedAndroidRelease.ts",
+    "releases:publish-android-link": "ts-node --files src/scripts/publishAndroidReleaseLink.ts",
     "units:link-complements": "ts-node --files src/scripts/linkUsersToUnitsFromAddressComplement.ts",
     "inter:sync": "ts-node --files src/scripts/syncInterIntegration.ts",
     "inter:test": "ts-node --files src/scripts/testInterToken.ts",
-    "inter:audit": "ts-node --files src/scripts/auditBankIntegrations.ts"
+    "inter:audit": "ts-node --files src/scripts/auditBankIntegrations.ts",
+    "admin:update": "ts-node --files src/scripts/updateAdminProfile.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "bcrypt": "^5.1.0",
     "dotenv": "^16.0.0",
     "exceljs": "^4.4.0",
     "express": "^4.18.2",
+    "googleapis": "^173.0.0",
     "jsonwebtoken": "^9.0.0",
     "jszip": "^3.10.1",
     "multer": "^2.2.0",
+    "node-cron": "^3.0.3",
     "nodemailer": "^9.0.3",
     "pdf-parse": "^1.1.1",
     "pg": "^8.9.0"
@@ -30,9 +36,11 @@
     "@types/jsonwebtoken": "^9.0.2",
     "@types/multer": "^2.2.0",
     "@types/node": "^20.2.5",
+    "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^8.0.1",
     "@types/pdf-parse": "^1.1.4",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.1.3"
+    "typescript": "^5.1.3",
+    "vitest": "^2.1.9"
   }
 }

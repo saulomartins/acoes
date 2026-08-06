@@ -4,7 +4,10 @@ import type { UserRole } from '../types';
 
 export const authenticate = (req: Request, res: Response, next: NextFunction) => {
   const header = req.headers.authorization;
-  const token = header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : null;
+  // Downloads acionados por um link direto do navegador (não um fetch() com
+  // header customizado) não conseguem anexar Authorization — para essas
+  // rotas específicas, o token também pode vir por query string.
+  const token = header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : (typeof req.query.token === 'string' ? req.query.token : null);
 
   if (!token) {
     return res.status(401).json({ message: 'authorization token is required' });

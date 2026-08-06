@@ -294,6 +294,102 @@ export const getInterBoleto = async (codigoSolicitacao: string, integration: Int
   });
 };
 
+// Situações que a API do Inter pode reportar para uma cobrança, e o status
+// local (invoice_status, só 5 valores) que cada uma representa. Único lugar
+// desse mapeamento — usado tanto pela sincronização individual quanto pela
+// busca/reconciliação em lote, pra evitar as duas implementações divergirem
+// de novo (era a causa de MARCADO_RECEBIDO, EM_PROCESSAMENTO, FALHA_EMISSAO
+// e PROTESTO ficarem invisíveis pro sistema).
+export type LocalInvoiceStatus = 'pending_provider' | 'issued' | 'paid' | 'overdue' | 'canceled';
+const INTER_STATUS_MAP: Record<string, LocalInvoiceStatus> = {
+  A_RECEBER: 'issued',
+  ATRASADO: 'overdue',
+  EXPIRADO: 'overdue',
+  PROTESTO: 'overdue', // dívida enviada a cartório: continua contando como em aberto/atrasada
+  RECEBIDO: 'paid',
+  MARCADO_RECEBIDO: 'paid', // conciliado manualmente no banco (fora do fluxo padrão) — mesmo efeito de pago
+  CANCELADO: 'canceled',
+  ARQUIVADO: 'canceled',
+  FALHA_EMISSAO: 'canceled', // tentativa não gerou boleto utilizável; libera o morador para nova emissão
+  // EM_PROCESSAMENTO e qualquer situação não mapeada caem no fallback abaixo.
+};
+export const mapInterStatus = (situacao: string | null | undefined): LocalInvoiceStatus =>
+  INTER_STATUS_MAP[situacao || ''] || 'pending_provider';
+
+export type InterListedBoleto = {
+  cobranca: {
+    codigoSolicitacao: string;
+    situacao: string;
+    dataVencimento: string;
+    dataSituacao?: string;
+    valorNominal: number | string;
+    valorTotalRecebido?: number | string;
+    pagador?: { nome?: string; cpfCnpj?: string };
+  };
+  boleto?: { linhaDigitavel?: string; codigoBarras?: string };
+  pix?: { pixCopiaECola?: string };
+};
+
+// Consulta uma única janela de datas, paginando até o fim. A API do Inter
+// costuma limitar o intervalo aceito entre dataInicial/dataFinal (não é
+// documentado com precisão, mas relatos de integração apontam algo em torno
+// de 90 dias a 1 ano); por isso quem chama esta função deve fatiar períodos
+// longos em janelas menores via listInterBoletosByPayer.
+const listInterBoletosWindow = async (
+  document: string | null,
+  startDate: string,
+  endDate: string,
+  integration: InterIntegrationConfig,
+) => {
+  const accessToken = await getInterAccessToken(integration);
+  if (!accessToken) throw new Error('Integração Banco Inter desabilitada ou incompleta.');
+  const charges: InterListedBoleto[] = [];
+  let page = 0;
+  let lastPage = false;
+  while (!lastPage) {
+    const params = new URLSearchParams({
+      dataInicial: startDate, dataFinal: endDate, filtrarDataPor: 'VENCIMENTO',
+      'paginacao.itensPorPagina': '1000',
+      'paginacao.paginaAtual': String(page), ordenarPor: 'DATA_VENCIMENTO', tipoOrdenacao: 'DESC',
+    });
+    if (document) params.set('cpfCnpjPessoaPagadora', document);
+    const response = await interRequest<{ totalPaginas?: number; ultimaPagina?: boolean; cobrancas?: InterListedBoleto[] }>(
+      integration, `/cobranca/v3/cobrancas?${params.toString()}`,
+      { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    charges.push(...(response.cobrancas || []));
+    lastPage = response.ultimaPagina === true || page + 1 >= Number(response.totalPaginas || 1);
+    page += 1;
+  }
+  return charges;
+};
+
+// Fatia [startDate, endDate] em janelas de até ~330 dias, pois a API do Inter
+// pode ignorar ou rejeitar intervalos muito longos numa única chamada. Passar
+// payerDocument=null busca todas as cobranças da conta, sem filtrar por
+// pagador (usado para varrer o condomínio inteiro).
+export const listInterBoletosByPayer = async (
+  payerDocument: string | null,
+  startDate: string,
+  endDate: string,
+  integration: InterIntegrationConfig,
+) => {
+  const document = payerDocument ? payerDocument.replace(/\D/g, '') : '';
+  if (document && ![11, 14].includes(document.length)) throw new Error('CPF/CNPJ do pagador inválido para consulta no Banco Inter.');
+  const windowDays = 330;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  const charges: InterListedBoleto[] = [];
+  for (let windowStart = start; windowStart <= end; windowStart = new Date(windowStart.getTime() + windowDays * dayMs)) {
+    const windowEndCandidate = new Date(windowStart.getTime() + (windowDays - 1) * dayMs);
+    const windowEnd = windowEndCandidate < end ? windowEndCandidate : end;
+    const iso = (date: Date) => date.toISOString().slice(0, 10);
+    charges.push(...await listInterBoletosWindow(document || null, iso(windowStart), iso(windowEnd), integration));
+  }
+  return charges;
+};
+
 export const getInterBoletoPdf = async (codigoSolicitacao: string, integration: InterIntegrationConfig) => {
   const accessToken=await getInterAccessToken(integration);
   if(!accessToken)throw new Error('Integração Banco Inter desabilitada ou incompleta.');

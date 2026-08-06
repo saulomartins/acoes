@@ -22,7 +22,7 @@ export const config = {
   // depois disso o usuário precisa logar de novo mesmo com uso contínuo do app.
   refreshTokenExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
   webUrl: process.env.APP_WEB_URL || 'http://localhost:8081',
-  allowedOrigins: (process.env.CORS_ORIGINS || process.env.APP_WEB_URL || 'http://localhost:8081,http://localhost:19006')
+  allowedOrigins: (process.env.CORS_ORIGINS || process.env.APP_WEB_URL || 'http://localhost:8081,http://localhost:8082,http://localhost:19006')
     .split(',').map(value => value.trim()).filter(Boolean),
   email: {
     resendApiKey: process.env.RESEND_API_KEY || '',
@@ -45,6 +45,11 @@ export const config = {
     baseUrl: process.env.INTER_BASE_URL || 'https://cdpj.partners.bancointer.com.br',
     tokenPath: process.env.INTER_TOKEN_PATH || '/oauth/v2/token',
     scopes: process.env.INTER_SCOPES || 'boleto-cobranca.write boleto-cobranca.read',
+  },
+  googleDrive: {
+    clientId: process.env.GOOGLE_DRIVE_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_DRIVE_CLIENT_SECRET || '',
+    refreshToken: process.env.GOOGLE_DRIVE_REFRESH_TOKEN || '',
   },
 };
 
