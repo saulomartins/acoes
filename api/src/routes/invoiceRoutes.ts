@@ -953,6 +953,10 @@ router.get('/:id/pdf', asyncHandler(async(req,res)=>{
   const row=invoice.rows[0];if(!row)return res.status(404).json({message:'Boleto não encontrado.'});
   if(['proprietario','inquilino'].includes(req.user?.role||'')&&row.user_id!==req.user?.id)return res.status(403).json({message:'Você não pode acessar este boleto.'});
   if(row.status==='canceled')return res.status(409).json({message:'Este boleto foi cancelado e não deve ser impresso para pagamento.'});
+  // 'pending_provider' = enviado ao Inter, sem confirmação de registro. O
+  // PDF ou não existe ainda no banco ou sairia sem linha digitável válida —
+  // imprimir nesse estado gera boleto impagável na mão do morador.
+  if(row.status==='pending_provider')return res.status(409).json({message:'O banco ainda não confirmou o registro deste boleto. Aguarde a confirmação para imprimir o PDF.'});
   if(!row.external_id)return res.status(409).json({message:'O Banco Inter ainda não disponibilizou o PDF deste boleto.'});
   const integration=await getInterIntegration(row.condominium_id);if(!integration)return res.status(400).json({message:'Integração Banco Inter não configurada.'});
   let pdf: Buffer;

@@ -161,19 +161,68 @@ export const register = async (username: string, password: string, role: UserRol
   return createSession(publicUser(created));
 };
 
-export const login = async (username: string, password: string) => {
-  const normalizedUsername = username.trim().toLowerCase();
+// Resultado especial de login(): o identificador informado (CPF ou e-mail)
+// serve para mais de uma conta ativa e a senha bateu em mais de uma delas,
+// então não dá para saber em qual entrar. Ver AMBIGUOUS_LOGIN abaixo.
+export const AMBIGUOUS_LOGIN = 'ambiguous_login' as const;
+
+// Aceita três identificadores: usuário de acesso, CPF ou e-mail.
+//
+// Só `username` é unique no schema — `cpf` e `email` não são, e existem
+// duplicatas reais em produção (a mesma pessoa como admin_geral e como
+// morador, por exemplo). Por isso não dá para simplesmente pegar a primeira
+// linha: o par (identificador, senha) é que precisa identificar uma conta
+// só. Buscamos todos os candidatos, testamos a senha em cada um e só
+// autenticamos se exatamente um bater. Se mais de um bater, devolvemos
+// AMBIGUOUS_LOGIN para a rota pedir o usuário de acesso — nunca escolhemos
+// um "provável", o que poderia logar num admin_geral sem querer.
+//
+// A senha é conferida antes de qualquer aviso de ambiguidade de propósito:
+// avisar só pela existência de duplicata vazaria que aquele CPF/e-mail tem
+// conta no sistema para quem não sabe a senha.
+export const login = async (identifier: string, password: string) => {
+  const normalizedIdentifier = identifier.trim().toLowerCase();
+  // CPF é gravado quase sempre com 11 dígitos, mas há registro com máscara —
+  // por isso a comparação normaliza os dois lados para dígitos.
+  const identifierDigits = normalizedIdentifier.replace(/\D/g, '');
+  const cpfDigits = identifierDigits.length === 11 ? identifierDigits : '';
+
   const result = await query<DbUser & { login_enabled: boolean }>(
     `select u.id, u.username, u.password_hash, u.role, u.condominium_id, u.full_name, u.must_change_password, u.terms_accepted_version, u.terms_accepted_at, u.tour_completed_version, u.tour_completed_at, u.login_enabled, c.name condominium_name
      from users u left join condominiums c on c.id=u.condominium_id
-     where username = $1`,
-    [normalizedUsername],
+     where u.username = $1
+        or (u.email is not null and lower(trim(u.email)) = $1)
+        or ($2 <> '' and regexp_replace(coalesce(u.cpf,''), '[^0-9]', '', 'g') = $2)`,
+    [normalizedIdentifier, cpfDigits],
   );
-  const user = result.rows[0];
 
-  if (!user || !user.login_enabled || !(await bcrypt.compare(password, user.password_hash))) {
-    return null;
+  const candidates = result.rows.filter(row => row.login_enabled);
+  const matches: Array<DbUser & { login_enabled: boolean }> = [];
+  for (const candidate of candidates) {
+    if (await bcrypt.compare(password, candidate.password_hash)) matches.push(candidate);
   }
+
+  // Desempate quando o mesmo CPF/e-mail + senha servem a mais de uma conta.
+  //
+  // Não confundir com o multiperfil (síndico que também é proprietário): ali
+  // é UM registro em `users` com linhas extras em `user_profiles`, a busca
+  // acha uma linha só e não cai aqui. Este caso é o de contas separadas
+  // mesmo — tipicamente a conta operacional `admin_geral` da plataforma
+  // cadastrada com o CPF/e-mail pessoais de quem também é morador.
+  //
+  // Regra: entrar por CPF/e-mail é conveniência de morador, então uma conta
+  // `admin_geral` nunca é escolhida automaticamente por esse caminho — ela
+  // se acessa pelo usuário de acesso. Assim o morador entra normalmente e
+  // não existe caminho que promova alguém a admin sem ele pedir.
+  // Atenção: só descartamos admin_geral para DESEMPATAR. Se o admin for a
+  // única conta que bateu, ele entra normalmente por CPF/e-mail também.
+  let user = matches[0];
+  if (matches.length > 1) {
+    const nonAdmin = matches.filter(match => match.role !== 'admin_geral');
+    if (nonAdmin.length !== 1) return AMBIGUOUS_LOGIN;
+    user = nonAdmin[0];
+  }
+  if (!user) return null;
 
   if ((user.role === 'sindico' || user.role === 'subsindico') && user.condominium_id) {
     // Verificação sob demanda da fatura da plataforma: dispara no login, sem

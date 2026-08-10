@@ -1,8 +1,9 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
 import { AppButton, AppDialog, EmptyState, Field, Panel, TextField } from '../ui/components';
+import { ComboBox } from '../ui/ComboBox';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
@@ -123,7 +124,6 @@ export default function Users({ navigation }: any) {
   const [phone, setPhone] = useState('');
   const [unit, setUnit] = useState('');
   const [unitId, setUnitId] = useState('');
-  const [unitSearch, setUnitSearch] = useState('');
   const [isRepresentative, setIsRepresentative] = useState(false);
   const [billingExempt, setBillingExempt] = useState(false);
   const [preferredDueDay, setPreferredDueDay] = useState<10 | 20>(10);
@@ -194,14 +194,16 @@ export default function Users({ navigation }: any) {
     });
   }, [filterCondominiumId, filterCpf, filterName, filterUnitTypeId, items]);
 
-  // Condomínio grande tem dezenas de apartamentos; rolar a lista inteira no
-  // celular é inviável, então filtra por bloco/número e mostra só um punhado.
-  const selectedUnit = managedUnits.find((item) => item.id === unitId) || null;
-  const unitMatches = useMemo(() => {
-    const term = unitSearch.trim().toLocaleLowerCase('pt-BR');
-    if (!term) return managedUnits;
-    return managedUnits.filter((item) => `${item.block_name} ${item.number} ${item.unit_type_name || ''}`.toLocaleLowerCase('pt-BR').includes(term));
-  }, [managedUnits, unitSearch]);
+  // Condomínio grande tem dezenas de apartamentos: a busca dentro do ComboBox
+  // cobre bloco, número e tipologia (a tipologia vai em `description`).
+  const unitOptions = useMemo(
+    () => managedUnits.map((item) => ({
+      value: item.id,
+      label: `${item.block_name} · Apartamento ${item.number}`,
+      description: item.unit_type_name || 'Sem tipologia',
+    })),
+    [managedUnits],
+  );
 
   const condominiumName = (condominiumId: string | null) =>
     condominiums.find((item) => item.id === condominiumId)?.name || 'Condomínio não identificado';
@@ -320,7 +322,6 @@ export default function Users({ navigation }: any) {
       setPhone('');
       setUnit('');
       setUnitId('');
-      setUnitSearch('');
       setIsRepresentative(false);
       setBillingExempt(false);
       setPreferredDueDay(10);
@@ -437,7 +438,7 @@ export default function Users({ navigation }: any) {
   };
 
   const cancelEditing = () => {
-    setEditingId(null); setUsername(''); setPassword(''); setFullName(''); setCpf(''); setEmail(''); setPhone(''); setUnit(''); setUnitId(''); setUnitSearch(''); setIsRepresentative(false); setBillingExempt(false); setPreferredDueDay(10); setCondominiumId(''); setUnitTypeId('');
+    setEditingId(null); setUsername(''); setPassword(''); setFullName(''); setCpf(''); setEmail(''); setPhone(''); setUnit(''); setUnitId(''); setIsRepresentative(false); setBillingExempt(false); setPreferredDueDay(10); setCondominiumId(''); setUnitTypeId('');
     setPersonProfiles([]); setNewProfileRole(''); setNewProfileUnitId(''); setProfilesError(null);
     setStreet(''); setAddressNumber(''); setAddressComplement(''); setNeighborhood(''); setCity(''); setAddressState(''); setPostalCode('');
     setRole('');
@@ -674,17 +675,17 @@ export default function Users({ navigation }: any) {
                     ))}
                   </View>
                   {needsUnitPicker ? (
-                    managedUnits.length === 0 ? <View style={styles.helperBox}><Text style={styles.helperText}>Cadastre blocos e apartamentos antes de conceder um perfil de morador.</Text></View> : Platform.OS === 'web' ? React.createElement('select' as any, {
-                      value: newProfileUnitId,
-                      onChange: (event: any) => setNewProfileUnitId(event.target.value),
-                      style: { width: '100%', minHeight: 52, border: `1px solid ${colors.border}`, borderRadius: 8, padding: '0 12px', marginTop: 10, marginBottom: 10, backgroundColor: '#fff', color: colors.ink },
-                    }, [React.createElement('option' as any, { key: '', value: '' }, 'Selecione a unidade'), ...managedUnits.map((item) => React.createElement('option' as any, { key: item.id, value: item.id }, `${item.block_name} · Apartamento ${item.number}`))]) : (
-                      <View style={styles.roleGrid}>
-                        {managedUnits.map((item) => (
-                          <Pressable key={item.id} onPress={() => setNewProfileUnitId(item.id)} style={[styles.roleButton, newProfileUnitId === item.id && styles.roleButtonActive]}>
-                            <Text style={[styles.roleText, newProfileUnitId === item.id && styles.roleTextActive]}>{item.block_name} · {item.number}</Text>
-                          </Pressable>
-                        ))}
+                    managedUnits.length === 0 ? <View style={styles.helperBox}><Text style={styles.helperText}>Cadastre blocos e apartamentos antes de conceder um perfil de morador.</Text></View> : (
+                      <View style={styles.profileUnitPicker}>
+                        <ComboBox
+                          options={unitOptions}
+                          value={newProfileUnitId}
+                          onChange={setNewProfileUnitId}
+                          placeholder="Selecione a unidade"
+                          title="Unidade / apartamento"
+                          searchPlaceholder="Buscar bloco, apartamento ou tipologia"
+                          emptyText="Nenhuma unidade encontrada para esta busca."
+                        />
                       </View>
                     )
                   ) : null}
@@ -782,35 +783,16 @@ export default function Users({ navigation }: any) {
           <FormFieldFull>
             <View style={styles.condominiumPicker}>
               <Text style={styles.label}>Unidade / apartamento</Text>
-              {managedUnits.length === 0 ? <View style={styles.helperBox}><Text style={styles.helperText}>Cadastre blocos e apartamentos antes de cadastrar o morador.</Text></View> : Platform.OS === 'web' ? React.createElement('select' as any, {
-                value: unitId,
-                onChange: (event: any) => setUnitId(event.target.value),
-                style: { width: '100%', minHeight: 52, border: `1px solid ${colors.border}`, borderRadius: 8, padding: '0 12px', marginBottom: 10, backgroundColor: '#fff', color: colors.ink },
-              }, [React.createElement('option' as any, { key: '', value: '' }, 'Selecione a unidade'), ...managedUnits.map((item) => React.createElement('option' as any, { key: item.id, value: item.id }, `${item.block_name} · Apartamento ${item.number} · ${item.unit_type_name || 'Sem tipologia'}`))]) : selectedUnit ? (
-                <View style={styles.unitSelected}>
-                  <View style={styles.grow}>
-                    <Text style={styles.unitSelectedName}>{selectedUnit.block_name} · Apartamento {selectedUnit.number}</Text>
-                    <Text style={styles.unitSelectedMeta}>{selectedUnit.unit_type_name || 'Sem tipologia'}</Text>
-                  </View>
-                  <Pressable onPress={() => { setUnitId(''); setUnitSearch(''); }} style={styles.unitChange}><Text style={styles.unitChangeText}>Trocar</Text></Pressable>
-                </View>
-              ) : (
-                <>
-                  <TextInput
-                    placeholder="Buscar bloco ou apartamento"
-                    placeholderTextColor={colors.placeholder}
-                    value={unitSearch}
-                    onChangeText={setUnitSearch}
-                    style={styles.input}
-                  />
-                  {unitMatches.length === 0 ? <Text style={styles.fieldHint}>Nenhuma unidade encontrada para "{unitSearch}".</Text> : unitMatches.slice(0, 8).map((item) => (
-                    <Pressable key={item.id} onPress={() => setUnitId(item.id)} style={styles.unitOption}>
-                      <Text style={styles.unitOptionName}>{item.block_name} · Apartamento {item.number}</Text>
-                      <Text style={styles.unitOptionMeta}>{item.unit_type_name || 'Sem tipologia'}</Text>
-                    </Pressable>
-                  ))}
-                  {unitMatches.length > 8 ? <Text style={styles.fieldHint}>Mostrando 8 de {unitMatches.length}. Refine a busca para encontrar a unidade.</Text> : null}
-                </>
+              {managedUnits.length === 0 ? <View style={styles.helperBox}><Text style={styles.helperText}>Cadastre blocos e apartamentos antes de cadastrar o morador.</Text></View> : (
+                <ComboBox
+                  options={unitOptions}
+                  value={unitId}
+                  onChange={setUnitId}
+                  placeholder="Selecione a unidade"
+                  title="Unidade / apartamento"
+                  searchPlaceholder="Buscar bloco, apartamento ou tipologia"
+                  emptyText="Nenhuma unidade encontrada para esta busca."
+                />
               )}
               {unitId ? <Pressable onPress={() => setIsRepresentative((value) => !value)} style={[styles.representativeOption, isRepresentative && styles.representativeOptionActive]}><Text style={[styles.roleText, isRepresentative && styles.roleTextActive]}>{isRepresentative ? '✓ ' : ''}Morador representante desta unidade</Text></Pressable> : null}
             </View>
@@ -1080,14 +1062,7 @@ const styles = StyleSheet.create({
   condominiumPicker: { marginBottom: 10 },
   readOnlyBox: { minHeight: 52, borderRadius: 9, borderWidth: 1, borderColor: colors.border, borderStyle: 'dashed', backgroundColor: '#f8fafc', paddingHorizontal: 12, justifyContent: 'center' },
   readOnlyText: { color: colors.muted, fontWeight: '700' },
-  unitSelected: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 9, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.softBlue, padding: 12 },
-  unitSelectedName: { color: colors.primaryDark, fontWeight: '900', fontSize: 15 },
-  unitSelectedMeta: { color: colors.primary, fontSize: 13, marginTop: 2 },
-  unitChange: { borderRadius: 8, backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 8 },
-  unitChangeText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
-  unitOption: { borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 11, marginBottom: 8 },
-  unitOptionName: { color: colors.ink, fontWeight: '800', fontSize: 15 },
-  unitOptionMeta: { color: colors.muted, fontSize: 13, marginTop: 2 },
+  profileUnitPicker: { marginTop: 10, marginBottom: 10 },
   helperBox: {
     borderRadius: 8,
     backgroundColor: colors.softBlue,

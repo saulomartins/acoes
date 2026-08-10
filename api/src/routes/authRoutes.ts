@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { authenticate } from '../middleware/auth';
-import { changePassword, listProfiles, login, refresh, register, requestPasswordReset, resetPassword, revokeRefreshToken, switchProfile } from '../services/authService';
+import { AMBIGUOUS_LOGIN, changePassword, listProfiles, login, refresh, register, requestPasswordReset, resetPassword, revokeRefreshToken, switchProfile } from '../services/authService';
 import { query } from '../db';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { FEATURE_KEYS, type FeatureKey } from '../services/featureCatalog';
@@ -79,6 +79,9 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', limit(20, 15 * 60_000), async (req, res) => {
   try {
+    // `username` aqui é o identificador digitado: usuário de acesso, CPF ou
+    // e-mail. O nome do campo é mantido para não quebrar clientes já
+    // publicados (app instalado e web em cache) que enviam essa chave.
     const { username, password } = req.body ?? {};
 
     if (!username || !password || typeof username !== 'string' || typeof password !== 'string') {
@@ -91,6 +94,12 @@ router.post('/login', limit(20, 15 * 60_000), async (req, res) => {
     }
 
     const response = await login(username, password);
+    // Senha correta, mas o CPF/e-mail informado serve a mais de uma conta —
+    // não conta como tentativa falha, já que a credencial está certa.
+    if (response === AMBIGUOUS_LOGIN) {
+      clearLoginFailures(normalizedUsername);
+      return res.status(409).json({ message: 'Este CPF/e-mail está vinculado a mais de uma conta. Entre com o seu usuário de acesso.' });
+    }
     if (!response) {
       registerLoginFailure(normalizedUsername);
       return res.status(401).json({ message: 'invalid credentials' });
