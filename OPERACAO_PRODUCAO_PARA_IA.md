@@ -400,11 +400,54 @@ telas (`FeatureTour`/`useSectionTour`) e o novo ícone do app.
 - Android: versão `1.2.4`, versionCode `15` (auto-incrementado pelo EAS,
   `appVersionSource: remote` — o `versionCode` do `app.json` é ignorado).
   Build EAS `112e45cf-6de3-4869-87e6-cbc3bec20f0f`, perfil
-  `production-apk`. **Ainda em fila no momento deste registro.** O
-  pipeline `release:apk:resume` está rodando e, ao concluir, grava
-  `releases/lar-em-dia-1.2.4-build-15-production.apk`, valida SHA-256 e
-  assinatura, copia para o volume e promove na central. Log em
-  `releases/apk-1.2.4-pipeline.log`.
+  `production-apk`, concluído. Arquivo
+  `releases/lar-em-dia-1.2.4-build-15-production.apk` (69.449.580 bytes).
+  SHA-256:
+  `140F9AC037303A531EBCC41BD26FC2392F130751B6C99104FC21009EBD1243FB`.
+  Assinatura APK Scheme v2 validada com `apksigner`; um signer RSA de
+  2048 bits. O mesmo hash foi conferido em três pontos: artefato do EAS,
+  arquivo local e `/data/mobile-releases` no volume do Railway. Central
+  com `android 1.2.4 build 15 active=true` como único registro ativo.
+
+  O `versionCode` do `app.json` estava em `1` (menor que o `14` já
+  publicado). Isso **não** é problema porque `eas.json` usa
+  `appVersionSource: remote` com `autoIncrement`, então o EAS ignora o
+  valor local. Não "corrigir" esse número achando que é um bug.
+
+### `releases:seed-android` estoura a memória do contêiner
+
+O pipeline `release:apk:resume` falhou no último passo com
+`FATAL ERROR: Reached heap limit Allocation failed`. É o **mesmo**
+problema já documentado na seção 3 para `npm run db:setup`: o script
+roda via `ts-node`, que compila o projeto inteiro em memória e estoura o
+limite do contêiner.
+
+`mobile/scripts/publish-apk.js` chama:
+
+```text
+railway ssh ... npm run releases:seed-android -- URL VERSION BUILD SHA256
+```
+
+e `releases:seed-android` é `ts-node --files src/scripts/seedAndroidRelease.ts`.
+
+Enquanto o pipeline não for corrigido, todo release Android vai falhar
+nesse ponto. O APK, o SHA-256 e a validação de assinatura já terão sido
+feitos — só a publicação na central fica pendente. Concluir à mão com a
+versão compilada, pegando a URL do artefato e o SHA-256 do log do
+pipeline:
+
+```powershell
+& "$env:APPDATA\npm\railway.cmd" ssh --service acoes --environment production `
+  "node dist/scripts/seedAndroidRelease.js URL_DO_ARTEFATO VERSAO BUILD SHA256"
+```
+
+A saída esperada é `Android X.Y.Z build N already exists and was promoted.`
+ou a criação do registro. Depois confirmar o SHA-256 do arquivo em
+`/data/mobile-releases` e o `active=true` em `mobile_releases`.
+
+A correção definitiva é trocar a chamada em `publish-apk.js` para o
+script compilado, do mesmo jeito que a seção 3 já faz com
+`setupDatabase.js`.
 
 ### Ajustes de código desta revisão
 
