@@ -102,10 +102,23 @@ diff do schema antes de cada execução e procurar por `drop`, alterações de t
 ou operações destrutivas.
 
 O hostname `postgres.railway.internal` só resolve dentro do Railway. Portanto,
-não usar `railway run` local para esta migração. Executar dentro do contêiner:
+não usar `railway run` local para esta migração. Executar dentro do contêiner.
+
+O caminho abaixo (`npm run db:setup`) **falha hoje** com
+`FATAL ERROR: Reached heap limit Allocation failed` — o `ts-node` compila o
+projeto inteiro em memória e estoura o limite do contêiner:
 
 ```powershell
-& "$env:APPDATA\npm\  .cmd" ssh --service acoes --environment production npm run db:setup
+# NÃO usar: estoura a memória do contêiner
+& "$env:APPDATA\npm\railway.cmd" ssh --service acoes --environment production "npm run db:setup"
+```
+
+Use a versão já compilada pelo deploy. O `tsc` não copia o `.sql` para o
+`dist`, então é preciso copiar o schema antes:
+
+```powershell
+& "$env:APPDATA\npm\railway.cmd" ssh --service acoes --environment production `
+  "mkdir -p dist/db && cp src/db/schema.sql dist/db/schema.sql && node dist/scripts/setupDatabase.js"
 ```
 
 O resultado esperado é:
@@ -358,3 +371,49 @@ de estado em `releases` são ignorados pelo Git; nunca versionar binários.
   como `releases/lar-em-dia-1.2.0-build-5-production.apk` e o comprovante como
   `releases/latest-android-release.json`; a central web será promovida pelo
   próprio pipeline.
+
+## Publicação 1.2.4 de 10/08/2026
+
+Publicada a partir da working tree do `master` (68 arquivos ainda não
+commitados no momento do deploy; commitados logo em seguida). Além dos
+ajustes desta revisão, subiram features que ainda não tinham ido a
+produção: certidão negativa (`clearanceService`/`Clearances`/
+`ClearanceVerify`), indicadores de boletos (`BillingAnalytics`), tour de
+telas (`FeatureTour`/`useSectionTour`) e o novo ícone do app.
+
+- API: deployment Railway `bcaa769e-a7de-41c3-99ff-aefad9e8d0db`,
+  status `SUCCESS`; health HTTP 200.
+- Banco: `dist/scripts/setupDatabase.js` executado dentro do contêiner
+  (schema.sql copiado para `dist/db` antes, como manda a seção 3).
+  Resultado `Schema applied successfully`. O diff do schema tinha +51
+  linhas e nenhuma operação destrutiva.
+- Web: deployment Cloudflare `043abf53.lar-em-dia.pages.dev`; domínio
+  `gestaolaremdia.com` HTTP 200 servindo o bundle
+  `AppEntry-1fc7bb2606d9cd7edb28d70482ae40b8.js`, o mesmo gerado no build
+  local. Conferido antes de publicar que o bundle contém
+  `acoes-production.up.railway.app` e nenhuma ocorrência de
+  `localhost:3000`.
+- Smoke test: `POST /auth/login` em produção com credencial inexistente
+  devolveu HTTP 401 (não 500) e `access-control-allow-origin:
+  https://gestaolaremdia.com`, confirmando o caminho API→banco após a
+  migração.
+- Android: versão `1.2.4`, versionCode `15` (auto-incrementado pelo EAS,
+  `appVersionSource: remote` — o `versionCode` do `app.json` é ignorado).
+  Build EAS `112e45cf-6de3-4869-87e6-cbc3bec20f0f`, perfil
+  `production-apk`. **Ainda em fila no momento deste registro.** O
+  pipeline `release:apk:resume` está rodando e, ao concluir, grava
+  `releases/lar-em-dia-1.2.4-build-15-production.apk`, valida SHA-256 e
+  assinatura, copia para o volume e promove na central. Log em
+  `releases/apk-1.2.4-pipeline.log`.
+
+### Ajustes de código desta revisão
+
+- Comunicados: síndico/subsíndico que também é morador passa a receber os
+  próprios avisos gerais e pode se selecionar no envio pessoal. O par
+  síndico+morador pode estar em qualquer ordem (um lado em `users.role`,
+  o outro em `user_profiles`), por isso as duas origens são consultadas.
+- Gestão de débitos: boletos `pending_provider` ("Aguardando Inter")
+  deixaram de contar como débito — não há o que o morador pague enquanto
+  o banco não confirma o registro. Também saíram do total "Em aberto" do
+  painel, onde eram contados duas vezes (já existia o card "Aguardando o
+  banco" com os mesmos boletos).

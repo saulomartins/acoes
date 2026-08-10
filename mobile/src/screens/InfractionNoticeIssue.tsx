@@ -6,6 +6,8 @@ import { AppButton, AppDialog, EmptyState, Panel } from '../ui/components';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import { formatCents } from '../utils/money';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type Article = { id: string; article_number: string; description: string; base_fine_percent: string; payment_deadline_days: number };
 type UnitOption = { id: string; label: string };
@@ -32,6 +34,11 @@ export default function InfractionNoticeIssue({ navigation, route }: any) {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [breakdown, setBreakdown] = useState<FineBreakdown | null>(null);
   const [dialog, setDialog] = useState({ visible: false, title: '', message: '', tone: 'info' as 'info' | 'success' | 'error' });
+  const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
+  const tourSteps: TourStep[] = [
+    { key: 'form', title: 'Nova notificação de infração', description: 'Escolha o artigo do regimento (a lista mostra só artigos ativos) e a unidade infratora entre as opções listadas, depois descreva o que motivou a notificação com pelo menos 3 caracteres. Ao tocar em "Calcular multa e revisar" o sistema confere se a unidade tem uma tipologia ativa com taxa condominial configurada — sem isso não dá pra emitir. Quando a notificação vem de uma ocorrência transformada, o artigo e a unidade já chegam preenchidos.' },
+    { key: 'result', title: 'Revisar o cálculo antes de enviar', description: 'O detalhamento mostra multa base, acréscimo por reincidência (se a mesma unidade já teve uma notificação confirmada para este artigo, a multa base dobra), juros de mora, correção monetária e multa diária por reincidência contínua, somando o total no momento da emissão. Juros, correção e a multa contínua ainda podem crescer até a confirmação, caso a unidade demore a dar ciência ou pagar. "Descartar" cancela sem enviar nada; "Enviar notificação" avisa a unidade, que precisa abrir o app pra dar ciência.' },
+  ];
 
   useEffect(() => {
     if (!userToken) return;
@@ -81,10 +88,15 @@ export default function InfractionNoticeIssue({ navigation, route }: any) {
 
   return (
     <>
-      <ScrollView contentContainerStyle={[styles.content, isDesktop && styles.desktopCap]}>
-        <Text style={styles.eyebrow}>REGIMENTO INTERNO</Text>
-        <Text style={styles.title}>Emitir notificação de infração</Text>
-        <Text style={styles.subtitle}>Escolha o artigo e a unidade, revise o cálculo completo da multa e só então envie.</Text>
+      <ScrollView ref={scrollRef} contentContainerStyle={[styles.content, isDesktop && styles.desktopCap]}>
+        <View style={styles.headerRow}>
+          <View style={styles.grow}>
+            <Text style={styles.eyebrow}>REGIMENTO INTERNO</Text>
+            <Text style={styles.title}>Emitir notificação de infração</Text>
+            <Text style={styles.subtitle}>Escolha o artigo e a unidade, revise o cálculo completo da multa e só então envie.</Text>
+          </View>
+          <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+        </View>
 
         {!loadingLists && articles.length === 0 ? (
           <EmptyState
@@ -92,6 +104,7 @@ export default function InfractionNoticeIssue({ navigation, route }: any) {
             description="Este condomínio ainda não possui artigos do regimento cadastrados. Cadastre um artigo (ou aplique o modelo inicial) na tela de Regimento antes de emitir notificações."
           />
         ) : notice && breakdown ? (
+          <View ref={registerSection('result')} style={[isActive('result') && styles.tourHighlight]}>
           <Panel>
             <Text style={styles.panelTitle}>Cálculo da multa · {selectedArticle?.article_number}</Text>
             {notice.is_recurrence ? <Text style={styles.recurrenceNote}>Esta unidade já teve uma notificação confirmada para este mesmo artigo — a multa base foi dobrada por reincidência.</Text> : null}
@@ -109,7 +122,9 @@ export default function InfractionNoticeIssue({ navigation, route }: any) {
               <View style={styles.actionButton}><AppButton title="Enviar notificação" onPress={send} loading={sending} /></View>
             </View>
           </Panel>
+          </View>
         ) : (
+          <View ref={registerSection('form')} style={[isActive('form') && styles.tourHighlight]}>
           <Panel>
             <Text style={styles.panelTitle}>Nova notificação</Text>
             <Text style={styles.label}>Artigo do regimento</Text>
@@ -138,9 +153,11 @@ export default function InfractionNoticeIssue({ navigation, route }: any) {
               <AppButton title="Calcular multa e revisar" onPress={create} loading={creating} disabled={!articleId || !unitId || description.trim().length < 3} />
             </View>
           </Panel>
+          </View>
         )}
       </ScrollView>
       <AppDialog {...dialog} onClose={() => setDialog(x => ({ ...x, visible: false }))} />
+      <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} />
     </>
   );
 }
@@ -148,6 +165,11 @@ export default function InfractionNoticeIssue({ navigation, route }: any) {
 const styles = StyleSheet.create({
   content: { width: '100%', alignSelf: 'center', padding: 28, paddingBottom: 70, gap: 16 },
   desktopCap: { maxWidth: 780, alignSelf: 'center', width: '100%' },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
+  grow: { flex: 1 },
+  tourButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.softBlue },
+  tourButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
+  tourHighlight: { borderWidth: 2, borderColor: colors.primary, borderRadius: 16, padding: 6, margin: -6 },
   eyebrow: { color: colors.primary, fontSize: 13, fontWeight: '900' },
   title: { color: colors.ink, fontSize: 27, fontWeight: '900', marginTop: 5 },
   subtitle: { color: colors.muted, fontSize: 15, marginTop: 5 },

@@ -73,10 +73,18 @@ router.post('/',authorize('sindico','subsindico'),requireFeature('avisos_comunic
   const targetUserId=req.body?.targetUserId?String(req.body.targetUserId):null;
   if(!condominiumId)return res.status(400).json({message:'Condomínio obrigatório.'});
   if(!senderId)return res.status(401).json({message:'Usuário autenticado obrigatório.'});
-  if(targetUserId&&targetUserId===senderId)return res.status(400).json({message:'Você não pode enviar um aviso para você mesmo.'});
   if(title.length<3||title.length>120)return res.status(400).json({message:'O título deve ter entre 3 e 120 caracteres.'});
   if(body.length<3||body.length>2000)return res.status(400).json({message:'A mensagem deve ter entre 3 e 2.000 caracteres.'});
-  const recipients=await query<{id:string;full_name:string|null;username:string}>(`select u.id,u.full_name,u.username from users u where u.condominium_id=$1 and u.login_enabled=true and u.id<>$3 and ($2::uuid is null or u.id=$2)`,[condominiumId,targetUserId,senderId]);
+  // Quem envia fica de fora do próprio aviso — exceto o síndico/subsíndico que
+  // também é morador deste condomínio. Nesse caso ele é destinatário legítimo:
+  // como proprietário/inquilino precisa do comunicado no inbox e no push igual
+  // a qualquer outro morador. O par síndico+morador pode estar em qualquer
+  // ordem (um lado em `users.role`, o outro em `user_profiles`), por isso as
+  // duas origens são consultadas — ver authService.listProfiles.
+  const residentProfile=await query(`select 1 from users u where u.id=$1 and u.condominium_id=$2 and u.role in ('proprietario','inquilino') union all select 1 from user_profiles p where p.user_id=$1 and p.condominium_id=$2 and p.role in ('proprietario','inquilino') limit 1`,[senderId,condominiumId]);
+  const senderIsResident=residentProfile.rows.length>0;
+  if(targetUserId&&targetUserId===senderId&&!senderIsResident)return res.status(400).json({message:'Você não pode enviar um aviso para você mesmo.'});
+  const recipients=await query<{id:string;full_name:string|null;username:string}>(`select u.id,u.full_name,u.username from users u where u.condominium_id=$1 and u.login_enabled=true and ($4::boolean or u.id<>$3) and ($2::uuid is null or u.id=$2)`,[condominiumId,targetUserId,senderId,senderIsResident]);
   if(!recipients.rows.length)return res.status(404).json({message:targetUserId?'A pessoa selecionada não está ativa neste condomínio.':'Não há pessoas ativas neste condomínio.'});
   const recipientIds=recipients.rows.map(row=>row.id);
   const devices=await query<{fcm_token:string}>(`select distinct fcm_token from device_tokens where user_id = any($1::uuid[])`,[recipientIds]);
@@ -88,7 +96,9 @@ router.post('/',authorize('sindico','subsindico'),requireFeature('avisos_comunic
     return created.rows[0];
   });
   const recipientName=recipients.rows[0].full_name||recipients.rows[0].username;
-  return res.status(201).json({notification,recipients:recipients.rows.length,push,message:targetUserId?`Mensagem enviada para ${recipientName}.`:`Aviso enviado para ${recipients.rows.length} pessoa(s) do condomínio.`});
+  const personalMessage=targetUserId===senderId?'Mensagem enviada para você mesmo.':`Mensagem enviada para ${recipientName}.`;
+  const generalMessage=`Aviso enviado para ${recipients.rows.length} pessoa(s) do condomínio${senderIsResident?', incluindo você':''}.`;
+  return res.status(201).json({notification,recipients:recipients.rows.length,senderIncluded:senderIsResident,push,message:targetUserId?personalMessage:generalMessage});
 }));
 
 export default router;

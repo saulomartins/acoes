@@ -972,6 +972,7 @@ create table if not exists audit_log (
     'pessoas','tipologias','blocos_unidades','prestacao_contas',
     'gestao_cobrancas','gestao_debitos','historico_acordos',
     'config_enviar_cobrancas','cobrancas_adicionais',
+    'enquetes','reserva_espacos',
     'regimento','ocorrencias','notificacoes_infracao'
   )),
   action text not null,
@@ -991,6 +992,7 @@ alter table audit_log add constraint audit_log_feature_check check (feature in (
   'pessoas','tipologias','blocos_unidades','prestacao_contas',
   'gestao_cobrancas','gestao_debitos','historico_acordos',
   'config_enviar_cobrancas','cobrancas_adicionais',
+  'enquetes','reserva_espacos',
   'regimento','ocorrencias','notificacoes_infracao'
 ));
 
@@ -1139,6 +1141,8 @@ create table if not exists condominium_features (
   historico_acordos boolean not null default true,
   config_enviar_cobrancas boolean not null default true,
   cobrancas_adicionais boolean not null default true,
+  painel boolean not null default true,
+  indicadores_boletos boolean not null default true,
   avisos_comunicacao boolean not null default true,
   relatos_solicitacoes boolean not null default true,
   enquetes boolean not null default false,
@@ -1151,3 +1155,50 @@ alter table condominium_features add column if not exists enquetes boolean not n
 alter table condominium_features add column if not exists reserva_espacos boolean not null default true;
 alter table condominium_features alter column enquetes set default false;
 alter table condominium_features alter column reserva_espacos set default false;
+-- Painel financeiro e Indicadores de boletos passaram a ser ligáveis por
+-- condomínio. `default true` no add column mantém quem já usava as telas
+-- vendo elas normalmente — o admin_geral desliga depois se quiser.
+alter table condominium_features add column if not exists painel boolean not null default true;
+alter table condominium_features add column if not exists indicadores_boletos boolean not null default true;
+alter table condominium_features add column if not exists nada_consta boolean not null default true;
+
+-- Nada consta / Declaração de quitação condominial.
+--
+-- O morador solicita, o sistema confere as três fontes de débito (boletos,
+-- acordos/débitos antigos e cobranças adicionais) e o síndico/subsíndico
+-- emite. Os dados de quem emitiu, de quem recebeu e do condomínio ficam
+-- congelados na própria linha (snapshot): o documento vale como declaração
+-- na data em que foi emitido, então não pode mudar se a pessoa for
+-- renomeada, trocar de unidade ou sair do condomínio depois.
+--
+-- `verification_code` é o código verificador impresso no documento; a
+-- página pública /clearances/verify/:code confirma autenticidade sem
+-- exigir login. `document_hash` é o SHA-256 do conteúdo declarado, pra
+-- detectar adulteração de um PDF que circule por aí.
+create table if not exists clearance_certificates (
+  id uuid primary key default gen_random_uuid(),
+  condominium_id uuid not null references condominiums(id) on delete cascade,
+  unit_id uuid references units(id) on delete set null,
+  requested_by uuid not null references users(id) on delete restrict,
+  status text not null default 'pending' check (status in ('pending','issued','refused')),
+  -- snapshots do momento da emissão
+  requester_name text not null,
+  requester_cpf text,
+  unit_label text,
+  condominium_name text not null,
+  condominium_address text,
+  condominium_cnpj text,
+  issued_by uuid references users(id) on delete set null,
+  issuer_name text,
+  issuer_cpf text,
+  issuer_role text,
+  issued_at timestamptz,
+  verification_code text unique,
+  document_hash text,
+  -- o que a verificação encontrou (bloqueios e pendências informativas)
+  debt_snapshot jsonb,
+  refusal_reason text,
+  created_at timestamptz not null default now()
+);
+create index if not exists clearance_certificates_condominium_idx on clearance_certificates(condominium_id, created_at desc);
+create index if not exists clearance_certificates_requester_idx on clearance_certificates(requested_by, created_at desc);

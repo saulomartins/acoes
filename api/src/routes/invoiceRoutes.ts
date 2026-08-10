@@ -286,10 +286,15 @@ router.get('/', asyncHandler(async (req, res) => {
 // isso entram em "Pagos" (separados do valor pago normalmente pelo
 // banco), e não em "Cancelados" (que é só quem nunca recebeu nada).
 //
+// "Em aberto" é só status='issued'. Boletos 'pending_provider' têm o card
+// próprio "Aguardando o banco" (pendingBank abaixo) — contá-los também em
+// "Em aberto" somava o mesmo valor duas vezes no painel. Além disso eles
+// ainda não existem para o morador pagar, então não são cobrança em aberto.
+//
 // Todas as datas são lidas via to_char/aritmética em SQL, nunca como
 // Date do JS — node-postgres devolve colunas `date` como objeto Date por
 // padrão, o que já causou bugs de comparação nesta mesma base de código.
-router.get('/dashboard/summary', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
+router.get('/dashboard/summary', authorize('sindico', 'subsindico'), requireFeature('painel'), asyncHandler(async (req, res) => {
   const condominiumId = req.user?.condominiumId;
   const rawReferenceMonth = String(req.query?.referenceMonth || '');
   const referenceMonth = /^\d{4}-\d{2}-01$/.test(rawReferenceMonth) ? rawReferenceMonth : null;
@@ -299,21 +304,39 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), asyncHandle
   const totals = await query<{
     bank_paid_cents: number; bank_paid_count: number; pix_settled_cents: number; pix_settled_count: number;
     open_cents: number; open_count: number; canceled_cents: number; canceled_count: number;
-    overdue_cents: number; overdue_count: number;
+    overdue_cents: number; overdue_count: number; pending_provider_cents: number; pending_provider_count: number;
   }>(
     `select
        coalesce(sum(coalesce(paid_amount_cents, amount_cents)) filter (where paid_at is not null and status <> 'canceled'), 0)::int as bank_paid_cents,
        count(*) filter (where paid_at is not null and status <> 'canceled')::int as bank_paid_count,
        coalesce(sum(coalesce(paid_amount_cents, amount_cents)) filter (where paid_at is not null and status = 'canceled'), 0)::int as pix_settled_cents,
        count(*) filter (where paid_at is not null and status = 'canceled')::int as pix_settled_count,
-       coalesce(sum(amount_cents) filter (where status in ('issued','pending_provider') and paid_at is null), 0)::int as open_cents,
-       count(*) filter (where status in ('issued','pending_provider') and paid_at is null)::int as open_count,
+       coalesce(sum(amount_cents) filter (where status = 'issued' and paid_at is null), 0)::int as open_cents,
+       count(*) filter (where status = 'issued' and paid_at is null)::int as open_count,
        coalesce(sum(amount_cents) filter (where status = 'canceled' and paid_at is null), 0)::int as canceled_cents,
        count(*) filter (where status = 'canceled' and paid_at is null)::int as canceled_count,
        coalesce(sum(amount_cents) filter (where status = 'overdue'), 0)::int as overdue_cents,
-       count(*) filter (where status = 'overdue')::int as overdue_count
+       count(*) filter (where status = 'overdue')::int as overdue_count,
+       coalesce(sum(amount_cents) filter (where status = 'pending_provider' and paid_at is null), 0)::int as pending_provider_cents,
+       count(*) filter (where status = 'pending_provider' and paid_at is null)::int as pending_provider_count
      from invoices
      where condominium_id = $1 and deleted_at is null ${scopeSql}`,
+    [condominiumId, referenceMonth],
+  );
+
+  // "Aguardando o banco" = boletos que já foram enviados pro Inter mas
+  // ainda não têm confirmação (situação EM_PROCESSAMENTO ou não mapeada —
+  // ver mapInterStatus em interService.ts). São os únicos que ainda podem
+  // mudar de status sem nenhuma ação do síndico, então valem uma lista à
+  // parte pra acompanhar de perto.
+  const pendingBank = await query<{
+    id: string; amount_cents: number; due_date: string; created_at: string;
+    full_name: string | null; username: string; unit: string | null;
+  }>(
+    `select i.id, i.amount_cents, i.due_date, i.created_at, u.full_name, u.username, u.unit
+     from invoices i join users u on u.id = i.user_id
+     where i.condominium_id = $1 and i.status = 'pending_provider' and i.paid_at is null and i.deleted_at is null ${scopeSql}
+     order by i.created_at asc`,
     [condominiumId, referenceMonth],
   );
 
@@ -354,6 +377,7 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), asyncHandle
   const row = totals.rows[0] || {
     bank_paid_cents: 0, bank_paid_count: 0, pix_settled_cents: 0, pix_settled_count: 0,
     open_cents: 0, open_count: 0, canceled_cents: 0, canceled_count: 0, overdue_cents: 0, overdue_count: 0,
+    pending_provider_cents: 0, pending_provider_count: 0,
   };
 
   return res.json({
@@ -378,6 +402,19 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), asyncHandle
     },
     open: { totalCents: row.open_cents, count: row.open_count },
     canceled: { totalCents: row.canceled_cents, count: row.canceled_count },
+    pendingBank: {
+      totalCents: row.pending_provider_cents,
+      count: row.pending_provider_count,
+      invoices: pendingBank.rows.map(item => ({
+        id: item.id,
+        amountCents: item.amount_cents,
+        dueDate: item.due_date,
+        createdAt: item.created_at,
+        fullName: item.full_name,
+        username: item.username,
+        unit: item.unit,
+      })),
+    },
     overdue: {
       totalCents: row.overdue_cents,
       count: row.overdue_count,
@@ -391,6 +428,67 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), asyncHandle
         oldestDueDate: item.oldest_due_date,
         daysOverdue: item.days_overdue,
       })),
+    },
+  });
+}));
+
+// Painel analítico isolado do Painel financeiro (dashboard/summary acima):
+// filtro de período livre (De/Até) em vez de mês de referência, e
+// cancelados agrupados por motivo em vez de listados um a um.
+//
+// Ao contrário do Painel financeiro (que é 100% por regime de competência,
+// tudo pelo mês de vencimento), aqui "recebidos" usa a data do PAGAMENTO
+// (paid_at), não do vencimento — é regime de caixa: um boleto vencido em
+// julho e pago em agosto deve contar como recebido em agosto, não em
+// julho. "Não pagos" e "cancelados" continuam por vencimento (due_date),
+// porque não têm uma "data do evento" própria pra usar.
+router.get('/analytics', authorize('sindico', 'subsindico'), requireFeature('indicadores_boletos'), asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.condominiumId;
+  const from = String(req.query?.from || '');
+  const to = String(req.query?.to || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || to < from) {
+    return res.status(400).json({ message: 'Informe um período válido (de/até).' });
+  }
+
+  const totals = await query<{
+    received_cents: number; received_count: number;
+    unpaid_cents: number; unpaid_count: number;
+    canceled_cents: number; canceled_count: number;
+  }>(
+    `select
+       coalesce(sum(coalesce(paid_amount_cents, amount_cents)) filter (where paid_at is not null and paid_at::date between $2::date and $3::date), 0)::int as received_cents,
+       count(*) filter (where paid_at is not null and paid_at::date between $2::date and $3::date)::int as received_count,
+       coalesce(sum(amount_cents) filter (where status in ('issued','pending_provider','overdue') and paid_at is null and due_date between $2::date and $3::date), 0)::int as unpaid_cents,
+       count(*) filter (where status in ('issued','pending_provider','overdue') and paid_at is null and due_date between $2::date and $3::date)::int as unpaid_count,
+       coalesce(sum(amount_cents) filter (where status = 'canceled' and paid_at is null and due_date between $2::date and $3::date), 0)::int as canceled_cents,
+       count(*) filter (where status = 'canceled' and paid_at is null and due_date between $2::date and $3::date)::int as canceled_count
+     from invoices
+     where condominium_id = $1 and deleted_at is null`,
+    [condominiumId, from, to],
+  );
+
+  const byReason = await query<{ reason: string | null; count: number; cents: number }>(
+    `select nullif(trim(cancellation_reason), '') as reason, count(*)::int as count, coalesce(sum(amount_cents), 0)::int as cents
+     from invoices
+     where condominium_id = $1 and status = 'canceled' and paid_at is null and deleted_at is null and due_date between $2::date and $3::date
+     group by reason
+     order by count desc`,
+    [condominiumId, from, to],
+  );
+
+  const row = totals.rows[0] || {
+    received_cents: 0, received_count: 0, unpaid_cents: 0, unpaid_count: 0, canceled_cents: 0, canceled_count: 0,
+  };
+
+  return res.json({
+    from,
+    to,
+    received: { totalCents: row.received_cents, count: row.received_count },
+    unpaid: { totalCents: row.unpaid_cents, count: row.unpaid_count },
+    canceled: {
+      totalCents: row.canceled_cents,
+      count: row.canceled_count,
+      byReason: byReason.rows.map(item => ({ reason: item.reason, count: item.count, totalCents: item.cents })),
     },
   });
 }));

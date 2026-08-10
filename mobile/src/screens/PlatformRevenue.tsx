@@ -5,6 +5,8 @@ import { AuthContext } from '../context/AuthContext';
 import { EmptyState, Panel } from '../ui/components';
 import { colors } from '../ui/theme';
 import { maskBrazilianDate, brazilianDateToIso, formatBrazilianDate, formatBrazilianMonth } from '../utils/date';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type PlatformPlan = { id: string; name: string; plan_type: 'per_active_user' | 'tiered_bracket'; active: boolean };
 type PlatformStatus = 'active' | 'suspended' | 'canceled';
@@ -29,6 +31,7 @@ const statusOrder: PlatformStatus[] = ['active', 'suspended', 'canceled'];
 
 export default function PlatformRevenue() {
   const { userToken } = useContext(AuthContext);
+  const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
   const [items, setItems] = useState<OverviewItem[]>([]);
   const [totalProjectedCents, setTotalProjectedCents] = useState(0);
   const [plans, setPlans] = useState<PlatformPlan[]>([]);
@@ -127,18 +130,31 @@ export default function PlatformRevenue() {
     }
   };
 
-  return (
-    <ScrollView contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} />}>
-      <Text style={styles.eyebrow}>Modelo de negocio</Text>
-      <Text style={styles.title}>Faturamento da plataforma</Text>
-      <Text style={styles.subtitle}>Veja quanto cada condominio geraria por mes com o plano vinculado, com base nos usuários ativos cadastrados. Condomínios suspensos ou cancelados não entram na projeção.</Text>
+  const tourSteps: TourStep[] = [
+    { key: 'total', title: 'Total projetado por mês', description: 'Soma o valor mensal projetado de todos os condomínios com status "Ativo" e um plano vinculado, calculado a partir da quantidade atual de usuários ativos de cada um. Condomínios "Suspenso" ou "Cancelado" continuam aparecendo na lista abaixo, mas não entram nesse total.' },
+    { key: 'list', title: 'Condomínios e planos vinculados', description: 'Cada linha é um condomínio. Toque na bolinha de status (verde = Ativo, amarelo = Suspenso, vermelho = Cancelado) pra trocar a situação dele na plataforma. Toque no botão de plano à direita pra vincular ou trocar o plano (só fica habilitado quando existe ao menos um plano ativo cadastrado). Com um plano vinculado, "Cobrança a partir de..." deixa ajustar a data de início da cobrança. A última fatura emitida (mês, valor e status) aparece quando existir, e o valor no canto direito de cada linha mostra quanto esse condomínio contribui pro total projetado.' },
+  ];
 
+  return (
+    <>
+    <ScrollView ref={scrollRef} contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} />}>
+      <View style={styles.headerRow}>
+        <View style={styles.grow}>
+          <Text style={styles.eyebrow}>Modelo de negocio</Text>
+          <Text style={styles.title}>Faturamento da plataforma</Text>
+          <Text style={styles.subtitle}>Veja quanto cada condominio geraria por mes com o plano vinculado, com base nos usuários ativos cadastrados. Condomínios suspensos ou cancelados não entram na projeção.</Text>
+        </View>
+        <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+      </View>
+
+      <View ref={registerSection('total')} style={[isActive('total') && styles.tourHighlight]}>
       <Panel>
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>TOTAL PROJETADO / MES</Text>
           <Text style={styles.totalValue}>{formatCurrency(totalProjectedCents)}</Text>
         </View>
       </Panel>
+      </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -146,6 +162,7 @@ export default function PlatformRevenue() {
         <Text style={styles.hint}>Cadastre ao menos um plano ativo em "Planos da plataforma" para poder vincular aos condominios.</Text>
       ) : null}
 
+      <View ref={registerSection('list')} style={[isActive('list') && styles.tourHighlight]}>
       {items.length === 0 ? (
         <EmptyState title="Nenhum condominio cadastrado" description="Cadastre condominios para ver a projecao de receita aqui." />
       ) : (
@@ -242,12 +259,20 @@ export default function PlatformRevenue() {
           ))}
         </View>
       )}
+      </View>
     </ScrollView>
+    <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   container: { width: '100%', maxWidth: 1180, alignSelf: 'center', padding: 24, paddingBottom: 40, backgroundColor: colors.background },
+  grow: { flex: 1 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
+  tourButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.softBlue },
+  tourButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
+  tourHighlight: { borderWidth: 2, borderColor: colors.primary, borderRadius: 16, padding: 6, margin: -6 },
   eyebrow: { color: colors.teal, fontWeight: '800', marginBottom: 6 },
   title: { color: colors.ink, fontSize: 28, fontWeight: '900' },
   subtitle: { color: colors.muted, fontSize: 17, lineHeight: 22, marginTop: 6, marginBottom: 18 },

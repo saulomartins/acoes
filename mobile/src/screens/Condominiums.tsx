@@ -6,6 +6,8 @@ import { AppButton, AppDialog, EmptyState, Panel } from '../ui/components';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type Condominium = {
   id: string;
@@ -48,6 +50,9 @@ const FEATURE_CATALOG: Record<FeatureKey, { label: string; dependsOn: FeatureKey
   regimento_ocorrencias: { label: 'Regimento e Ocorrências', dependsOn: ['gestao_cobrancas', 'tipologias', 'blocos_unidades'] },
   historico_acordos: { label: 'Histórico de acordos', dependsOn: ['gestao_debitos'] },
   cobrancas_adicionais: { label: 'Cobranças adicionais', dependsOn: ['config_enviar_cobrancas'] },
+  painel: { label: 'Painel financeiro', dependsOn: ['gestao_cobrancas'] },
+  indicadores_boletos: { label: 'Indicadores de boletos', dependsOn: ['gestao_cobrancas'] },
+  nada_consta: { label: 'Nada consta (quitação)', dependsOn: ['gestao_cobrancas'] },
 };
 const FEATURE_LABELS: Record<FeatureKey, string> = Object.fromEntries(
   Object.entries(FEATURE_CATALOG).map(([key, value]) => [key, value.label]),
@@ -91,6 +96,7 @@ const formatPhone = (value: string) => {
 
 export default function Condominiums({ navigation }: any) {
   const { userToken } = useContext(AuthContext);
+  const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
   const [items, setItems] = useState<Condominium[]>([]);
   const [name, setName] = useState('');
   const [cnpj, setCnpj] = useState('');
@@ -356,16 +362,30 @@ export default function Condominiums({ navigation }: any) {
     }
   };
 
+  const tourSteps: TourStep[] = [
+    { key: 'form', title: 'Cadastrar ou editar condomínio', description: 'Nome é o único campo obrigatório pra salvar. CNPJ, telefone/WhatsApp e e-mail são opcionais. Preencha o CEP e toque em "Buscar CEP" pra autocompletar o endereço pelo ViaCEP (só preenche se o campo de endereço ainda estiver vazio). O link da pasta do Google Drive é usado na Prestação de Contas: compartilhe a pasta como Editor com laremdia.condominio@gmail.com e cole o link aqui — deixando em branco, os anexos continuam sendo guardados no próprio sistema.' },
+    { key: 'whatsapp', title: 'Integração WhatsApp Business', description: 'Só aparece depois de salvar o condomínio (cadastre primeiro, configure depois, ao editar). Liga o envio automático dos comunicados de débito pelo número oficial do condomínio via API oficial da Meta (Cloud API), em vez de abrir o WhatsApp pessoal de quem está operando. Exige Phone Number ID, token de acesso (fica oculto depois de salvo — só digite um novo se quiser trocar), nome e idioma do template já aprovado na Meta, e o toggle "Integração ativa". Depois de salvar, use "Enviar mensagem de teste" pra confirmar que está funcionando.' },
+    { key: 'features', title: 'Funcionalidades ativas', description: 'Liga e desliga o que este condomínio pode usar no app — por padrão tudo vem ativado ao cadastrar. Desligar uma funcionalidade some do menu e bloqueia o acesso pra síndico, subsíndico, proprietário e inquilino daquele condomínio. Itens recuados com "↳" dependem da funcionalidade indicada em "Depende de" (ex.: "Gestão de débitos" depende de "Gestão de cobranças"): pra desligar uma funcionalidade de nível mais alto, desligue antes as que dependem dela.' },
+    { key: 'list', title: 'Condomínios cadastrados', description: 'Cada card mostra CNPJ, endereço, telefone e e-mail. "Editar" abre o formulário acima já preenchido — e libera os painéis de WhatsApp e Funcionalidades. "Excluir" só funciona se o condomínio não tiver nenhuma pessoa ou registro vinculado; caso contrário a API recusa e explica o que precisa ser removido antes.' },
+  ];
+
   return (
     <>
     <ScrollView
+      ref={scrollRef}
       contentContainerStyle={styles.container}
       refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} />}
     >
-      <Text style={styles.eyebrow}>Gestao</Text>
-      <Text style={styles.title}>Configuracao inicial</Text>
-      <Text style={styles.subtitle}>Cadastre os condomínios e depois defina os gestores responsáveis.</Text>
+      <View style={styles.headerRow}>
+        <View style={styles.grow}>
+          <Text style={styles.eyebrow}>Gestao</Text>
+          <Text style={styles.title}>Configuracao inicial</Text>
+          <Text style={styles.subtitle}>Cadastre os condomínios e depois defina os gestores responsáveis.</Text>
+        </View>
+        <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+      </View>
 
+      <View ref={registerSection('form')} style={[isActive('form') && styles.tourHighlight]}>
       <Panel>
         <Text style={styles.panelTitle}>{editingId ? 'Editar condominio' : 'Novo condominio'}</Text>
         <FormGrid columns={{ mobile: 1, tablet: 2, desktop: 2 }}>
@@ -410,7 +430,9 @@ export default function Condominiums({ navigation }: any) {
           ) : null}
         </View>
       </Panel>
+      </View>
 
+      <View ref={registerSection('whatsapp')} style={[isActive('whatsapp') && styles.tourHighlight]}>
       {editingId ? (
         <Panel>
           <Text style={styles.panelTitle}>WhatsApp Business (API oficial)</Text>
@@ -459,7 +481,9 @@ export default function Condominiums({ navigation }: any) {
           {!whatsappHasStoredToken ? <Text style={styles.whatsappHint}>Salve a integração antes de enviar uma mensagem de teste.</Text> : null}
         </Panel>
       ) : null}
+      </View>
 
+      <View ref={registerSection('features')} style={[isActive('features') && styles.tourHighlight]}>
       {editingId ? (
         <Panel>
           <Text style={styles.panelTitle}>Funcionalidades ativas</Text>
@@ -505,7 +529,9 @@ export default function Condominiums({ navigation }: any) {
           )}
         </Panel>
       ) : null}
+      </View>
 
+      <View ref={registerSection('list')} style={[isActive('list') && styles.tourHighlight]}>
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Cadastrados</Text>
         <Text style={styles.counter}>{items.length}</Text>
@@ -540,7 +566,9 @@ export default function Condominiums({ navigation }: any) {
           ))}
         </CardGrid>
       )}
+      </View>
     </ScrollView>
+    <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} />
     <AppDialog
       visible={!!deleteTarget}
       title="Excluir condomínio"
@@ -558,6 +586,11 @@ export default function Condominiums({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { width: '100%', maxWidth: 1180, alignSelf: 'center', padding: 24, paddingBottom: 40, backgroundColor: colors.background },
+  grow: { flex: 1 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
+  tourButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.softBlue },
+  tourButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
+  tourHighlight: { borderWidth: 2, borderColor: colors.primary, borderRadius: 16, padding: 6, margin: -6 },
   eyebrow: { color: colors.teal, fontWeight: '800', letterSpacing: 0, marginBottom: 6 },
   title: { color: colors.ink, fontSize: 28, fontWeight: '900' },
   subtitle: { color: colors.muted, fontSize: 17, lineHeight: 22, marginTop: 6, marginBottom: 18 },

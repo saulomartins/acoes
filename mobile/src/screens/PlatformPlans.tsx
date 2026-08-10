@@ -5,6 +5,8 @@ import { AuthContext } from '../context/AuthContext';
 import { AppButton, EmptyState, Panel } from '../ui/components';
 import { colors } from '../ui/theme';
 import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type PlanType = 'per_active_user' | 'tiered_bracket';
 type ActiveUserMetric = 'login_enabled' | 'registered';
@@ -35,6 +37,7 @@ const emptyTier = (minActiveUsers = 0): TierForm => ({ minActiveUsers: String(mi
 
 export default function PlatformPlans() {
   const { userToken } = useContext(AuthContext);
+  const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
   const [items, setItems] = useState<PlatformPlan[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -165,12 +168,24 @@ export default function PlatformPlans() {
     return `${plan.tiers.length} faixa${plan.tiers.length === 1 ? '' : 's'} · ${metric}`;
   };
 
-  return (
-    <ScrollView contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} />}>
-      <Text style={styles.eyebrow}>Modelo de negocio</Text>
-      <Text style={styles.title}>Planos da plataforma</Text>
-      <Text style={styles.subtitle}>Cadastre como a plataforma cobra cada condominio: por usuário ativo ou por faixa fechada de usuários ativos.</Text>
+  const tourSteps: TourStep[] = [
+    { key: 'form', title: 'Cadastrar ou editar plano', description: '"Por usuário ativo" cobra um valor fixo multiplicado pela quantidade de usuários ativos do condomínio, com um valor mínimo mensal opcional pra garantir um piso mesmo com poucos usuários. "Faixa fechada" cobra um valor mensal fixo conforme a faixa de usuários ativos — as faixas precisam ser contínuas, sem sobreposição nem lacuna (ex.: 0–50 seguida exatamente de 51–100). O "Critério de usuário ativo" também é configurável: "Usuário cadastrado" conta todo cadastro do condomínio não excluído; "Login habilitado" conta só quem também tem o acesso liberado no sistema. Desmarcar "Plano ativo" impede vincular o plano a novos condomínios, mas não desvincula quem já está usando.' },
+    { key: 'list', title: 'Planos cadastrados', description: 'Cada card mostra o tipo do plano (por usuário ativo ou faixa fechada), um resumo do valor cobrado e o critério de usuário ativo configurado. Planos inativos aparecem marcados como "Inativo" e não podem ser vinculados a condomínios em "Faturamento da plataforma". Toque em "Editar" pra carregar o plano no formulário acima e ajustar preço, faixas ou critério.' },
+  ];
 
+  return (
+    <>
+    <ScrollView ref={scrollRef} contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} />}>
+      <View style={styles.headerRow}>
+        <View style={styles.grow}>
+          <Text style={styles.eyebrow}>Modelo de negocio</Text>
+          <Text style={styles.title}>Planos da plataforma</Text>
+          <Text style={styles.subtitle}>Cadastre como a plataforma cobra cada condominio: por usuário ativo ou por faixa fechada de usuários ativos.</Text>
+        </View>
+        <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+      </View>
+
+      <View ref={registerSection('form')} style={[isActive('form') && styles.tourHighlight]}>
       <Panel>
         <Text style={styles.panelTitle}>{editingId ? 'Editar plano' : 'Novo plano'}</Text>
         <FormGrid columns={{ mobile: 1, tablet: 2, desktop: 2 }}>
@@ -248,7 +263,9 @@ export default function PlatformPlans() {
           ) : null}
         </View>
       </Panel>
+      </View>
 
+      <View ref={registerSection('list')} style={[isActive('list') && styles.tourHighlight]}>
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Planos cadastrados</Text>
         <Text style={styles.counter}>{items.length}</Text>
@@ -276,12 +293,20 @@ export default function PlatformPlans() {
           ))}
         </CardGrid>
       )}
+      </View>
     </ScrollView>
+    <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   container: { width: '100%', maxWidth: 1180, alignSelf: 'center', padding: 24, paddingBottom: 40, backgroundColor: colors.background },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
+  grow: { flex: 1 },
+  tourButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.softBlue },
+  tourButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
+  tourHighlight: { borderWidth: 2, borderColor: colors.primary, borderRadius: 16, padding: 6, margin: -6 },
   eyebrow: { color: colors.teal, fontWeight: '800', marginBottom: 6 },
   title: { color: colors.ink, fontSize: 28, fontWeight: '900' },
   subtitle: { color: colors.muted, fontSize: 17, lineHeight: 22, marginTop: 6, marginBottom: 18 },

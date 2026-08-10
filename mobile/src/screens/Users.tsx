@@ -2,10 +2,12 @@ import React, { useCallback, useContext, useEffect, useMemo, useState } from 're
 import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
-import { AppButton, AppDialog, EmptyState, Panel } from '../ui/components';
+import { AppButton, AppDialog, EmptyState, Field, Panel, TextField } from '../ui/components';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type UserRole = 'admin_geral' | 'sindico' | 'subsindico' | 'proprietario' | 'inquilino';
 
@@ -111,6 +113,7 @@ type ViaCepResponse = {
 export default function Users({ navigation }: any) {
   const { isMobile: mobile } = useBreakpoint();
   const { userToken, user } = useContext(AuthContext);
+  const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
   const [items, setItems] = useState<UserItem[]>([]);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -120,6 +123,7 @@ export default function Users({ navigation }: any) {
   const [phone, setPhone] = useState('');
   const [unit, setUnit] = useState('');
   const [unitId, setUnitId] = useState('');
+  const [unitSearch, setUnitSearch] = useState('');
   const [isRepresentative, setIsRepresentative] = useState(false);
   const [billingExempt, setBillingExempt] = useState(false);
   const [preferredDueDay, setPreferredDueDay] = useState<10 | 20>(10);
@@ -189,6 +193,15 @@ export default function Users({ navigation }: any) {
       return matchesCondominium && matchesName && matchesCpf && matchesUnitType;
     });
   }, [filterCondominiumId, filterCpf, filterName, filterUnitTypeId, items]);
+
+  // Condomínio grande tem dezenas de apartamentos; rolar a lista inteira no
+  // celular é inviável, então filtra por bloco/número e mostra só um punhado.
+  const selectedUnit = managedUnits.find((item) => item.id === unitId) || null;
+  const unitMatches = useMemo(() => {
+    const term = unitSearch.trim().toLocaleLowerCase('pt-BR');
+    if (!term) return managedUnits;
+    return managedUnits.filter((item) => `${item.block_name} ${item.number} ${item.unit_type_name || ''}`.toLocaleLowerCase('pt-BR').includes(term));
+  }, [managedUnits, unitSearch]);
 
   const condominiumName = (condominiumId: string | null) =>
     condominiums.find((item) => item.id === condominiumId)?.name || 'Condomínio não identificado';
@@ -307,6 +320,7 @@ export default function Users({ navigation }: any) {
       setPhone('');
       setUnit('');
       setUnitId('');
+      setUnitSearch('');
       setIsRepresentative(false);
       setBillingExempt(false);
       setPreferredDueDay(10);
@@ -423,7 +437,7 @@ export default function Users({ navigation }: any) {
   };
 
   const cancelEditing = () => {
-    setEditingId(null); setUsername(''); setPassword(''); setFullName(''); setCpf(''); setEmail(''); setPhone(''); setUnit(''); setUnitId(''); setIsRepresentative(false); setBillingExempt(false); setPreferredDueDay(10); setCondominiumId(''); setUnitTypeId('');
+    setEditingId(null); setUsername(''); setPassword(''); setFullName(''); setCpf(''); setEmail(''); setPhone(''); setUnit(''); setUnitId(''); setUnitSearch(''); setIsRepresentative(false); setBillingExempt(false); setPreferredDueDay(10); setCondominiumId(''); setUnitTypeId('');
     setPersonProfiles([]); setNewProfileRole(''); setNewProfileUnitId(''); setProfilesError(null);
     setStreet(''); setAddressNumber(''); setAddressComplement(''); setNeighborhood(''); setCity(''); setAddressState(''); setPostalCode('');
     setRole('');
@@ -588,19 +602,42 @@ export default function Users({ navigation }: any) {
     });
   };
 
+  const isAdmin = user?.role === 'admin_geral';
+  const adminTourSteps: TourStep[] = [
+    { key: 'form', title: 'Cadastrar síndico ou subsíndico', description: 'Usuário de acesso é único no sistema (usado no login). CPF é obrigatório num cadastro novo — os 6 primeiros dígitos viram a senha inicial, gerada e mostrada uma única vez depois de salvar (ou enviada por e-mail, se informado). Selecione o condomínio que esse gestor vai administrar e o perfil (Síndico ou Subsíndico). Ao editar alguém, aparece o painel "Perfis desta pessoa" — um mesmo login pode acumular mais de um perfil (ex.: síndico que também é proprietário em outra unidade); conceda ou remova perfis extras ali.' },
+    { key: 'filters', title: 'Filtrar cadastros', description: 'Combine condomínio (inclusive "Sem condomínio"), nome e CPF pra localizar um síndico ou subsíndico específico entre todos os condomínios.' },
+    { key: 'reset', title: 'Reset de senha em massa', description: 'Selecione um condomínio no filtro acima pra habilitar "Resetar todos deste condomínio" — gera uma nova senha inicial (regra padrão: 6 primeiros dígitos do CPF) pra todos os síndicos/subsíndicos daquele condomínio de uma vez. Ou marque pessoas específicas nos cards da lista e use "Resetar selecionados".' },
+    { key: 'list', title: 'Ativos e excluídos', description: 'As abas "Ativos"/"Excluídos" alternam a lista. Em cada card dá pra editar, resetar a senha individualmente, excluir logicamente (bloqueia o login mas mantém o cadastro — reversível na aba "Excluídos" com "Reativar") ou excluir fisicamente (apaga o cadastro pra sempre, sem volta). Aqui você só gerencia cadastros de síndico e subsíndico.' },
+  ];
+  const managerTourSteps: TourStep[] = [
+    { key: 'form', title: 'Cadastrar morador ou subsíndico', description: 'Escolha o perfil (Subsíndico, Proprietário ou Inquilino), a unidade/apartamento (obrigatória para moradores) e marque se a pessoa é representante da unidade. Se não for isenta de boleto, defina o dia preferido de vencimento (10 ou 20). Preencha o endereço de cobrança do boleto — o CEP autocompleta rua, bairro, cidade e UF. A senha inicial é gerada automaticamente (apartamento + 4 primeiros dígitos do CPF) e mostrada uma única vez depois de salvar. Ao editar alguém, o painel "Perfis desta pessoa" permite conceder ou remover perfis adicionais (ex.: um subsíndico que também é proprietário).' },
+    { key: 'filters', title: 'Filtrar moradores', description: 'Filtre por nome, CPF ou tipologia do apartamento — inclusive "Sem tipologia", útil pra achar quem ainda não tem uma taxa condominial configurada.' },
+    { key: 'reset', title: 'Reset de senha em massa', description: 'Gera uma nova senha inicial pela regra padrão (apartamento + 4 primeiros dígitos do CPF). "Resetar todos os moradores" afeta todo mundo do condomínio de uma vez; ou marque pessoas específicas nos cards da lista e use "Resetar selecionados".' },
+    { key: 'list', title: 'Ativos e excluídos', description: 'As abas "Ativos"/"Excluídos" alternam a lista. Em cada card de morador dá pra editar, resetar a senha, excluir logicamente (bloqueia o login mas mantém o cadastro — reversível na aba "Excluídos") ou excluir fisicamente (apaga o cadastro pra sempre, junto com débitos, acordos e avisos dessa pessoa). Você pode cadastrar outro subsíndico por aqui, mas as ações de editar/resetar/excluir do card só ficam disponíveis pra moradores — outro subsíndico não é gerenciável por você.' },
+  ];
+  const tourSteps = isAdmin ? adminTourSteps : managerTourSteps;
+
   return (
+    <>
     <ScrollView
+      ref={scrollRef}
       contentContainerStyle={styles.container}
       refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} />}
     >
-      <Text style={styles.eyebrow}>Pessoas</Text>
-      <Text style={styles.title}>{user?.role === 'admin_geral' ? 'Síndicos e subsíndicos' : 'Usuários'}</Text>
-      <Text style={styles.subtitle}>
-        {user?.role === 'admin_geral'
-          ? 'Cadastre síndicos e subsíndicos e vincule-os ao condomínio que irão gerir.'
-          : 'Síndico e subsíndico possuem o mesmo acesso para cadastrar e administrar usuários do condomínio.'}
-      </Text>
+      <View style={styles.headerRow}>
+        <View style={styles.grow}>
+          <Text style={styles.eyebrow}>Pessoas</Text>
+          <Text style={styles.title}>{user?.role === 'admin_geral' ? 'Síndicos e subsíndicos' : 'Usuários'}</Text>
+          <Text style={styles.subtitle}>
+            {user?.role === 'admin_geral'
+              ? 'Cadastre síndicos e subsíndicos e vincule-os ao condomínio que irão gerir.'
+              : 'Síndico e subsíndico possuem o mesmo acesso para cadastrar e administrar usuários do condomínio.'}
+          </Text>
+        </View>
+        <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+      </View>
 
+      <View ref={registerSection('form')} style={[isActive('form') && styles.tourHighlight]}>
       <Panel>
         <View style={styles.formTitleRow}><Text style={styles.panelTitle}>{editingId ? 'Editar pessoa' : 'Novo usuário'}</Text>{editingId ? <Pressable onPress={cancelEditing} style={styles.cancelEdit}><Text style={styles.cancelEditText}>Cancelar edição</Text></Pressable> : null}</View>
         {editingId ? (() => {
@@ -658,32 +695,34 @@ export default function Users({ navigation }: any) {
           );
         })() : null}
         <FormGrid columns={{ mobile: 1, tablet: 2, desktop: 2 }}>
-          <View>
-            <TextInput placeholder="Usuário de acesso único" value={username} onChangeText={setUsername} style={styles.input} autoCapitalize="none" />
-            <Text style={styles.fieldHint}>Este nome será usado no login e não pode ser igual ao de outro usuário.</Text>
-          </View>
-          <View>
-            <Text style={styles.fieldHint}>{editingId
-              ? 'A senha não é alterada aqui — use "Resetar senha" no card da pessoa.'
-              : isManagerRole
-                ? 'A senha inicial será gerada automaticamente (6 primeiros números do CPF) e exibida após salvar.'
-                : isResidentRole
-                  ? 'A senha inicial será gerada automaticamente (número do apartamento + 4 primeiros números do CPF) e exibida após salvar.'
-                  : 'A senha inicial será gerada automaticamente com base no CPF e exibida após salvar.'}</Text>
-          </View>
-          <View>
-            <TextInput placeholder="Nome completo" value={fullName} onChangeText={setFullName} style={styles.input} />
-          </View>
-          <View>
-            <TextInput
-              placeholder="CPF ou CNPJ"
-              value={cpf}
-              onChangeText={(value) => setCpf(formatCpf(value))}
-              style={styles.input}
-              keyboardType="number-pad"
-              maxLength={18}
-            />
-          </View>
+          <TextField
+            label="Usuário de acesso"
+            required
+            placeholder="Ex.: maria.silva"
+            hint="Usado no login e único no sistema."
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+          />
+          <TextField label="Nome completo" placeholder="Nome e sobrenome" value={fullName} onChangeText={setFullName} />
+          <TextField
+            label="CPF ou CNPJ"
+            required={!editingId}
+            placeholder="000.000.000-00"
+            value={cpf}
+            onChangeText={(value) => setCpf(formatCpf(value))}
+            keyboardType="number-pad"
+            maxLength={18}
+          />
+          <Field label="Senha inicial" hint={editingId
+            ? 'A senha não é alterada aqui — use "Resetar senha" no card da pessoa.'
+            : isManagerRole
+              ? 'Gerada automaticamente (6 primeiros números do CPF) e exibida após salvar.'
+              : isResidentRole
+                ? 'Gerada automaticamente (número do apartamento + 4 primeiros números do CPF) e exibida após salvar.'
+                : 'Gerada automaticamente com base no CPF e exibida após salvar.'}>
+            <View style={styles.readOnlyBox}><Text style={styles.readOnlyText}>Definida pelo sistema</Text></View>
+          </Field>
         </FormGrid>
         {user?.role === 'admin_geral' ? (
           <FormFieldFull>
@@ -747,11 +786,32 @@ export default function Users({ navigation }: any) {
                 value: unitId,
                 onChange: (event: any) => setUnitId(event.target.value),
                 style: { width: '100%', minHeight: 52, border: `1px solid ${colors.border}`, borderRadius: 8, padding: '0 12px', marginBottom: 10, backgroundColor: '#fff', color: colors.ink },
-              }, [React.createElement('option' as any, { key: '', value: '' }, 'Selecione a unidade'), ...managedUnits.map((item) => React.createElement('option' as any, { key: item.id, value: item.id }, `${item.block_name} · Apartamento ${item.number} · ${item.unit_type_name || 'Sem tipologia'}`))]) : managedUnits.map((item) => (
-                <Pressable key={item.id} onPress={() => setUnitId(item.id)} style={[styles.condominiumOption, unitId === item.id && styles.condominiumOptionActive]}>
-                  <View style={styles.condominiumOptionTop}><Text style={[styles.condominiumName, unitId === item.id && styles.condominiumNameActive]}>{item.block_name} · Apartamento {item.number}</Text><Text style={[styles.selectBadge, unitId === item.id && styles.selectBadgeActive]}>{item.unit_type_name || 'Sem tipologia'}</Text></View>
-                </Pressable>
-              ))}
+              }, [React.createElement('option' as any, { key: '', value: '' }, 'Selecione a unidade'), ...managedUnits.map((item) => React.createElement('option' as any, { key: item.id, value: item.id }, `${item.block_name} · Apartamento ${item.number} · ${item.unit_type_name || 'Sem tipologia'}`))]) : selectedUnit ? (
+                <View style={styles.unitSelected}>
+                  <View style={styles.grow}>
+                    <Text style={styles.unitSelectedName}>{selectedUnit.block_name} · Apartamento {selectedUnit.number}</Text>
+                    <Text style={styles.unitSelectedMeta}>{selectedUnit.unit_type_name || 'Sem tipologia'}</Text>
+                  </View>
+                  <Pressable onPress={() => { setUnitId(''); setUnitSearch(''); }} style={styles.unitChange}><Text style={styles.unitChangeText}>Trocar</Text></Pressable>
+                </View>
+              ) : (
+                <>
+                  <TextInput
+                    placeholder="Buscar bloco ou apartamento"
+                    placeholderTextColor={colors.placeholder}
+                    value={unitSearch}
+                    onChangeText={setUnitSearch}
+                    style={styles.input}
+                  />
+                  {unitMatches.length === 0 ? <Text style={styles.fieldHint}>Nenhuma unidade encontrada para "{unitSearch}".</Text> : unitMatches.slice(0, 8).map((item) => (
+                    <Pressable key={item.id} onPress={() => setUnitId(item.id)} style={styles.unitOption}>
+                      <Text style={styles.unitOptionName}>{item.block_name} · Apartamento {item.number}</Text>
+                      <Text style={styles.unitOptionMeta}>{item.unit_type_name || 'Sem tipologia'}</Text>
+                    </Pressable>
+                  ))}
+                  {unitMatches.length > 8 ? <Text style={styles.fieldHint}>Mostrando 8 de {unitMatches.length}. Refine a busca para encontrar a unidade.</Text> : null}
+                </>
+              )}
               {unitId ? <Pressable onPress={() => setIsRepresentative((value) => !value)} style={[styles.representativeOption, isRepresentative && styles.representativeOptionActive]}><Text style={[styles.roleText, isRepresentative && styles.roleTextActive]}>{isRepresentative ? '✓ ' : ''}Morador representante desta unidade</Text></Pressable> : null}
             </View>
           </FormFieldFull>
@@ -760,41 +820,46 @@ export default function Users({ navigation }: any) {
           <FormFieldFull>
             <View style={styles.addressPanel}>
               <Text style={styles.label}>Endereço do pagador para emissão do boleto</Text>
-              <View style={[styles.postalCodeRow, mobile && styles.postalCodeRowMobile]}>
-                <TextInput
-                  placeholder="CEP"
-                  value={postalCode}
-                  onChangeText={(value) => setPostalCode(formatPostalCode(value))}
-                  onBlur={() => { if (onlyDigits(postalCode).length === 8 && !street) lookupPostalCode(); }}
-                  style={[styles.input, styles.postalCodeInput]}
-                  keyboardType="number-pad"
-                  maxLength={9}
-                />
-                <Pressable onPress={lookupPostalCode} disabled={isLookingUpPostalCode} style={[styles.postalCodeButton, isLookingUpPostalCode && styles.postalCodeButtonDisabled, mobile && styles.postalCodeButtonMobile]}>
-                  <Text style={styles.postalCodeButtonText}>{isLookingUpPostalCode ? 'Buscando...' : 'Buscar CEP'}</Text>
-                </Pressable>
-              </View>
-              <TextInput placeholder="Rua / avenida" value={street} onChangeText={setStreet} style={styles.input} />
-              <View style={[styles.addressRow, mobile && styles.addressRowMobile]}><TextInput placeholder="Número" value={addressNumber} onChangeText={setAddressNumber} style={[styles.input, styles.addressNumber, mobile && styles.addressNumberMobile]} /><TextInput placeholder="Complemento" value={addressComplement} onChangeText={setAddressComplement} style={[styles.input, styles.addressComplement, mobile && styles.addressComplementMobile]} /></View>
-              <TextInput placeholder="Bairro" value={neighborhood} onChangeText={setNeighborhood} style={styles.input} />
-              <View style={[styles.addressRow, mobile && styles.addressRowMobile]}><TextInput placeholder="Cidade" value={city} onChangeText={setCity} style={[styles.input, styles.addressComplement, mobile && styles.addressComplementMobile]} /><TextInput placeholder="UF" value={addressState} onChangeText={(value) => setAddressState(value.slice(0, 2).toUpperCase())} style={[styles.input, styles.stateInput, mobile && styles.stateInputMobile]} autoCapitalize="characters" /></View>
+              <Field label="CEP" hint="Preencha o CEP para completar rua, bairro, cidade e UF automaticamente.">
+                <View style={[styles.postalCodeRow, mobile && styles.postalCodeRowMobile]}>
+                  <TextInput
+                    placeholder="00000-000"
+                    placeholderTextColor={colors.placeholder}
+                    value={postalCode}
+                    onChangeText={(value) => setPostalCode(formatPostalCode(value))}
+                    onBlur={() => { if (onlyDigits(postalCode).length === 8 && !street) lookupPostalCode(); }}
+                    style={[styles.input, styles.postalCodeInput]}
+                    keyboardType="number-pad"
+                    maxLength={9}
+                  />
+                  <Pressable onPress={lookupPostalCode} disabled={isLookingUpPostalCode} style={[styles.postalCodeButton, isLookingUpPostalCode && styles.postalCodeButtonDisabled, mobile && styles.postalCodeButtonMobile]}>
+                    <Text style={styles.postalCodeButtonText}>{isLookingUpPostalCode ? 'Buscando...' : 'Buscar CEP'}</Text>
+                  </Pressable>
+                </View>
+              </Field>
+              <TextField label="Rua / avenida" placeholder="Nome da rua" value={street} onChangeText={setStreet} />
+              <FormGrid columns={{ mobile: 2, tablet: 2, desktop: 2 }}>
+                <TextField label="Número" placeholder="123" value={addressNumber} onChangeText={setAddressNumber} keyboardType="number-pad" />
+                <TextField label="Complemento" placeholder="Apto, bloco" value={addressComplement} onChangeText={setAddressComplement} />
+              </FormGrid>
+              <TextField label="Bairro" placeholder="Nome do bairro" value={neighborhood} onChangeText={setNeighborhood} />
+              <FormGrid columns={{ mobile: 2, tablet: 2, desktop: 2 }}>
+                <TextField label="Cidade" placeholder="Nome da cidade" value={city} onChangeText={setCity} />
+                <TextField label="UF" placeholder="GO" value={addressState} onChangeText={(value) => setAddressState(value.slice(0, 2).toUpperCase())} autoCapitalize="characters" maxLength={2} />
+              </FormGrid>
             </View>
           </FormFieldFull>
         ) : null}
         <FormGrid columns={{ mobile: 1, tablet: 2, desktop: 2 }}>
-          <View>
-            <TextInput placeholder="Email" value={email} onChangeText={setEmail} style={styles.input} autoCapitalize="none" />
-          </View>
-          <View>
-            <TextInput
-              placeholder="Telefone"
-              value={phone}
-              onChangeText={(value) => setPhone(formatPhone(value))}
-              style={styles.input}
-              keyboardType="phone-pad"
-              maxLength={15}
-            />
-          </View>
+          <TextField label="E-mail" placeholder="nome@email.com" hint="Se informado, a senha inicial é enviada por e-mail." value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+          <TextField
+            label="Telefone"
+            placeholder="(00) 00000-0000"
+            value={phone}
+            onChangeText={(value) => setPhone(formatPhone(value))}
+            keyboardType="phone-pad"
+            maxLength={15}
+          />
         </FormGrid>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -808,8 +873,9 @@ export default function Users({ navigation }: any) {
           disabled={isLoading}
         />
       </Panel>
+      </View>
 
-      <View style={styles.filterPanel}>
+      <View ref={registerSection('filters')} style={[styles.filterPanel, isActive('filters') && styles.tourHighlight]}>
           <View style={styles.filterHeader}>
             <View>
               <Text style={styles.filterTitle}>{user?.role === 'admin_geral' ? 'Filtrar síndicos e subsíndicos' : 'Filtrar usuários'}</Text>
@@ -863,6 +929,7 @@ export default function Users({ navigation }: any) {
           </> : null}
         </View>
 
+      <View ref={registerSection('reset')} style={[isActive('reset') && styles.tourHighlight]}>
       {user?.role === 'admin_geral' ? (
         <View style={styles.resetPanel}>
           <Text style={styles.filterTitle}>Reset de senha em massa</Text>
@@ -882,7 +949,9 @@ export default function Users({ navigation }: any) {
           </View>
         </View>
       ) : null}
+      </View>
 
+      <View ref={registerSection('list')} style={[isActive('list') && styles.tourHighlight]}>
       {manager ? (
         <View style={styles.tabRow}>
           <Pressable onPress={() => setViewingDeleted(false)} style={[styles.tabButton, !viewingDeleted && styles.tabButtonActive]}>
@@ -948,14 +1017,21 @@ export default function Users({ navigation }: any) {
           ))}
         </CardGrid>
       )}
+      </View>
       <AppDialog visible={Boolean(dialog)} title={dialog?.title || ''} message={dialog?.message || ''} tone={dialog?.tone} confirmLabel={dialog?.confirmLabel} cancelLabel={dialog?.cancelLabel} onConfirm={dialog?.onConfirm} onClose={() => setDialog(null)} scrollable={dialog?.scrollable} />
     </ScrollView>
+    <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   container: { width: '100%', alignSelf: 'center', padding: 24, paddingBottom: 40, backgroundColor: colors.background },
   grow: { flex: 1 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
+  tourButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.softBlue },
+  tourButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
+  tourHighlight: { borderWidth: 2, borderColor: colors.primary, borderRadius: 16, padding: 6, margin: -6 },
   eyebrow: { color: colors.amber, fontWeight: '800', letterSpacing: 0, marginBottom: 6 },
   title: { color: colors.ink, fontSize: 28, fontWeight: '900' },
   subtitle: { color: colors.muted, fontSize: 17, lineHeight: 22, marginTop: 6, marginBottom: 18 },
@@ -1002,6 +1078,16 @@ const styles = StyleSheet.create({
   postalCodeButtonText: { color: '#fff', fontWeight: '900' },
   label: { color: colors.ink, fontSize: 16, fontWeight: '800', marginBottom: 8 },
   condominiumPicker: { marginBottom: 10 },
+  readOnlyBox: { minHeight: 52, borderRadius: 9, borderWidth: 1, borderColor: colors.border, borderStyle: 'dashed', backgroundColor: '#f8fafc', paddingHorizontal: 12, justifyContent: 'center' },
+  readOnlyText: { color: colors.muted, fontWeight: '700' },
+  unitSelected: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 9, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.softBlue, padding: 12 },
+  unitSelectedName: { color: colors.primaryDark, fontWeight: '900', fontSize: 15 },
+  unitSelectedMeta: { color: colors.primary, fontSize: 13, marginTop: 2 },
+  unitChange: { borderRadius: 8, backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 8 },
+  unitChangeText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
+  unitOption: { borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 11, marginBottom: 8 },
+  unitOptionName: { color: colors.ink, fontWeight: '800', fontSize: 15 },
+  unitOptionMeta: { color: colors.muted, fontSize: 13, marginTop: 2 },
   helperBox: {
     borderRadius: 8,
     backgroundColor: colors.softBlue,

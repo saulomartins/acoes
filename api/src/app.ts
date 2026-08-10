@@ -26,6 +26,7 @@ import occurrenceAttachmentRoutes from './routes/occurrenceAttachmentRoutes';
 import infractionNoticeRoutes from './routes/infractionNoticeRoutes';
 import pollRoutes from './routes/pollRoutes';
 import spaceReservationRoutes from './routes/spaceReservationRoutes';
+import clearanceRoutes from './routes/clearanceRoutes';
 import { config } from './config';
 
 export const app = express();
@@ -85,6 +86,7 @@ app.use('/occurrence-attachments', occurrenceAttachmentRoutes);
 app.use('/infraction-notices', infractionNoticeRoutes);
 app.use('/polls', pollRoutes);
 app.use('/space-reservations', spaceReservationRoutes);
+app.use('/clearances', clearanceRoutes);
 
 app.use((_req, res) => res.status(404).json({ message: 'route not found' }));
 

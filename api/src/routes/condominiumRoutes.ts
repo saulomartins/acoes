@@ -412,11 +412,21 @@ router.patch('/:id/features', authorize('admin_geral'), asyncHandler(async (req,
     }
   }
 
+  // Grava todas as FEATURE_KEYS explicitamente (usando `effective`, que já
+  // resolve "sem linha = true"), não só a coluna alterada — senão, na
+  // primeira vez que o admin_geral mexe numa funcionalidade de um
+  // condomínio sem linha ainda, o INSERT cria a linha e as colunas não
+  // citadas caem no default da própria tabela (que não é `true` pra todas,
+  // ex.: enquetes/reserva_espacos), desativando funcionalidades que
+  // ninguém tocou.
+  const featureValues = FEATURE_KEYS.map(key => (key === feature ? enabled : effective[key]));
+  const insertColumns = ['condominium_id', ...FEATURE_KEYS, 'updated_by', 'updated_at'].join(', ');
+  const insertPlaceholders = ['$1', ...FEATURE_KEYS.map((_, index) => `$${index + 2}`), `$${FEATURE_KEYS.length + 2}`, 'now()'].join(', ');
   await query(
-    `insert into condominium_features (condominium_id, ${feature}, updated_by, updated_at)
-     values ($1, $2, $3, now())
+    `insert into condominium_features (${insertColumns})
+     values (${insertPlaceholders})
      on conflict (condominium_id) do update set ${feature}=excluded.${feature}, updated_by=excluded.updated_by, updated_at=now()`,
-    [req.params.id, enabled, req.user?.id || null],
+    [req.params.id, ...featureValues, req.user?.id || null],
   );
 
   return res.json({ features: { ...effective, [feature]: enabled } });

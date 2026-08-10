@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
+import ExcelJS from 'exceljs';
 import { authenticate, authorize } from '../middleware/auth';
 import { requireFeature } from '../middleware/requireFeature';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -10,6 +11,22 @@ const router = Router();
 router.use(authenticate, authorize('sindico', 'subsindico'), requireFeature('cobrancas_adicionais'));
 
 const addMonths = (date: string, months: number) => { const value = new Date(`${date}T12:00:00Z`); value.setUTCMonth(value.getUTCMonth() + months); return value.toISOString().slice(0, 10); };
+
+// A parcela entra somada ao boleto do mês, então "pagou a cobrança adicional"
+// = pagou o boleto que a carregava. Por isso a situação sai do invoice
+// vinculado (invoice_id), sem controle de pagamento paralelo.
+const paymentStateOf = (item: any) => {
+  if (item.status === 'canceled') return 'canceled';
+  if (item.status !== 'applied' || !item.invoice_id) return 'awaiting_issue';
+  if (item.invoice_paid_at) return 'paid';
+  if (item.invoice_status === 'overdue') return 'overdue';
+  if (item.invoice_status === 'canceled') return 'invoice_canceled';
+  return 'open';
+};
+const paymentStateLabel: Record<string, string> = {
+  paid: 'Paga', open: 'Em aberto', overdue: 'Vencida',
+  awaiting_issue: 'Aguardando emissão', invoice_canceled: 'Boleto cancelado', canceled: 'Cancelada',
+};
 const isValidReferenceMonth = (value: string) => /^\d{4}-\d{2}$/.test(value);
 const currentMonthDate = () => { const now = new Date(); return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`; };
 
@@ -48,19 +65,41 @@ router.get('/', asyncHandler(async (req, res) => {
     [condominiumId, unitId],
   );
   const chargeIds = charges.rows.map((row: any) => row.id);
+  // A parcela guarda o boleto em que entrou (invoice_id). Como a cobrança
+  // adicional é somada ao boleto do mês, "quem pagou a cobrança adicional"
+  // é exatamente quem pagou esse boleto — por isso a situação de pagamento
+  // vem do próprio invoice, não de um controle separado.
   const installments = chargeIds.length
     ? await query<any>(
-        `select * from unit_extra_charge_installments where charge_id = any($1::uuid[]) order by installment_number`,
+        `select ins.*, inv.status as invoice_status, inv.paid_at as invoice_paid_at,
+                to_char(inv.due_date, 'YYYY-MM-DD') as invoice_due_date
+         from unit_extra_charge_installments ins
+         left join invoices inv on inv.id = ins.invoice_id and inv.deleted_at is null
+         where ins.charge_id = any($1::uuid[])
+         order by ins.installment_number`,
         [chargeIds],
       )
     : { rows: [] as any[] };
 
   const chargesWithInstallments = charges.rows.map((charge: any) => {
-    const chargeInstallments = installments.rows.filter((item: any) => item.charge_id === charge.id);
+    const chargeInstallments = installments.rows
+      .filter((item: any) => item.charge_id === charge.id)
+      .map((item: any) => ({ ...item, paymentState: paymentStateOf(item) }));
     const status = chargeInstallments.every((item: any) => item.status !== 'pending') && chargeInstallments.length
       ? (chargeInstallments.some((item: any) => item.status === 'applied') ? 'finished' : 'canceled')
       : 'active';
-    return { ...charge, status, installments: chargeInstallments };
+    const billable = chargeInstallments.filter((item: any) => item.status !== 'canceled');
+    const paid = billable.filter((item: any) => item.paymentState === 'paid');
+    const payment = {
+      paidCount: paid.length,
+      billableCount: billable.length,
+      paidCents: paid.reduce((sum: number, item: any) => sum + item.amount_cents, 0),
+      billableCents: billable.reduce((sum: number, item: any) => sum + item.amount_cents, 0),
+      overdueCount: billable.filter((item: any) => item.paymentState === 'overdue').length,
+      openCount: billable.filter((item: any) => item.paymentState === 'open').length,
+      awaitingIssueCount: billable.filter((item: any) => item.paymentState === 'awaiting_issue').length,
+    };
+    return { ...charge, status, payment, installments: chargeInstallments };
   });
 
   const groups = new Map<string, any>();
@@ -72,6 +111,117 @@ router.get('/', asyncHandler(async (req, res) => {
   }
   const result = [...groups.values()].sort((a, b) => (a.lastActivityAt < b.lastActivityAt ? 1 : -1));
   return res.json({ groups: result });
+}));
+
+// Planilha de acompanhamento: quem pagou e quem não pagou a cobrança
+// adicional. `description` opcional exporta só um grupo; sem ela, exporta
+// todas as cobranças do condomínio.
+router.get('/export', asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.condominiumId;
+  if (!condominiumId) return res.status(400).json({ message: 'condominiumId is required' });
+  const description = req.query?.description ? String(req.query.description) : null;
+
+  const rows = await query<any>(
+    `select ec.description,
+            coalesce(nullif(concat_ws(' - ', b.name, un.number), ''), un.number) as unit_label,
+            coalesce(morador.full_name, morador.username) as resident_name,
+            ec.installment_count, ins.installment_number, ins.amount_cents,
+            to_char(ins.reference_month, 'MM/YYYY') as reference_month,
+            ins.status, ins.invoice_id, inv.status as invoice_status,
+            to_char(inv.due_date, 'DD/MM/YYYY') as due_date,
+            to_char(inv.paid_at, 'DD/MM/YYYY') as paid_at, inv.paid_at as paid_at_raw
+     from unit_extra_charges ec
+     join units un on un.id = ec.unit_id
+     left join blocks b on b.id = un.block_id
+     join unit_extra_charge_installments ins on ins.charge_id = ec.id
+     left join invoices inv on inv.id = ins.invoice_id and inv.deleted_at is null
+     left join lateral (
+       select u.full_name, u.username from unit_occupancies uo
+       join users u on u.id = uo.user_id
+       where uo.unit_id = ec.unit_id and uo.ended_at is null and u.deleted_at is null
+       order by uo.is_representative desc nulls last limit 1
+     ) morador on true
+     where ec.condominium_id = $1 and ($2::text is null or ec.description = $2)
+     order by ec.description, unit_label, ins.installment_number`,
+    [condominiumId, description],
+  );
+
+  const enriched = rows.rows.map((row: any) => ({ ...row, state: paymentStateOf({ ...row, invoice_paid_at: row.paid_at_raw }) }));
+
+  const workbook = new ExcelJS.Workbook();
+  const detail = workbook.addWorksheet('Parcelas');
+  detail.columns = [
+    { header: 'Cobrança', key: 'description', width: 28 },
+    { header: 'Unidade', key: 'unit', width: 18 },
+    { header: 'Morador', key: 'resident', width: 28 },
+    { header: 'Parcela', key: 'installment', width: 10 },
+    { header: 'Referência', key: 'reference', width: 12 },
+    { header: 'Valor', key: 'amount', width: 14 },
+    { header: 'Situação', key: 'state', width: 20 },
+    { header: 'Vencimento', key: 'due', width: 14 },
+    { header: 'Pago em', key: 'paid', width: 14 },
+  ];
+  for (const row of enriched) {
+    detail.addRow({
+      description: row.description,
+      unit: row.unit_label,
+      resident: row.resident_name || '—',
+      installment: row.installment_count > 1 ? `${row.installment_number}/${row.installment_count}` : 'Única',
+      reference: row.reference_month,
+      amount: row.amount_cents / 100,
+      state: paymentStateLabel[row.state] || row.state,
+      due: row.due_date || '—',
+      paid: row.paid_at || '—',
+    });
+  }
+  detail.getColumn('amount').numFmt = 'R$ #,##0.00';
+  detail.getRow(1).font = { bold: true };
+
+  // Aba consolidada por unidade — é a leitura de "quem pagou e quem não
+  // pagou" sem precisar somar parcela por parcela na mão.
+  const summary = workbook.addWorksheet('Por unidade');
+  summary.columns = [
+    { header: 'Cobrança', key: 'description', width: 28 },
+    { header: 'Unidade', key: 'unit', width: 18 },
+    { header: 'Morador', key: 'resident', width: 28 },
+    { header: 'Total', key: 'total', width: 14 },
+    { header: 'Pago', key: 'paid', width: 14 },
+    { header: 'Em aberto', key: 'open', width: 14 },
+    { header: 'Parcelas pagas', key: 'paidCount', width: 15 },
+    { header: 'Situação', key: 'state', width: 18 },
+  ];
+  const byUnit = new Map<string, any>();
+  for (const row of enriched) {
+    if (row.state === 'canceled') continue;
+    const key = `${row.description}||${row.unit_label}`;
+    const acc = byUnit.get(key) || { description: row.description, unit: row.unit_label, resident: row.resident_name || '—', total: 0, paid: 0, paidCount: 0, count: 0 };
+    acc.total += row.amount_cents;
+    acc.count += 1;
+    if (row.state === 'paid') { acc.paid += row.amount_cents; acc.paidCount += 1; }
+    byUnit.set(key, acc);
+  }
+  for (const acc of byUnit.values()) {
+    summary.addRow({
+      description: acc.description,
+      unit: acc.unit,
+      resident: acc.resident,
+      total: acc.total / 100,
+      paid: acc.paid / 100,
+      open: (acc.total - acc.paid) / 100,
+      paidCount: `${acc.paidCount}/${acc.count}`,
+      state: acc.paid === 0 ? 'Nada pago' : acc.paid >= acc.total ? 'Quitado' : 'Parcial',
+    });
+  }
+  summary.getColumn('total').numFmt = 'R$ #,##0.00';
+  summary.getColumn('paid').numFmt = 'R$ #,##0.00';
+  summary.getColumn('open').numFmt = 'R$ #,##0.00';
+  summary.getRow(1).font = { bold: true };
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const slug = (description || 'todas').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="cobrancas-adicionais-${slug}.xlsx"`);
+  return res.send(Buffer.from(buffer));
 }));
 
 router.post('/', asyncHandler(async (req, res) => {

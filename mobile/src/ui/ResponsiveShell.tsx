@@ -19,17 +19,20 @@ const items: Item[] = [
   { label: 'Enquetes', route: 'Polls', symbol: '✓', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'enquetes' },
   { label: 'Reserva de espaços', route: 'SpaceReservations', symbol: '⌑', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'reserva_espacos' },
   { label: 'Início', route: 'Home', symbol: '⌂', roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'] },
-  { label: 'Painel', route: 'Dashboard', symbol: '◆', roles: ['sindico', 'subsindico'] },
+  { label: 'Painel', route: 'Dashboard', symbol: '◆', roles: ['sindico', 'subsindico'], feature: 'painel' },
+  { label: 'Indicadores de boletos', route: 'BillingAnalytics', symbol: '📈', roles: ['sindico', 'subsindico'], feature: 'indicadores_boletos' },
   { label: 'Condomínios', route: 'Condominiums', symbol: '▦', roles: ['admin_geral'] },
   { label: 'Pessoas', route: 'Users', symbol: '♙', roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'pessoas' },
   { label: 'Cadastro de bancos', route: 'Banks', symbol: '▣', roles: ['admin_geral'] },
   { label: 'Configurações bancárias', route: 'BankConfigurations', symbol: '⚙', roles: ['admin_geral'] },
   { label: 'Vincular banco ao condomínio', route: 'BankLink', symbol: '↔', roles: ['admin_geral'] },
+  { label: 'Guia de expansão bancária', route: 'BankIntegrationGuide', symbol: '📘', roles: ['admin_geral'] },
   { label: 'Planos da plataforma', route: 'PlatformPlans', symbol: '◆', roles: ['admin_geral'] },
   { label: 'Faturamento da plataforma', route: 'PlatformRevenue', symbol: '$', roles: ['admin_geral'] },
   { label: 'Auditoria', route: 'AuditLog', symbol: '🛡', roles: ['admin_geral'] },
   { label: 'Tipologias', route: 'UnitTypes', symbol: '▧', roles: ['sindico', 'subsindico'], feature: 'tipologias' },
   { label: 'Blocos e unidades', route: 'Units', symbol: '▦', roles: ['sindico', 'subsindico'], feature: 'blocos_unidades' },
+  { label: 'Nada consta', route: 'Clearances', symbol: '✓', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'nada_consta' },
   { label: 'Prestação de contas', route: 'Accountability', symbol: '$', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'prestacao_contas' },
   { label: 'Gestão de cobranças', route: 'Invoices', symbol: '▤', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'gestao_cobrancas' },
   { label: 'Gestão de débitos', route: 'Debts', symbol: '≋', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'gestao_debitos' },
@@ -46,7 +49,7 @@ const items: Item[] = [
 const roleLabels: Record<string, string> = { admin_geral: 'Administrador geral', sindico: 'Síndico', subsindico: 'Subsíndico', proprietario: 'Proprietário', inquilino: 'Inquilino' };
 const billingRoutes = ['Invoices', 'Debts', 'AgreementHistory', 'BillingSettings', 'UnitExtraCharges'];
 const noticeRoutes = ['Communications', 'Reports'];
-const bankRoutes = ['Banks', 'BankConfigurations', 'BankLink', 'BankIntegration'];
+const bankRoutes = ['Banks', 'BankConfigurations', 'BankLink', 'BankIntegration', 'BankIntegrationGuide'];
 const regulationRoutes = ['RegulationArticles', 'Occurrences', 'InfractionNoticeIssue', 'InfractionNotices'];
 
 export default function ResponsiveShell({ activeRoute, navigation, children }: { activeRoute: string; navigation: any; children: React.ReactNode }) {
@@ -169,7 +172,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
           <View style={styles.sidebar}>
             <View style={styles.brand}>
               <View style={styles.brandIconBox}>
-                <Image source={require('../../assets/lar-em-dia-logo.png')} style={styles.brandLogo} resizeMode="contain" />
+                <Image source={require('../../assets/lar-em-dia-icon.png')} style={styles.brandLogo} resizeMode="contain" />
               </View>
               <View style={styles.brandInfo}>
                 <Text style={styles.brandName}>Lar em Dia</Text>
@@ -321,40 +324,42 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
               )}
             </ScrollView>
 
-            <View style={styles.profile}>
-              <View style={styles.avatarLight}>
-                <Text style={styles.avatarLightText}>{initials}</Text>
+            <View style={styles.profileAnchor}>
+              {profiles.length > 1 && profileMenuOpen ? (
+                <View style={styles.profileSwitcher}>
+                  <Text style={styles.profileSwitcherTitle}>Trocar perfil</Text>
+                  {profiles.map(profile => (
+                    <Pressable
+                      key={profile.id ?? 'default'}
+                      onPress={() => handleSwitchProfile(profile.id)}
+                      disabled={switchingProfile}
+                      style={[styles.profileSwitcherItem, (user?.activeProfileId ?? null) === profile.id && styles.profileSwitcherItemActive]}
+                    >
+                      <Text style={styles.profileSwitcherItemText}>{roleLabels[profile.role]}{profile.condominiumName ? ` · ${profile.condominiumName}` : ''}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+              <View style={styles.profile}>
+                <View style={styles.avatarLight}>
+                  <Text style={styles.avatarLightText}>{initials}</Text>
+                </View>
+                <View style={styles.grow}>
+                  <Text style={styles.profileName}>{user?.username}</Text>
+                  {profiles.length > 1 ? (
+                    <Pressable onPress={() => setProfileMenuOpen(current => !current)}>
+                      <Text style={styles.profileRole}>{roleLabels[user?.role || '']} ▾</Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={styles.profileRole}>{roleLabels[user?.role || '']}</Text>
+                  )}
+                </View>
+                <Pressable onPress={startSystemTour} accessibilityLabel="Refazer tour" style={styles.profileTourButton}><Text style={styles.profileTourIcon}>?</Text></Pressable>
+                <Pressable onPress={() => signOut()}>
+                  <Text style={styles.exit}>↪</Text>
+                </Pressable>
               </View>
-              <View style={styles.grow}>
-                <Text style={styles.profileName}>{user?.username}</Text>
-                {profiles.length > 1 ? (
-                  <Pressable onPress={() => setProfileMenuOpen(current => !current)}>
-                    <Text style={styles.profileRole}>{roleLabels[user?.role || '']} ▾</Text>
-                  </Pressable>
-                ) : (
-                  <Text style={styles.profileRole}>{roleLabels[user?.role || '']}</Text>
-                )}
-              </View>
-              <Pressable onPress={startSystemTour} accessibilityLabel="Refazer tour" style={styles.profileTourButton}><Text style={styles.profileTourIcon}>?</Text></Pressable>
-              <Pressable onPress={() => signOut()}>
-                <Text style={styles.exit}>↪</Text>
-              </Pressable>
             </View>
-            {profiles.length > 1 && profileMenuOpen ? (
-              <View style={styles.profileSwitcher}>
-                <Text style={styles.profileSwitcherTitle}>Trocar perfil</Text>
-                {profiles.map(profile => (
-                  <Pressable
-                    key={profile.id ?? 'default'}
-                    onPress={() => handleSwitchProfile(profile.id)}
-                    disabled={switchingProfile}
-                    style={[styles.profileSwitcherItem, (user?.activeProfileId ?? null) === profile.id && styles.profileSwitcherItemActive]}
-                  >
-                    <Text style={styles.profileSwitcherItemText}>{roleLabels[profile.role]}{profile.condominiumName ? ` · ${profile.condominiumName}` : ''}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
           </View>
 
           <View style={styles.mainDesktop}>
@@ -544,8 +549,9 @@ const styles = StyleSheet.create({
   subnavDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#a8b2bd' },
   subnavDotActive: { backgroundColor: colors.primary },
   subnavText: { color: '#6e7b88', fontSize: 14, fontWeight: '700' },
-  profile: { marginTop: 'auto', borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 8, paddingTop: 16, flexDirection: 'row', alignItems: 'center', gap: 9 }, avatarLight: { width: 33, height: 33, borderRadius: 17, backgroundColor: '#dfe9f6', alignItems: 'center', justifyContent: 'center' }, avatarLightText: { color: colors.primary, fontSize: 14, fontWeight: '800' }, profileName: { color: colors.ink, fontSize: 14, fontWeight: '800' }, profileRole: { color: '#8190a0', fontSize: 12, marginTop: 2 },profileTourButton:{width:34,height:34,borderRadius:17,backgroundColor:colors.primary,alignItems:'center',justifyContent:'center',shadowColor:colors.primary,shadowOpacity:.22,shadowRadius:6,elevation:2},profileTourIcon:{color:'#fff',fontSize:17,fontWeight:'900'}, exit: { color: colors.red, fontSize: 13, fontWeight: '800' },
-  profileSwitcher: { paddingHorizontal: 8, paddingTop: 8, paddingBottom: 4, gap: 4 },
+  profileAnchor: { marginTop: 'auto' },
+  profile: { borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 8, paddingTop: 16, flexDirection: 'row', alignItems: 'center', gap: 9 }, avatarLight: { width: 33, height: 33, borderRadius: 17, backgroundColor: '#dfe9f6', alignItems: 'center', justifyContent: 'center' }, avatarLightText: { color: colors.primary, fontSize: 14, fontWeight: '800' }, profileName: { color: colors.ink, fontSize: 14, fontWeight: '800' }, profileRole: { color: '#8190a0', fontSize: 12, marginTop: 2 },profileTourButton:{width:34,height:34,borderRadius:17,backgroundColor:colors.primary,alignItems:'center',justifyContent:'center',shadowColor:colors.primary,shadowOpacity:.22,shadowRadius:6,elevation:2},profileTourIcon:{color:'#fff',fontSize:17,fontWeight:'900'}, exit: { color: colors.red, fontSize: 13, fontWeight: '800' },
+  profileSwitcher: { paddingHorizontal: 8, paddingVertical: 8, marginBottom: 8, gap: 4, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: colors.border, borderRadius: 12 },
   mobileProfileSwitcher: { paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: '#f9f9fa', gap: 4 },
   profileSwitcherTitle: { fontSize: 11, fontWeight: '800', color: colors.muted, textTransform: 'uppercase', marginBottom: 2 },
   profileSwitcherItem: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, backgroundColor: 'transparent' },

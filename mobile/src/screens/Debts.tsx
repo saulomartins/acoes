@@ -7,6 +7,8 @@ import { AppButton, EmptyState } from '../ui/components';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import { brazilianDateToIso, formatBrazilianDate, formatBrazilianMonth, maskBrazilianDate } from '../utils/date';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type Person = { id: string; full_name: string | null; username: string; unit: string | null };
 type DebtAdjustment = {
@@ -96,6 +98,7 @@ export default function Debts({ navigation }: any) {
   const { userToken, user, condominiumFeatures } = useContext(AuthContext);
   const manager = ['sindico', 'subsindico'].includes(user?.role || '');
   const agreementEnabled = condominiumFeatures?.historico_acordos === true;
+  const {scrollRef,tourOpen,registerSection,scrollToSection,openTour,closeTour,isActive}=useSectionTour();
   const [data, setData] = useState<DebtData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -413,12 +416,28 @@ export default function Debts({ navigation }: any) {
     ))}
   </View>;
 
-  return <ScrollView contentContainerStyle={[styles.container,compact&&styles.containerMobile]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
-      <Text style={styles.eyebrow}>FINANCEIRO</Text>
-      <Text style={styles.title}>Gestão de débitos por apartamento</Text>
-      <Text style={styles.subtitle}>Cada apartamento apresenta suas referências mensais, encargos e total atualizado diariamente.</Text>
+  const managerTourSteps:TourStep[]=[
+    {key:'update',title:'Atualização automática dos valores',description:'Multa e mora são recalculadas automaticamente pela data de hoje toda vez que a tela carrega, e também sozinha a cada 5 minutos enquanto você fica na tela. Toque em "Atualizar agora" pra forçar um recálculo imediato — útil logo depois de registrar um pagamento ou editar um débito.'},
+    {key:'legacy',title:'Cadastrar débito antigo',description:'Use pra lançar dívidas anteriores à existência do sistema, vinculadas a uma pessoa já cadastrada. Dá pra cadastrar manualmente um débito por vez ou importar uma planilha .xlsx com várias linhas (colunas MES, TAXA CONDOMINIO, VENCIMENTO BOLETO e SITUAÇÃO opcional pra marcar meses já pagos). Se marcar "já foi negociado", o valor fica congelado com parcelas fixas; se essa negociação for cancelada depois, o sistema volta a calcular multa e mora normalmente sobre o valor original.'},
+    {key:'summary',title:'Resumo geral do condomínio',description:'Total de apartamentos com algum débito listado, quantidade de referências mensais em aberto no condomínio inteiro e a soma de tudo isso já com multa e mora recalculadas até hoje.'},
+    {key:'agreements',title:'Propostas e acordos',description:'Acompanhe cada proposta de negociação pelo status: rascunho, aguardando aceite do morador, aceito (aguardando emissão dos boletos), ativo, sob risco, rompido ou quitado. Um acordo só passa a valer — e os débitos originais só ficam congelados — depois que o morador aceita as condições. Se todas as parcelas de um acordo ativo forem canceladas, dá pra registrar a justificativa do cancelamento total dele.'},
+    {key:'units',title:'Débitos por apartamento',description:'Cada apartamento lista seus responsáveis (proprietário e/ou inquilino) com o total em aberto de cada um. "Comunicar por WhatsApp" notifica o morador sobre os débitos em aberto; "Criar proposta de acordo" parcela a dívida dele a partir de uma data de primeiro vencimento e uma quantidade de parcelas à sua escolha. Na tabela de débitos dá pra editar valor/vencimento, registrar um pagamento parcial recebido por fora do sistema, ou excluir um débito que já esteja pago ou cancelado.'},
+  ];
+  const residentTourSteps:TourStep[]=[
+    {key:'update',title:'Atualização automática dos valores',description:'Multa e mora são recalculadas automaticamente pela data de hoje toda vez que a tela carrega, e também sozinha a cada 5 minutos. Toque em "Atualizar agora" se quiser forçar um recálculo na hora.'},
+    {key:'summary',title:'Resumo geral',description:'Quantos apartamentos aparecem pra você (o seu e, se você for proprietário adicional de outra unidade, os que você acompanha), quantas referências mensais estão em aberto e o total já atualizado com multa e mora até hoje.'},
+    {key:'agreements',title:'Meus acordos',description:'Acompanhe suas propostas de negociação de dívida. Quando o síndico envia uma, ela fica "Aguardando seu aceite" — leia as condições e toque em aceitar; só depois disso a dívida original é congelada e as parcelas passam a ser emitidas como boletos. Se o acordo for rompido por falta de pagamento de uma parcela, os débitos originais voltam a receber multa e mora normalmente.'},
+    {key:'units',title:'Seus débitos em aberto',description:'Veja as referências mensais em aberto do seu apartamento, com valor original, multa, mora e total atualizado de cada uma. Toque em "Ver tabela de débitos" pra abrir o detalhamento completo, mês a mês.'},
+    {key:'ownedElsewhere',title:'Apartamentos que você acompanha',description:'Se você é proprietário adicional de outra unidade além da que mora, os débitos dela aparecem aqui só pra consulta — quem responde pela cobrança é o morador daquele apartamento, então não há ações de edição ou negociação por aqui.'},
+  ];
+  const tourSteps=manager?managerTourSteps:residentTourSteps;
 
-      <View style={styles.updateBox}>
+  return <><ScrollView ref={scrollRef} contentContainerStyle={[styles.container,compact&&styles.containerMobile]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
+      <View style={styles.headerRow}><View style={styles.grow}><Text style={styles.eyebrow}>FINANCEIRO</Text>
+      <Text style={styles.title}>Gestão de débitos por apartamento</Text>
+      <Text style={styles.subtitle}>Cada apartamento apresenta suas referências mensais, encargos e total atualizado diariamente.</Text></View><Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable></View>
+
+      <View ref={registerSection('update')} style={[styles.updateBox,isActive('update')&&styles.tourHighlight]}>
         <View style={styles.updateCopy}>
           <Text style={styles.updateTitle}>Atualização automática</Text>
           <Text style={styles.updateText}>{data ? `Multa de ${percent(data.rules.finePercent)}% e mora de ${percent(data.rules.dailyInterestPercent)}% ao dia, recalculadas pela data atual a cada atualização.` : 'Multa e mora recalculadas pela data atual a cada atualização.'}</Text>
@@ -427,18 +446,18 @@ export default function Debts({ navigation }: any) {
         <View style={styles.updateAction}><AppButton title={loading ? 'Atualizando...' : 'Atualizar agora'} onPress={load} disabled={loading} /></View>
       </View>
 
-      {manager ? <View style={styles.legacyTrigger}><AppButton title="Cadastrar débito antigo" onPress={() => setShowLegacyForm(true)} variant="secondary" /></View> : null}
+      {manager ? <View ref={registerSection('legacy')} style={[styles.legacyTrigger,isActive('legacy')&&styles.tourHighlight]}><AppButton title="Cadastrar débito antigo" onPress={() => setShowLegacyForm(true)} variant="secondary" /></View> : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
       {data ? <>
-        <View style={styles.summaryRow}>
+        <View ref={registerSection('summary')} style={[styles.summaryRow,isActive('summary')&&styles.tourHighlight]}>
           <View style={styles.summary}><Text style={styles.summaryValue}>{units.length}</Text><Text style={styles.summaryLabel}>apartamentos listados</Text></View>
           <View style={styles.summary}><Text style={styles.summaryValue}>{data.totals.openCount}</Text><Text style={styles.summaryLabel}>referências em aberto</Text></View>
           <View style={styles.summaryTotal}><Text style={styles.summaryTotalValue}>{money(data.totals.updatedTotalCents)}</Text><Text style={styles.summaryTotalLabel}>total atualizado do condomínio</Text></View>
         </View>
 
-        {agreements.length?<View style={styles.agreements}><Text style={styles.sectionTitle}>Propostas e acordos</Text><Text style={styles.sectionHint}>{manager?'Acompanhe propostas, aceites e emissão das parcelas.':'Consulte abaixo todos os valores, débitos incluídos, vencimentos e situação do seu acordo.'}</Text>{agreements.map(agreement=>{const discount=Math.max(0,agreement.original_total_cents-agreement.negotiated_total_cents);const orderedItems=[...(agreement.items||[])].sort((a,b)=>b.referenceMonth.localeCompare(a.referenceMonth));const orderedInstallments=[...(agreement.installments||[])].sort((a,b)=>a.number-b.number);const paid=orderedInstallments.filter(item=>item.status==='paid').length;return <View key={agreement.id} style={[styles.agreementCard,agreement.status==='breached'&&styles.agreementCardDanger]}>
+        {agreements.length?<View ref={registerSection('agreements')} style={[styles.agreements,isActive('agreements')&&styles.tourHighlight]}><Text style={styles.sectionTitle}>Propostas e acordos</Text><Text style={styles.sectionHint}>{manager?'Acompanhe propostas, aceites e emissão das parcelas.':'Consulte abaixo todos os valores, débitos incluídos, vencimentos e situação do seu acordo.'}</Text>{agreements.map(agreement=>{const discount=Math.max(0,agreement.original_total_cents-agreement.negotiated_total_cents);const orderedItems=[...(agreement.items||[])].sort((a,b)=>b.referenceMonth.localeCompare(a.referenceMonth));const orderedInstallments=[...(agreement.installments||[])].sort((a,b)=>a.number-b.number);const paid=orderedInstallments.filter(item=>item.status==='paid').length;return <View key={agreement.id} style={[styles.agreementCard,agreement.status==='breached'&&styles.agreementCardDanger]}>
           <View style={styles.agreementHeader}><View style={styles.grow}><Text style={styles.agreementCode}>ACORDO {agreement.id.slice(0,8).toUpperCase()}</Text><Text style={styles.agreementTitle}>{agreement.apartment} · {agreement.debtor_name}</Text></View><Text style={[styles.agreementStatus,agreement.status==='breached'&&styles.agreementStatusDanger,agreement.status==='settled'&&styles.agreementStatusSuccess]}>{agreementStatus[agreement.status]||agreement.status}</Text></View>
           <View style={styles.agreementValues}><View style={styles.agreementValueBox}><Text style={styles.valueLabel}>Dívida original</Text><Text style={styles.valueText}>{money(agreement.original_total_cents)}</Text></View><View style={styles.agreementValueBox}><Text style={styles.valueLabel}>Valor negociado</Text><Text style={styles.valueStrong}>{money(agreement.negotiated_total_cents)}</Text></View><View style={styles.agreementValueBox}><Text style={styles.valueLabel}>Condição</Text><Text style={styles.valueText}>{agreement.installment_count} parcela(s)</Text></View>{discount>0?<View style={styles.agreementValueBox}><Text style={styles.valueLabel}>Redução negociada</Text><Text style={styles.discountValue}>{money(discount)}</Text></View>:null}</View>
           <View style={styles.agreementInfo}><Text style={styles.infoText}>Primeiro vencimento: <Text style={styles.infoStrong}>{formatBrazilianDate(agreement.first_due_date)}</Text></Text>{agreement.valid_until?<Text style={styles.infoText}>Proposta válida até: <Text style={styles.infoStrong}>{formatBrazilianDate(agreement.valid_until)}</Text></Text>:null}{agreement.accepted_at?<Text style={styles.infoText}>Aceito em: <Text style={styles.infoStrong}>{formatBrazilianDate(agreement.accepted_at)}</Text></Text>:null}{agreement.notes?<Text style={styles.infoText}>Observação: <Text style={styles.infoStrong}>{agreement.notes}</Text></Text>:null}</View>
@@ -448,9 +467,11 @@ export default function Debts({ navigation }: any) {
           <View style={styles.agreementActions}>{manager&&agreement.status==='draft'?<View style={styles.smallAction}><AppButton title="Enviar proposta" onPress={()=>agreementAction(agreement,'send')} disabled={loading}/></View>:null}{!manager&&agreement.status==='sent'?<View style={styles.acceptAction}><AppButton title="Li as condições e aceito o acordo" onPress={()=>agreementAction(agreement,'accept')} disabled={loading}/></View>:null}{manager&&agreement.status==='accepted'?<View style={styles.smallAction}><AppButton title="Gerar boletos" onPress={()=>agreementAction(agreement,'issue')} disabled={loading}/></View>:null}{manager&&canDeleteAgreement(agreement)?<View style={styles.smallAction}><AppButton title="Excluir acordo" onPress={()=>{setJustifyingAgreement(agreement.id);setJustification('');setShouldRecalculate(false)}} disabled={loading}/></View>:null}</View>
         </View>})}</View>:null}
 
+        <View ref={registerSection('units')} style={[isActive('units')&&styles.tourHighlight]}>
         {units.length ? units.map(group => renderUnitGroup(group)) : <EmptyState title="Nenhum débito encontrado" description={manager ? 'Não há cobranças registradas para os apartamentos.' : 'Não há cobranças registradas para o seu apartamento.'} />}
+        </View>
 
-        {!manager && ownedElsewhereUnits.length ? <View style={styles.ownedElsewhereSection}>
+        {!manager && ownedElsewhereUnits.length ? <View ref={registerSection('ownedElsewhere')} style={[styles.ownedElsewhereSection,isActive('ownedElsewhere')&&styles.tourHighlight]}>
           <Text style={styles.sectionTitle}>Apartamentos que você acompanha</Text>
           <Text style={styles.sectionHint}>Você é proprietário adicional dessas unidades — só visualização, o morador é quem responde pela cobrança.</Text>
           {ownedElsewhereUnits.map(group => renderUnitGroup(group))}
@@ -796,7 +817,9 @@ export default function Debts({ navigation }: any) {
           </View>
         </View>
       </Modal>
-    </ScrollView>;
+    </ScrollView>
+    <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step=>scrollToSection(step.key)}/>
+    </>;
 }
 
 const styles = StyleSheet.create({
@@ -805,6 +828,8 @@ const styles = StyleSheet.create({
   eyebrow: { color: colors.primary, fontWeight: '900' },
   title: { color: colors.ink, fontSize: 28, fontWeight: '900' },
   subtitle: { color: colors.muted, lineHeight: 22 },
+  headerRow:{flexDirection:'row',alignItems:'flex-start',gap:12,flexWrap:'wrap'},
+  tourButton:{borderWidth:1,borderColor:colors.primary,borderRadius:20,paddingHorizontal:14,paddingVertical:9,backgroundColor:colors.softBlue},tourButtonText:{color:colors.primaryDark,fontWeight:'900',fontSize:13},tourHighlight:{borderWidth:2,borderColor:colors.primary,borderRadius:16,padding:6,margin:-6},
   updateBox: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 14, borderWidth: 1, borderColor: '#b8d6c1', backgroundColor: colors.softGreen, borderRadius: 10, padding: 14 },
   updateCopy: { flex: 1, minWidth: 240 }, updateAction: { minWidth: 170 },
   updateTitle: { color: colors.green, fontWeight: '900' }, updateText: { color: colors.muted, lineHeight: 20, marginTop: 3 }, updateDate: { color: colors.ink, fontWeight: '800', marginTop: 5 },

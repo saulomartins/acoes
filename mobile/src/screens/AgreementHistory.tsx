@@ -6,6 +6,8 @@ import { AppButton, EmptyState, Panel } from '../ui/components';
 import { colors } from '../ui/theme';
 import { formatBrazilianDate, formatBrazilianMonth } from '../utils/date';
 import { useBreakpoint } from '../ui/responsive';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type Agreement = {
   id: string;
@@ -68,6 +70,7 @@ export default function AgreementHistory({ navigation }: any) {
   const { isMobile: compact } = useBreakpoint();
   const { userToken, user } = useContext(AuthContext);
   const manager = ['sindico', 'subsindico'].includes(user?.role || '');
+  const {scrollRef,tourOpen,registerSection,scrollToSection,openTour,closeTour,isActive}=useSectionTour();
   const [agreements, setAgreements] = useState<Agreement[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -151,20 +154,33 @@ export default function AgreementHistory({ navigation }: any) {
 
   const allCanceledCount = (ag: Agreement) => ag.installments.filter(i => i.status === 'canceled').length === ag.installments.length ? ag.installments.length : 0;
 
-  return (
-    <ScrollView contentContainerStyle={[styles.container, compact && styles.containerMobile]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
-      <Text style={styles.eyebrow}>FINANCEIRO</Text>
-      <Text style={styles.title}>Histórico de Acordos</Text>
-      <Text style={styles.subtitle}>{manager ? 'Acordos encerrados, quitados e rompidos' : 'Acompanhe seus acordos finalizados'}</Text>
+  const managerTourSteps:TourStep[]=[
+    {key:'summary',title:'Resumo geral',description:'Total de acordos no histórico, quantos foram quitados, quantos foram rompidos (o morador não honrou as parcelas) e a soma de tudo que foi efetivamente negociado, já considerando o desconto dado em relação à dívida original.'},
+    {key:'filters',title:'Buscar e filtrar',description:'Pesquise por apartamento ou pelo nome do responsável, e filtre por situação: rascunho, aguardando aceite, aceito, ativo, sob risco, rompido, quitado, recusado, expirado ou cancelado. Combine os dois pra achar um acordo específico rapidamente.'},
+    {key:'agreements',title:'Acordos por apartamento',description:'Os acordos aparecem agrupados por apartamento, do mais recente pro mais antigo. Toque em "Ver detalhes" pra abrir o resumo completo: dívida original, valor negociado, cada parcela com sua situação (paga, vencida, cancelada) e, se houver, o motivo do cancelamento ou observações registradas. Se um acordo ativo tiver todas as parcelas canceladas, dá pra justificar o cancelamento total dele por ali.'},
+  ];
+  const residentTourSteps:TourStep[]=[
+    {key:'summary',title:'Resumo geral',description:'Quantos acordos você já fez no total, quantos já foram quitados, quantos foram rompidos e o valor total que você negociou — já com o desconto obtido em relação à dívida original.'},
+    {key:'filters',title:'Filtrar por situação',description:'Filtre seus acordos por situação: aguardando seu aceite, ativo, sob risco de rompimento, quitado, rompido, recusado, expirado ou cancelado.'},
+    {key:'agreements',title:'Seus acordos',description:'Toque em "Ver detalhes" pra ver a dívida original, o valor negociado, todas as parcelas com data de vencimento e situação (paga, vencida, cancelada), além de observações e o motivo de um eventual cancelamento.'},
+  ];
+  const tourSteps=manager?managerTourSteps:residentTourSteps;
 
-      <View style={[styles.summaryRow, compact && styles.summaryRowMobile]}>
+  return (
+    <>
+    <ScrollView ref={scrollRef} contentContainerStyle={[styles.container, compact && styles.containerMobile]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
+      <View style={styles.headerRow}><View style={styles.grow}><Text style={styles.eyebrow}>FINANCEIRO</Text>
+      <Text style={styles.title}>Histórico de Acordos</Text>
+      <Text style={styles.subtitle}>{manager ? 'Acordos encerrados, quitados e rompidos' : 'Acompanhe seus acordos finalizados'}</Text></View><Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable></View>
+
+      <View ref={registerSection('summary')} style={[styles.summaryRow, compact && styles.summaryRowMobile, isActive('summary')&&styles.tourHighlight]}>
         <View style={[styles.summary, compact && styles.summaryMobile]}><Text style={[styles.summaryValue, compact && styles.summaryValueMobile]}>{agreements.length}</Text><Text style={styles.summaryLabel}>acordos no histórico</Text></View>
         <View style={[styles.summary, compact && styles.summaryMobile]}><Text style={[styles.summaryValue, compact && styles.summaryValueMobile, { color: colors.green }]}>{settledCount}</Text><Text style={styles.summaryLabel}>quitados</Text></View>
         <View style={[styles.summary, breachedCount > 0 && styles.summaryDanger, compact && styles.summaryMobile]}><Text style={[styles.summaryValue, compact && styles.summaryValueMobile, breachedCount > 0 && styles.dangerText]}>{breachedCount}</Text><Text style={styles.summaryLabel}>rompidos</Text></View>
         <View style={[styles.summary, compact && styles.summaryMobile]}><Text style={[styles.summaryValue, compact && styles.summaryValueMobile]}>{money(negotiatedTotal)}</Text><Text style={styles.summaryLabel}>total negociado</Text></View>
       </View>
 
-      <Panel>
+      <View ref={registerSection('filters')} style={[isActive('filters')&&styles.tourHighlight]}><Panel>
         <Text style={styles.panelTitle}>Filtros</Text>
         {manager && (
           <>
@@ -180,10 +196,11 @@ export default function AgreementHistory({ navigation }: any) {
             </Pressable>
           ))}
         </View>
-      </Panel>
+      </Panel></View>
 
       {error && <Text style={styles.error}>{error}</Text>}
 
+      <View ref={registerSection('agreements')} style={[isActive('agreements')&&styles.tourHighlight]}>
       {loading && !agreements.length ? (
         <EmptyState title="Carregando..." description="" />
       ) : grouped.length && grouped.some(group => group.agreements.length) ? (
@@ -220,6 +237,7 @@ export default function AgreementHistory({ navigation }: any) {
       ) : (
         <EmptyState title="Nenhum acordo encontrado" description={manager ? 'Altere os filtros ou aguarde novos acordos encerrados, quitados ou rompidos.' : 'Você não possui acordos finalizados.'} />
       )}
+      </View>
 
       <Modal visible={!!detailsAgreement} transparent animationType="fade" onRequestClose={() => setDetailsAgreement(null)}>
         <View style={styles.modalOverlay}>
@@ -374,6 +392,8 @@ export default function AgreementHistory({ navigation }: any) {
         </View>
       </Modal>
     </ScrollView>
+    <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step=>scrollToSection(step.key)}/>
+    </>
   );
 }
 
@@ -384,6 +404,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontWeight: '900', color: colors.ink },
   subtitle: { fontSize: 14, color: colors.muted, lineHeight: 20, marginBottom: 4 },
   error: { color: colors.red, fontWeight: '800' },
+  headerRow:{flexDirection:'row',alignItems:'flex-start',gap:12,flexWrap:'wrap'},grow:{flex:1},
+  tourButton:{borderWidth:1,borderColor:colors.primary,borderRadius:20,paddingHorizontal:14,paddingVertical:9,backgroundColor:colors.softBlue},tourButtonText:{color:colors.primaryDark,fontWeight:'900',fontSize:13},tourHighlight:{borderWidth:2,borderColor:colors.primary,borderRadius:16,padding:6,margin:-6},
 
   summaryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   summaryRowMobile: { gap: 6 },

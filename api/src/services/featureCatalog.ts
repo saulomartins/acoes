@@ -13,6 +13,9 @@ export type FeatureKey =
   | 'historico_acordos'
   | 'config_enviar_cobrancas'
   | 'cobrancas_adicionais'
+  | 'painel'
+  | 'indicadores_boletos'
+  | 'nada_consta'
   | 'avisos_comunicacao'
   | 'relatos_solicitacoes'
   | 'enquetes'
@@ -29,6 +32,13 @@ export const FEATURE_CATALOG: Record<FeatureKey, { label: string; dependsOn: Fea
   historico_acordos: { label: 'Histórico de acordos', dependsOn: ['gestao_debitos'] },
   config_enviar_cobrancas: { label: 'Config. e enviar cobranças', dependsOn: ['gestao_cobrancas'] },
   cobrancas_adicionais: { label: 'Cobranças adicionais', dependsOn: ['config_enviar_cobrancas'] },
+  // Painéis de leitura: só somam os boletos já existentes, então não fazem
+  // sentido sem Gestão de cobranças ligada.
+  painel: { label: 'Painel financeiro', dependsOn: ['gestao_cobrancas'] },
+  indicadores_boletos: { label: 'Indicadores de boletos', dependsOn: ['gestao_cobrancas'] },
+  // Depende da cobrança porque a declaração afirma quitação de débitos —
+  // sem boletos no sistema não há o que declarar.
+  nada_consta: { label: 'Nada consta (quitação)', dependsOn: ['gestao_cobrancas'] },
   avisos_comunicacao: { label: 'Avisos e comunicação', dependsOn: [] },
   relatos_solicitacoes: { label: 'Relatos e solicitações', dependsOn: [] },
   enquetes: { label: 'Enquetes', dependsOn: ['pessoas', 'blocos_unidades'] },
@@ -55,6 +65,9 @@ export const NEW_CONDOMINIUM_FEATURE_DEFAULTS: Record<FeatureKey, boolean> = {
   reserva_espacos: false,
   gestao_cobrancas: true,
   config_enviar_cobrancas: true,
+  painel: true,
+  indicadores_boletos: true,
+  nada_consta: true,
   gestao_debitos: false,
   historico_acordos: false,
   cobrancas_adicionais: false,

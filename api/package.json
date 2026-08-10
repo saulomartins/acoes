@@ -17,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@types/pdfkit": "^0.17.6",
     "bcrypt": "^5.1.0",
     "dotenv": "^16.0.0",
     "exceljs": "^4.4.0",
@@ -28,6 +29,7 @@
     "node-cron": "^3.0.3",
     "nodemailer": "^9.0.3",
     "pdf-parse": "^1.1.1",
+    "pdfkit": "^0.19.1",
     "pg": "^8.9.0"
   },
   "devDependencies": {

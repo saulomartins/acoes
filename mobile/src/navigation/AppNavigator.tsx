@@ -1,11 +1,14 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import ResponsiveShell from '../ui/ResponsiveShell';
 import Home from '../screens/Home';
 import Dashboard from '../screens/Dashboard';
+import BillingAnalytics from '../screens/BillingAnalytics';
+import Clearances from '../screens/Clearances';
+import ClearanceVerify from '../screens/ClearanceVerify';
 import Landing from '../screens/Landing';
 import Login from '../screens/Login';
 import Register from '../screens/Register';
@@ -13,6 +16,7 @@ import Condominiums from '../screens/Condominiums';
 import Users from '../screens/Users';
 import Invoices from '../screens/Invoices';
 import BankIntegration from '../screens/BankIntegration';
+import BankIntegrationGuide from '../screens/BankIntegrationGuide';
 import UnitTypes from '../screens/UnitTypes';
 import UnitExtraCharges from '../screens/UnitExtraCharges';
 import BillingSettings from '../screens/BillingSettings';
@@ -52,12 +56,16 @@ type RootStackParamList = {
   SelectProfile: undefined;
   Home: undefined;
   Dashboard: undefined;
+  BillingAnalytics: undefined;
+  Clearances: undefined;
+  ClearanceVerify: { code?: string } | undefined;
   Condominiums: undefined;
   Users: undefined;
   BankIntegration: undefined;
   BankLink: undefined;
   BankConfigurations: undefined;
   Banks: undefined;
+  BankIntegrationGuide: undefined;
   UnitTypes: undefined;
   UnitExtraCharges: undefined;
   Units: undefined;
@@ -84,6 +92,10 @@ type RootStackParamList = {
 
 const Stack = createNativeStackNavigator();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
+// A landing page de marketing só existe no build web (app.laremdia.com.br).
+// No app nativo instalado (Android/iOS) o usuário já decidiu usar o app —
+// a primeira tela deve ser sempre o Login, nunca a landing de vendas.
+const isWeb = Platform.OS === 'web';
 export const CURRENT_TOUR_VERSION='2026-08-04-1';
 type TourStep={route:keyof RootStackParamList;title:string;description:string;roles:string[];feature?:FeatureKey};
 const TOUR_STEPS:TourStep[]=[
@@ -133,12 +145,15 @@ const withResponsiveShell = (Component: React.ComponentType<any>, routeName: str
 // função entre renders.
 const HomeScreen = withResponsiveShell(Home, 'Home');
 const DashboardScreen = withResponsiveShell(Dashboard, 'Dashboard');
+const BillingAnalyticsScreen = withResponsiveShell(BillingAnalytics, 'BillingAnalytics');
+const ClearancesScreen = withResponsiveShell(Clearances, 'Clearances');
 const CondominiumsScreen = withResponsiveShell(Condominiums, 'Condominiums');
 const UsersScreen = withResponsiveShell(Users, 'Users');
 const BankIntegrationScreen = withResponsiveShell(BankIntegration, 'BankIntegration');
 const BankLinkScreen = withResponsiveShell(BankIntegration, 'BankLink');
 const BankConfigurationsScreen = withResponsiveShell(BankIntegration, 'BankConfigurations');
 const BanksScreen = withResponsiveShell(BankIntegration, 'Banks');
+const BankIntegrationGuideScreen = withResponsiveShell(BankIntegrationGuide, 'BankIntegrationGuide');
 const UnitTypesScreen = withResponsiveShell(UnitTypes, 'UnitTypes');
 const UnitExtraChargesScreen = withResponsiveShell(UnitExtraCharges, 'UnitExtraCharges');
 const UnitsScreen = withResponsiveShell(Units, 'Units');
@@ -218,7 +233,7 @@ export default function AppNavigator() {
 
   return (
     <View style={styles.container}>
-      <NavigationContainer ref={navigationRef} linking={{ prefixes: ['laremdia://', 'appcond://'], config: { screens: { Landing: '', Login: 'login', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha' } } }}>
+      <NavigationContainer ref={navigationRef} linking={{ prefixes: ['laremdia://', 'appcond://'], config: { screens: isWeb ? { Landing: '', Login: 'login', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?' } : { Login: '', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?' } } }}>
         <Stack.Navigator screenOptions={{ animation: 'fade', contentStyle: { backgroundColor: '#f5f7fb' } }}>
           {userToken && user?.mustChangePassword ? (
             <Stack.Screen name="ForcePasswordChange" component={ForcePasswordChange} options={{ headerShown: false }} />
@@ -233,12 +248,16 @@ export default function AppNavigator() {
             <>
               <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="BillingAnalytics" component={BillingAnalyticsScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Clearances" component={ClearancesScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="ClearanceVerify" component={ClearanceVerify} options={{ headerShown: false }} />
               <Stack.Screen name="Condominiums" component={CondominiumsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Users" component={UsersScreen} options={{ headerShown: false }} />
               <Stack.Screen name="BankIntegration" component={BankIntegrationScreen} options={{ headerShown: false }} />
               <Stack.Screen name="BankLink" component={BankLinkScreen} initialParams={{ section: 'link' }} options={{ headerShown: false }} />
               <Stack.Screen name="BankConfigurations" component={BankConfigurationsScreen} initialParams={{ section: 'configurations' }} options={{ headerShown: false }} />
               <Stack.Screen name="Banks" component={BanksScreen} initialParams={{ section: 'banks' }} options={{ headerShown: false }} />
+              <Stack.Screen name="BankIntegrationGuide" component={BankIntegrationGuideScreen} options={{ headerShown: false }} />
               <Stack.Screen name="UnitTypes" component={UnitTypesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="UnitExtraCharges" component={UnitExtraChargesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Units" component={UnitsScreen} options={{ headerShown: false }} />
@@ -262,12 +281,13 @@ export default function AppNavigator() {
             </>
           ) : (
             <>
-              <Stack.Screen name="Landing" component={Landing} options={{ headerShown: false }} />
+              {isWeb ? <Stack.Screen name="Landing" component={Landing} options={{ headerShown: false }} /> : null}
               <Stack.Screen name="Login" component={Login} options={{ headerShown: false }} />
               <Stack.Screen name="Register" component={Register} options={{ headerShown: false }} />
               <Stack.Screen name="ForgotPassword" component={ForgotPassword} options={{ headerShown: false }} />
               <Stack.Screen name="LegalDocument" component={LegalDocument} options={{ headerShown: false }} />
               <Stack.Screen name="ResetPassword" component={ResetPassword} options={{ headerShown: false }} />
+              <Stack.Screen name="ClearanceVerify" component={ClearanceVerify} options={{ headerShown: false }} />
             </>
           )}
         </Stack.Navigator>

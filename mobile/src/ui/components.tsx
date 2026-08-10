@@ -1,6 +1,22 @@
 import React from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type TextInputProps, View } from 'react-native';
 import { colors, layout, shadow } from './theme';
+
+// Rótulo sempre visível acima do campo: placeholder some assim que o usuário
+// digita, e no celular vira impossível saber a que cada caixa corresponde.
+export const Field = ({ label, hint, required, children }: { label: string; hint?: string; required?: boolean; children: React.ReactNode }) => (
+  <View style={styles.field}>
+    <Text style={styles.fieldLabel}>{label}{required ? <Text style={styles.fieldRequired}> *</Text> : null}</Text>
+    {children}
+    {hint ? <Text style={styles.fieldHint}>{hint}</Text> : null}
+  </View>
+);
+
+export const TextField = ({ label, hint, required, style, ...props }: TextInputProps & { label: string; hint?: string; required?: boolean }) => (
+  <Field label={label} hint={hint} required={required}>
+    <TextInput placeholderTextColor={colors.placeholder} {...props} style={[styles.fieldInput, style]} />
+  </Field>
+);
 
 type ButtonProps = {
   title: string;
@@ -73,6 +89,20 @@ export const AppDialog = ({ visible, title, message, tone = 'info', confirmLabel
 );
 
 const styles = StyleSheet.create({
+  field: { marginBottom: 14 },
+  fieldLabel: { color: colors.ink, fontSize: 14.5, fontWeight: '800', marginBottom: 6 },
+  fieldRequired: { color: colors.red },
+  fieldHint: { color: colors.muted, fontSize: 13, lineHeight: 17, marginTop: 5 },
+  fieldInput: {
+    minHeight: 52,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 9,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    backgroundColor: '#fff',
+    color: colors.ink,
+  },
   button: {
     minHeight: 52,
     borderRadius: layout.controlRadius,

@@ -13,6 +13,8 @@ import { AuthContext } from "../context/AuthContext";
 import { AppButton, AppDialog, EmptyState, Panel } from "../ui/components";
 import { colors, layout } from "../ui/theme";
 import { useBreakpoint } from "../ui/responsive";
+import FeatureTour, { type TourStep } from "../ui/FeatureTour";
+import { useSectionTour } from "../ui/useSectionTour";
 type Report = {
   id: string;
   category: string;
@@ -49,6 +51,7 @@ export default function Reports({ navigation }: any) {
   const { isDesktop } = useBreakpoint();
   const { user, userToken } = useContext(AuthContext);
   const manager = ["sindico", "subsindico"].includes(user?.role || "");
+  const {scrollRef,tourOpen,registerSection,scrollToSection,openTour,closeTour,isActive}=useSectionTour();
   const [reports, setReports] = useState<Report[]>([]);
   const [selected, setSelected] = useState<Report | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -153,19 +156,35 @@ export default function Reports({ navigation }: any) {
     setSelected((current) => current ? { ...current, status: value } : current);
     await load();
   };
+  const managerTourSteps: TourStep[] = [
+    { key: "list", title: "Relatos dos moradores", description: 'Cada relato criado por um morador aparece aqui com a categoria (Reclamação, Incômodo, Manutenção, Sugestão ou Outro), o nome e apartamento de quem abriu, e a situação: Aberto, Em atendimento ou Resolvido. O número em vermelho mostra quantas mensagens novas aquele relato tem esperando sua resposta. Toque num relato pra abrir a conversa.' },
+    { key: "chat", title: "Atender um relato", description: 'Ao abrir um relato, a conversa completa aparece com as mensagens mais recentes embaixo. Toque em "Atender" pra marcar como "Em atendimento" assim que começar a tratar do assunto, e em "Resolver" quando finalizar — o morador recebe uma notificação avisando a mudança de situação. Um relato "Resolvido" fica travado: nenhum dos dois lados consegue mais enviar mensagem nele.' },
+  ];
+  const residentTourSteps: TourStep[] = [
+    { key: "newReport", title: "Abrir um novo relato", description: 'Escolha uma categoria (Reclamação, Incômodo, Manutenção, Sugestão ou Outro), escreva um assunto e a descrição — ambos precisam de pelo menos 3 caracteres. Assim que você envia, o síndico e o subsíndico são notificados na hora.' },
+    { key: "list", title: "Meus relatos", description: 'Acompanhe a situação de cada relato que você abriu: Aberto (ainda não visto pela administração), Em atendimento (já estão cuidando) ou Resolvido. O número em vermelho indica quantas respostas novas da administração você ainda não leu.' },
+    { key: "chat", title: "Conversar com a administração", description: 'Cada relato tem sua própria conversa direta com o síndico/subsíndico. Escreva sua mensagem (mínimo 2 caracteres) e toque em Responder; você recebe notificação a cada nova resposta. Quando o relato for marcado como "Resolvido", a conversa fica fechada — não dá mais pra enviar novas mensagens ali.' },
+  ];
+  const tourSteps = manager ? managerTourSteps : residentTourSteps;
   return (
     <>
-      <ScrollView contentContainerStyle={[styles.content, isDesktop && styles.desktopCap]}>
-        <View>
-          <Text style={styles.eyebrow}>CANAL PRIVADO</Text>
-          <Text style={styles.title}>Relatos e solicitações</Text>
-          <Text style={styles.subtitle}>
-            {manager
-              ? "Atenda relatos enviados pelos moradores do condomínio."
-              : "Converse diretamente com o síndico e o subsíndico."}
-          </Text>
+      <ScrollView ref={scrollRef} contentContainerStyle={[styles.content, isDesktop && styles.desktopCap]}>
+        <View style={styles.headerRow}>
+          <View style={styles.grow}>
+            <Text style={styles.eyebrow}>CANAL PRIVADO</Text>
+            <Text style={styles.title}>Relatos e solicitações</Text>
+            <Text style={styles.subtitle}>
+              {manager
+                ? "Atenda relatos enviados pelos moradores do condomínio."
+                : "Converse diretamente com o síndico e o subsíndico."}
+            </Text>
+          </View>
+          <Pressable onPress={openTour} style={styles.tourButton}>
+            <Text style={styles.tourButtonText}>? Tour desta tela</Text>
+          </Pressable>
         </View>
         {!manager ? (
+          <View ref={registerSection('newReport')} style={[isActive('newReport')&&styles.tourHighlight]}>
           <Panel>
             <Text style={styles.panelTitle}>Novo relato</Text>
             <View style={styles.categories}>
@@ -222,7 +241,9 @@ export default function Reports({ navigation }: any) {
               />
             </View>
           </Panel>
+          </View>
         ) : null}
+        <View ref={registerSection('list')} style={[isActive('list')&&styles.tourHighlight]}>
         <Text style={styles.sectionTitle}>
           {manager ? "Relatos dos moradores" : "Meus relatos"}
         </Text>
@@ -271,7 +292,9 @@ export default function Reports({ navigation }: any) {
             </Pressable>
           ))
         )}
+        </View>
         {selected ? (
+          <View ref={registerSection('chat')} style={[isActive('chat')&&styles.tourHighlight]}>
           <Panel>
             <View style={styles.chatHead}>
               <View style={styles.grow}>
@@ -342,12 +365,14 @@ export default function Reports({ navigation }: any) {
               </Text>
             )}
           </Panel>
+          </View>
         ) : null}
       </ScrollView>
       <AppDialog
         {...dialog}
         onClose={() => setDialog((x) => ({ ...x, visible: false }))}
       />
+      <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step=>scrollToSection(step.key)}/>
     </>
   );
 }
@@ -360,6 +385,10 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   desktopCap: { maxWidth: 860, alignSelf: "center", width: "100%" },
+  headerRow: { flexDirection: "row", alignItems: "flex-start", gap: 12, flexWrap: "wrap" },
+  tourButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.softBlue },
+  tourButtonText: { color: colors.primaryDark, fontWeight: "900", fontSize: 13 },
+  tourHighlight: { borderWidth: 2, borderColor: colors.primary, borderRadius: 16, padding: 6, margin: -6 },
   eyebrow: { color: colors.primary, fontSize: 13, fontWeight: "900" },
   title: { color: colors.ink, fontSize: 27, fontWeight: "900", marginTop: 5 },
   subtitle: { color: colors.muted, fontSize: 15, marginTop: 5 },

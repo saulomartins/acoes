@@ -6,6 +6,8 @@ import { AuthContext } from '../context/AuthContext';
 import { AppButton, EmptyState, Panel } from '../ui/components';
 import { CardGrid, FormGrid } from '../ui/grid';
 import { colors } from '../ui/theme';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type MobileRelease = {
   id:string; platform:'android'|'ios'; version:string; buildNumber:string; releaseNotes:string|null;
@@ -19,6 +21,7 @@ const formatDate = (value:string) => new Date(value).toLocaleString('pt-BR');
 export default function MobileReleases() {
   const { user, userToken } = useContext(AuthContext);
   const admin = user?.role === 'admin_geral';
+  const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
   const [latest,setLatest]=useState<Latest>({android:null,ios:null});
   const [history,setHistory]=useState<MobileRelease[]>([]);
   const [platform,setPlatform]=useState<'android'|'ios'>('android');
@@ -54,12 +57,28 @@ export default function MobileReleases() {
     {item?<><Text style={s.meta}>Build {item.buildNumber} · {formatBytes(item.fileSize)}</Text><Text style={s.meta}>Publicado em {formatDate(item.publishedAt)}</Text>{item.releaseNotes?<Text style={s.notes}>{item.releaseNotes}</Text>:null}<AppButton title={kind==='android'?'Baixar APK':'Abrir instalação iOS'} onPress={()=>install(item)}/></>:<Text style={s.notes}>A versão atual aparecerá aqui assim que for publicada.</Text>}
   </View>;
 
-  return <ScrollView contentContainerStyle={s.container}>
-    <Text style={s.eyebrow}>Aplicativo móvel</Text><Text style={s.title}>Instalar Lar em Dia</Text>
-    <Text style={s.subtitle}>Baixe sempre a versão mais recente e oficial para seu aparelho.</Text>
+  const adminTourSteps:TourStep[]=[
+    {key:'latest',title:'Versões atuais',description:'Mostra a versão mais recente publicada para Android e iOS, com número do build, tamanho do arquivo (ou "Link externo") e data de publicação. O botão baixa o APK diretamente ou abre o link de instalação do iOS.'},
+    {key:'publish',title:'Publicar nova versão',description:'Escolha a plataforma, informe versão e número do build (ambos obrigatórios) e, opcionalmente, as notas da versão. Para Android, selecione um arquivo APK (armazenado no volume persistente de produção, até 150 MB) ou informe um link externo; para iOS, é obrigatório informar o link da App Store ou TestFlight, já que não há upload de arquivo. Ao publicar, essa versão vira automaticamente a "versão atual" daquela plataforma.'},
+    {key:'history',title:'Histórico de versões',description:'Todas as versões já publicadas, incluindo as substituídas. "Definir como atual" reativa uma versão anterior (útil para reverter um build com problema); "Excluir" remove a versão definitivamente do histórico.'},
+  ];
+  const residentTourSteps:TourStep[]=[
+    {key:'latest',title:'Baixar o aplicativo',description:'Aqui fica sempre a versão mais recente e oficial do Lar em Dia para Android e iOS. Toque em "Baixar APK" (Android) ou "Abrir instalação iOS" para instalar direto no seu aparelho — não é preciso passar por loja de aplicativos no Android.'},
+  ];
+  const tourSteps=admin?adminTourSteps:residentTourSteps;
+  return <><ScrollView ref={scrollRef} contentContainerStyle={s.container}>
+    <View style={s.headerRow}>
+      <View style={s.grow}>
+        <Text style={s.eyebrow}>Aplicativo móvel</Text><Text style={s.title}>Instalar Lar em Dia</Text>
+        <Text style={s.subtitle}>Baixe sempre a versão mais recente e oficial para seu aparelho.</Text>
+      </View>
+      <Pressable onPress={openTour} style={s.tourButton}><Text style={s.tourButtonText}>? Tour desta tela</Text></Pressable>
+    </View>
     {error?<Text style={s.error}>{error}</Text>:null}{notice?<Text style={s.success}>{notice}</Text>:null}
-    <CardGrid columns={{mobile:1,tablet:2,desktop:2}}>{releaseCard(latest.android,'android')}{releaseCard(latest.ios,'ios')}</CardGrid>
-    {admin?<><Text style={s.section}>Publicar nova versão</Text><Panel>
+    <View ref={registerSection('latest')} style={[isActive('latest')&&s.tourHighlight]}>
+      <CardGrid columns={{mobile:1,tablet:2,desktop:2}}>{releaseCard(latest.android,'android')}{releaseCard(latest.ios,'ios')}</CardGrid>
+    </View>
+    {admin?<><View ref={registerSection('publish')} style={[isActive('publish')&&s.tourHighlight]}><Text style={s.section}>Publicar nova versão</Text><Panel>
       <View style={s.platforms}>{(['android','ios'] as const).map(item=><Pressable key={item} onPress={()=>{setPlatform(item);setFile(null)}} style={[s.platformOption,platform===item&&s.platformOptionActive]}><Text style={platform===item?s.platformTextActive:s.platformText}>{platformName(item)}</Text></Pressable>)}</View>
       <FormGrid columns={{mobile:1,tablet:2,desktop:2}}>
         <View><Text style={s.label}>Versão</Text><TextInput value={version} onChangeText={setVersion} placeholder="Ex.: 1.1.0" style={s.input}/></View>
@@ -69,14 +88,23 @@ export default function MobileReleases() {
       <Text style={s.label}>{platform==='ios'?'Link da App Store ou TestFlight':'Link externo opcional'}</Text><TextInput value={externalUrl} onChangeText={setExternalUrl} placeholder="https://..." autoCapitalize="none" style={s.input}/>
       {platform==='android'?<><AppButton title={file?`APK selecionado: ${file.name}`:'Selecionar arquivo APK'} onPress={chooseApk} variant="secondary"/><Text style={s.hint}>O APK fica armazenado no volume persistente de produção (máximo 150 MB).</Text></>:<Text style={s.hint}>No iOS, publique pelo TestFlight/App Store e informe o link oficial.</Text>}
       <AppButton title={loading?'Publicando...':'Publicar como versão atual'} onPress={publish} disabled={loading||!version.trim()||!buildNumber.trim()||(platform==='android'&&!file&&!externalUrl.trim())||(platform==='ios'&&!externalUrl.trim())}/>
-    </Panel>
-    <Text style={s.section}>Histórico de versões</Text>{history.length?<CardGrid columns={{mobile:1,tablet:2,desktop:3}}>{history.map(item=><View key={item.id} style={s.historyCard}><Text style={s.historyTitle}>{platformName(item.platform)} {item.version}</Text><Text style={s.meta}>Build {item.buildNumber} · {formatDate(item.publishedAt)}</Text><Text style={s.notes}>{item.releaseNotes||'Sem notas de versão.'}</Text><View style={s.actions}><AppButton title="Definir como atual" onPress={()=>activate(item.id)} variant="secondary"/><AppButton title="Excluir" onPress={()=>remove(item.id)} variant="secondary"/></View></View>)}</CardGrid>:<EmptyState title="Nenhuma versão cadastrada" description="Publique a primeira versão acima."/>}</>:null}
+    </Panel></View>
+    <View ref={registerSection('history')} style={[isActive('history')&&s.tourHighlight]}>
+    <Text style={s.section}>Histórico de versões</Text>{history.length?<CardGrid columns={{mobile:1,tablet:2,desktop:3}}>{history.map(item=><View key={item.id} style={s.historyCard}><Text style={s.historyTitle}>{platformName(item.platform)} {item.version}</Text><Text style={s.meta}>Build {item.buildNumber} · {formatDate(item.publishedAt)}</Text><Text style={s.notes}>{item.releaseNotes||'Sem notas de versão.'}</Text><View style={s.actions}><AppButton title="Definir como atual" onPress={()=>activate(item.id)} variant="secondary"/><AppButton title="Excluir" onPress={()=>remove(item.id)} variant="secondary"/></View></View>)}</CardGrid>:<EmptyState title="Nenhuma versão cadastrada" description="Publique a primeira versão acima."/>}
+    </View></>:null}
     {Platform.OS!=='web'?<Text style={s.hint}>Esta central também pode ser acessada pela versão web.</Text>:null}
-  </ScrollView>;
+  </ScrollView>
+  <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step=>scrollToSection(step.key)}/>
+  </>;
 }
 
 const s=StyleSheet.create({
-  container:{width:'100%',alignSelf:'center',padding:24,paddingBottom:60,backgroundColor:colors.background},eyebrow:{color:colors.green,fontWeight:'900',textTransform:'uppercase',letterSpacing:.8},
+  container:{width:'100%',alignSelf:'center',padding:24,paddingBottom:60,backgroundColor:colors.background},
+  headerRow:{flexDirection:'row',alignItems:'flex-start',gap:12,flexWrap:'wrap'},grow:{flex:1},
+  tourButton:{borderWidth:1,borderColor:colors.primary,borderRadius:20,paddingHorizontal:14,paddingVertical:9,backgroundColor:colors.softBlue},
+  tourButtonText:{color:colors.primaryDark,fontWeight:'900',fontSize:13},
+  tourHighlight:{borderWidth:2,borderColor:colors.primary,borderRadius:16,padding:6,margin:-6},
+  eyebrow:{color:colors.green,fontWeight:'900',textTransform:'uppercase',letterSpacing:.8},
   title:{fontSize:30,fontWeight:'900',color:colors.ink,marginTop:5},subtitle:{color:colors.muted,fontSize:17,lineHeight:24,marginTop:7,marginBottom:20},section:{fontSize:21,fontWeight:'900',color:colors.ink,marginTop:28,marginBottom:12},
   releaseCard:{borderWidth:1,borderColor:colors.border,borderRadius:16,backgroundColor:'#fff',padding:20,gap:9},platformBadge:{alignSelf:'flex-start',backgroundColor:colors.softBlue,borderRadius:99,paddingHorizontal:10,paddingVertical:5},
   platformBadgeText:{color:colors.primaryDark,fontWeight:'900',fontSize:12},releaseTitle:{fontSize:22,fontWeight:'900',color:colors.ink},meta:{color:colors.muted,fontSize:13},notes:{color:colors.ink,lineHeight:20,marginVertical:5},

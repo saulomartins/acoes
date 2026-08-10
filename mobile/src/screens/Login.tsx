@@ -22,7 +22,7 @@ export default function Login({ navigation }: any) {
         <View style={[styles.shell, desktop && styles.shellDesktop]}>
           <View style={[styles.presentation, desktop && styles.presentationDesktop]}>
             <View style={styles.brand}>
-              <Image source={require('../../assets/lar-em-dia-logo.png')} style={styles.brandLogo} resizeMode="contain" />
+              <Image source={require('../../assets/lar-em-dia-icon.png')} style={styles.brandLogo} resizeMode="contain" />
               <View><Text style={styles.brandName}>Lar em Dia</Text><Text style={styles.brandCaption}>Gestão condominial</Text></View>
             </View>
 
@@ -43,7 +43,7 @@ export default function Login({ navigation }: any) {
 
           <View style={[styles.loginArea, desktop && styles.loginAreaDesktop]}>
             <View style={[styles.loginCard, desktop && styles.loginCardDesktop]}>
-              <View style={styles.mobileBrand}><Image source={require('../../assets/lar-em-dia-logo.png')} style={styles.mobileBrandLogo} resizeMode="contain" /><Text style={styles.mobileBrandName}>Lar em Dia</Text></View>
+              <View style={styles.mobileBrand}><Image source={require('../../assets/lar-em-dia-icon.png')} style={styles.mobileBrandLogo} resizeMode="contain" /><Text style={styles.mobileBrandName}>Lar em Dia</Text></View>
               <Text style={styles.cardEyebrow}>BEM-VINDO DE VOLTA</Text>
               <Text style={styles.cardTitle}>Acesse sua conta</Text>
               <Text style={styles.cardSubtitle}>Entre com seus dados para continuar.</Text>

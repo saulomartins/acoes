@@ -13,6 +13,7 @@ export const colors = {
   teal: '#159b8b',
   lilac: '#7c3aed',
   sky: '#0ea5e9',
+  placeholder: '#98a2b3',
   softBlue: '#eef4ff',
   softGreen: '#eaf8f3',
 };

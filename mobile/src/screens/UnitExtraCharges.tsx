@@ -1,18 +1,32 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { apiRequest } from '../api/client';
+import { apiRequest, downloadAuthenticated } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
 import { AppButton, AppDialog, EmptyState } from '../ui/components';
 import { colors } from '../ui/theme';
 import { FormGrid, CardGrid } from '../ui/grid';
 import { brazilianMonthToIso, formatBrazilianMonth, maskBrazilianMonth } from '../utils/date';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type Unit = { id: string; number: string; block_name: string | null };
 type PersonBillingInfo = { unit_id: string | null; billing_exempt: boolean };
-type Installment = { id: string; installment_number: number; amount_cents: number; reference_month: string; status: 'pending' | 'applied' | 'canceled' };
+// A parcela é somada ao boleto do mês, então o pagamento dela é o pagamento
+// do próprio boleto — `paymentState` vem do invoice vinculado (invoice_id).
+type PaymentState = 'paid' | 'open' | 'overdue' | 'awaiting_issue' | 'invoice_canceled' | 'canceled';
+type Installment = {
+  id: string; installment_number: number; amount_cents: number; reference_month: string;
+  status: 'pending' | 'applied' | 'canceled'; paymentState: PaymentState;
+  invoice_due_date: string | null; invoice_paid_at: string | null;
+};
+type ChargePayment = {
+  paidCount: number; billableCount: number; paidCents: number; billableCents: number;
+  overdueCount: number; openCount: number; awaitingIssueCount: number;
+};
 type UnitCharge = {
   id: string; unit_id: string; unit_label: string; status: 'active' | 'finished' | 'canceled';
-  total_amount_cents: number; installment_count: number; first_reference_month: string; installments: Installment[];
+  total_amount_cents: number; installment_count: number; first_reference_month: string;
+  installments: Installment[]; payment: ChargePayment;
 };
 type Group = { description: string; lastActivityAt: string; charges: UnitCharge[] };
 
@@ -37,6 +51,23 @@ const chargePeriod = (charge: { total_amount_cents: number; installment_count: n
 
 const chargeStatusLabel: Record<UnitCharge['status'], string> = { active: 'Em andamento', finished: 'Concluída', canceled: 'Cancelada' };
 const chargeStatusColor: Record<UnitCharge['status'], string> = { active: colors.primary, finished: colors.green, canceled: colors.muted };
+const paymentLabel: Record<PaymentState, string> = {
+  paid: 'Paga', open: 'Em aberto', overdue: 'Vencida',
+  awaiting_issue: 'Aguardando emissão', invoice_canceled: 'Boleto cancelado', canceled: 'Cancelada',
+};
+const paymentColor: Record<PaymentState, string> = {
+  paid: colors.green, open: colors.primary, overdue: colors.red,
+  awaiting_issue: colors.amber, invoice_canceled: colors.muted, canceled: colors.muted,
+};
+// Total recebido x total a receber do grupo inteiro (todas as unidades),
+// ignorando parcelas canceladas.
+const groupPayment = (group: Group) => group.charges.reduce((totals, charge) => ({
+  paidCount: totals.paidCount + charge.payment.paidCount,
+  billableCount: totals.billableCount + charge.payment.billableCount,
+  paidCents: totals.paidCents + charge.payment.paidCents,
+  billableCents: totals.billableCents + charge.payment.billableCents,
+  overdueCount: totals.overdueCount + charge.payment.overdueCount,
+}), { paidCount: 0, billableCount: 0, paidCents: 0, billableCents: 0, overdueCount: 0 });
 const groupStatus = (group: Group): UnitCharge['status'] => {
   if (group.charges.every((charge) => charge.status === 'finished')) return 'finished';
   if (group.charges.every((charge) => charge.status === 'canceled')) return 'canceled';
@@ -65,6 +96,11 @@ export default function UnitExtraCharges({ navigation }: any) {
   const [dialog, setDialog] = useState<{ title: string; message: string; confirmLabel?: string; cancelLabel?: string; onConfirm?: () => void } | null>(null);
   const [managingDescription, setManagingDescription] = useState<string | null>(null);
   const [addUnitIds, setAddUnitIds] = useState<string[]>([]);
+  const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
+  const tourSteps: TourStep[] = [
+    { key: 'list', title: 'Cobranças cadastradas', description: 'Cada card agrupa todas as cobranças que têm a mesma descrição — por exemplo, todas as unidades com "Tag de portaria" aparecem juntas em um card só. O status (Em andamento, Concluída ou Cancelada) reflete o conjunto: se todas as unidades do grupo já terminaram as parcelas, o card fica "Concluída". Toque no card pra abrir o detalhe por unidade, adicionar mais unidades ao mesmo grupo ou remover uma unidade específica.' },
+    { key: 'form', title: 'Nova cobrança adicional', description: 'Escolha uma ou mais unidades (ou "Todas as unidades" pra lançar em todo o condomínio) — unidades com morador isento de boleto não aparecem na lista. Informe a descrição (ela some à observação do boleto e agrupa cobranças iguais no mesmo card), o valor total, quantas parcelas mensais (1 a 60, dividindo o valor entre elas) e o mês da 1ª parcela. A cobrança entra somada à taxa condominial nos boletos das unidades escolhidas, a partir do mês informado até o fim das parcelas.' },
+  ];
 
   const load = useCallback(async () => {
     if (!userToken) return;
@@ -143,18 +179,42 @@ export default function UnitExtraCharges({ navigation }: any) {
   };
 
   const openManageGroup = (group: Group) => { setManagingDescription(group.description); setAddUnitIds([]); setError(null); setSuccess(null); };
+  const [exporting, setExporting] = useState(false);
+  const exportPayments = async (description?: string) => {
+    if (!userToken) return;
+    setExporting(true); setError(null);
+    try {
+      const path = description ? `/unit-extra-charges/export?description=${encodeURIComponent(description)}` : '/unit-extra-charges/export';
+      await downloadAuthenticated(path, userToken, `cobrancas-adicionais-${description ? 'grupo' : 'todas'}.xlsx`, { awaitCompletion: true });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Não foi possível exportar a planilha.');
+    } finally { setExporting(false); }
+  };
   const availableUnitsForGroup = useMemo(() => {
     if (!managingGroup) return [];
     const includedIds = new Set(managingGroup.charges.map((charge) => charge.unit_id));
     return units.filter((unit) => !includedIds.has(unit.id));
   }, [managingGroup, units]);
 
-  return <ScrollView contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} />}>
-      <Text style={styles.eyebrow}>Configuração de cobranças</Text>
-      <Text style={styles.title}>Cobranças adicionais</Text>
-      <Text style={styles.subtitle}>Lance valores extras por unidade (ex.: tag de portaria) que são somados à taxa condominial nos boletos, avulsos ou parcelados, até o fim da cobrança.</Text>
+  return <>
+    <ScrollView ref={scrollRef} contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} />}>
+      <View style={styles.headerRow}>
+        <View style={styles.grow}>
+          <Text style={styles.eyebrow}>Configuração de cobranças</Text>
+          <Text style={styles.title}>Cobranças adicionais</Text>
+          <Text style={styles.subtitle}>Lance valores extras por unidade (ex.: tag de portaria) que são somados à taxa condominial nos boletos, avulsos ou parcelados, até o fim da cobrança.</Text>
+        </View>
+        <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+      </View>
 
-      <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Cobranças cadastradas</Text><Text style={styles.counter}>{groups.length}</Text></View>
+      <View ref={registerSection('list')} style={[isActive('list') && styles.tourHighlight]}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Cobranças cadastradas</Text>
+        <View style={styles.sectionHeaderRight}>
+          {groups.length > 0 ? <Pressable onPress={() => exportPayments()} disabled={exporting} style={styles.exportButton}><Text style={styles.exportButtonText}>{exporting ? 'Gerando...' : '↓ Exportar pagamentos'}</Text></Pressable> : null}
+          <Text style={styles.counter}>{groups.length}</Text>
+        </View>
+      </View>
       {groups.length === 0 ? <EmptyState title="Nenhuma cobrança adicional" description="Cadastre a primeira cobrança extra para uma ou mais unidades." /> : <CardGrid columns={{ mobile: 1, tablet: 2, desktop: 2 }}>{groups.map((group) => {
         const status = groupStatus(group);
         const uniform = groupIsUniform(group);
@@ -164,11 +224,24 @@ export default function UnitExtraCharges({ navigation }: any) {
             <View style={[styles.statusPill, { borderColor: chargeStatusColor[status] }]}><Text style={[styles.statusPillText, { color: chargeStatusColor[status] }]}>{chargeStatusLabel[status]}</Text></View>
           </View>
           <Text style={styles.value}>{uniform ? chargePeriod(group.charges[0]) : 'Valores variam por unidade'}</Text>
-          <Text style={styles.manageHint}>Toque para ver, adicionar ou remover unidades</Text>
+          {(() => {
+            const totals = groupPayment(group);
+            if (!totals.billableCount) return null;
+            const pct = Math.round((totals.paidCents / Math.max(totals.billableCents, 1)) * 100);
+            return <View style={styles.paymentBox}>
+              <View style={styles.paymentBar}><View style={[styles.paymentBarFill, { width: `${pct}%` as any }]} /></View>
+              <Text style={styles.paymentSummary}>
+                {formatCurrency(totals.paidCents)} recebidos de {formatCurrency(totals.billableCents)} · {totals.paidCount} de {totals.billableCount} parcela(s) paga(s)
+              </Text>
+              {totals.overdueCount > 0 ? <Text style={styles.paymentOverdue}>{totals.overdueCount} parcela(s) vencida(s)</Text> : null}
+            </View>;
+          })()}
+          <Text style={styles.manageHint}>Toque para ver o pagamento por unidade, adicionar ou remover unidades</Text>
         </Pressable>;
       })}</CardGrid>}
+      </View>
 
-      <View style={[styles.panel, styles.formPanel]}>
+      <View ref={registerSection('form')} style={[styles.panel, styles.formPanel, isActive('form') && styles.tourHighlight]}>
         <Text style={styles.panelTitle}>Nova cobrança adicional</Text>
         <Text style={styles.fieldLabel}>Unidades</Text>
         <Text style={styles.fieldHint}>Escolha uma unidade, várias, ou marque "Todas as unidades" para lançar a mesma cobrança em todo o condomínio. Se já existir uma cobrança com a mesma descrição, essas unidades entram no mesmo grupo. Unidades com morador isento de boleto não aparecem aqui.</Text>
@@ -213,7 +286,10 @@ export default function UnitExtraCharges({ navigation }: any) {
             <ScrollView contentContainerStyle={{ gap: 14 }}>
               {managingGroup ? <>
                 <Text style={styles.modalTitle}>{managingGroup.description}</Text>
-                <Text style={styles.cardDescription}>{managingGroup.charges.length} unidade(s) nesta cobrança</Text>
+                <View style={styles.modalSubtitleRow}>
+                  <Text style={[styles.cardDescription, styles.grow]}>{managingGroup.charges.length} unidade(s) nesta cobrança</Text>
+                  <Pressable onPress={() => exportPayments(managingGroup.description)} disabled={exporting} style={styles.exportButton}><Text style={styles.exportButtonText}>{exporting ? 'Gerando...' : '↓ Exportar'}</Text></Pressable>
+                </View>
 
                 <View>
                   <Text style={styles.fieldLabel}>Unidades</Text>
@@ -224,9 +300,18 @@ export default function UnitExtraCharges({ navigation }: any) {
                         <View style={styles.grow}>
                           <Text style={styles.unitChargeLabel}>{charge.unit_label}</Text>
                           <Text style={styles.installmentSummary}>{chargePeriod(charge)}</Text>
-                          <Text style={styles.installmentSummary}>
-                            {charge.installments.filter((item) => item.status === 'applied').length} aplicada(s) · {charge.installments.filter((item) => item.status === 'pending').length} pendente(s)
+                          <Text style={styles.installmentPaid}>
+                            {charge.payment.paidCount} de {charge.payment.billableCount} paga(s) · {formatCurrency(charge.payment.paidCents)} de {formatCurrency(charge.payment.billableCents)}
                           </Text>
+                          <View style={styles.installmentChips}>
+                            {charge.installments.map((item) => (
+                              <View key={item.id} style={[styles.installmentChip, { borderColor: paymentColor[item.paymentState] }]}>
+                                <Text style={[styles.installmentChipText, { color: paymentColor[item.paymentState] }]}>
+                                  {charge.installment_count > 1 ? `${item.installment_number}/${charge.installment_count} · ` : ''}{formatBrazilianMonth(item.reference_month.slice(0, 7))} · {paymentLabel[item.paymentState]}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
                         </View>
                         <View style={[styles.statusPill, { borderColor: chargeStatusColor[charge.status] }]}><Text style={[styles.statusPillText, { color: chargeStatusColor[charge.status] }]}>{chargeStatusLabel[charge.status]}</Text></View>
                         {hasPending || charge.status === 'active' ? <Pressable onPress={() => confirmRemoveUnitCharge(charge)} style={styles.linkButton}><Text style={styles.linkButtonTextDanger}>Excluir</Text></Pressable> : null}
@@ -254,11 +339,17 @@ export default function UnitExtraCharges({ navigation }: any) {
       </Modal>
 
       <AppDialog visible={Boolean(dialog)} title={dialog?.title || ''} message={dialog?.message || ''} tone="error" confirmLabel={dialog?.confirmLabel} cancelLabel={dialog?.cancelLabel} onConfirm={dialog?.onConfirm} onClose={() => setDialog(null)} />
-    </ScrollView>;
+    </ScrollView>
+    <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} />
+  </>;
 }
 
 const styles = StyleSheet.create({
   container: { width: '100%', marginLeft: 'auto', marginRight: 'auto', padding: 24, paddingBottom: 40, backgroundColor: colors.background }, grow: { flex: 1 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
+  tourButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.softBlue },
+  tourButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
+  tourHighlight: { borderWidth: 2, borderColor: colors.primary, borderRadius: 16, padding: 6, margin: -6 },
   eyebrow: { color: colors.teal, fontWeight: '800', marginBottom: 6 }, title: { color: colors.ink, fontSize: 28, fontWeight: '900' }, subtitle: { color: colors.muted, fontSize: 17, lineHeight: 22, marginTop: 6, marginBottom: 18 },
   panel: { borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, padding: 16, marginBottom: 16 }, panelTitle: { color: colors.ink, fontSize: 19, fontWeight: '900', marginBottom: 12 },
   fieldLabel: { color: colors.ink, fontSize: 14, fontWeight: '800', marginBottom: 4 },
@@ -283,4 +374,17 @@ const styles = StyleSheet.create({
   unitChargeList: { gap: 8, marginTop: 8 },
   unitChargeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 9, padding: 10 },
   unitChargeLabel: { color: colors.ink, fontSize: 14.5, fontWeight: '800' }, installmentSummary: { color: colors.muted, fontSize: 12.5, marginTop: 2 },
+  installmentPaid: { color: colors.green, fontSize: 12.5, fontWeight: '800', marginTop: 3 },
+  sectionHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  modalSubtitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  exportButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: colors.softBlue },
+  exportButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 12.5 },
+  installmentChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 6 },
+  installmentChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  installmentChipText: { fontSize: 11, fontWeight: '800' },
+  paymentBox: { marginTop: 10, gap: 5 },
+  paymentBar: { height: 6, borderRadius: 3, backgroundColor: '#e7ebf1', overflow: 'hidden' },
+  paymentBarFill: { height: 6, backgroundColor: colors.green },
+  paymentSummary: { color: colors.ink, fontSize: 12.5, fontWeight: '800' },
+  paymentOverdue: { color: colors.red, fontSize: 12, fontWeight: '800' },
 });

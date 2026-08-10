@@ -109,17 +109,6 @@ const MockupFrame = ({ device, children, style }: { device: 'desktop' | 'phone';
     </View>
   );
 
-// Wordmark "LAR EM DIA" com tratamento de duas cores — usado no cabeçalho e
-// como selo no hero, pra marca chamar mais atenção do que um texto simples.
-const Wordmark = ({ size = 'md', onDark }: { size?: 'md' | 'lg'; onDark?: boolean }) => (
-  <View style={styles.wordmarkRow}>
-    <Text style={[styles.wordmarkLar, size === 'lg' && styles.wordmarkLarLg, onDark && styles.wordmarkLarOnDark]}>LAR</Text>
-    <View style={[styles.wordmarkPill, size === 'lg' && styles.wordmarkPillLg]}>
-      <Text style={[styles.wordmarkPillText, size === 'lg' && styles.wordmarkPillTextLg]}>EM DIA</Text>
-    </View>
-  </View>
-);
-
 // Emblemas de seção — um selo próprio por bloco de conteúdo, no lugar de um
 // emoji solto, pra reforçar a identidade visual do sistema.
 const SECTION_MARKS = {
@@ -393,8 +382,7 @@ export default function Landing({ navigation }: any) {
       {/* 1. CABEÇALHO — fica fora do ScrollView, então permanece visível durante a rolagem */}
       <View style={[styles.topBar, hPad]}>
         <Pressable style={styles.brand} onPress={() => scrollToSection('inicio')}>
-          <Image source={require('../../assets/lar-em-dia-logo.png')} style={styles.brandLogo} resizeMode="contain" />
-          <Wordmark />
+          <Image source={require('../../assets/lar-em-dia-wordmark.png')} style={styles.brandWordmark} resizeMode="contain" />
         </Pressable>
 
         {desktop ? (
@@ -454,7 +442,7 @@ export default function Landing({ navigation }: any) {
                   <MockupFrame device="phone"><DashboardPreview kpis={HERO_PHONE_KPIS} rows={HERO_PHONE_ROWS} /></MockupFrame>
                 </Animated.View>
                 <View style={styles.brandStamp}>
-                  <Wordmark size="lg" />
+                  <Image source={require('../../assets/lar-em-dia-wordmark.png')} style={styles.brandStampLogo} resizeMode="contain" />
                   <Text style={styles.brandStampTag}>gestão condominial</Text>
                 </View>
               </View>
@@ -671,7 +659,7 @@ export default function Landing({ navigation }: any) {
           <View style={[styles.footerTop, desktop && styles.footerTopDesktop]}>
             <View style={styles.footerBrandCol}>
               <View style={styles.footerBrand}>
-                <Image source={require('../../assets/lar-em-dia-logo.png')} style={styles.footerLogo} resizeMode="contain" />
+                <Image source={require('../../assets/lar-em-dia-icon.png')} style={styles.footerLogo} resizeMode="contain" />
                 <Text style={styles.footerBrandName}>Lar em Dia</Text>
               </View>
               <Text style={styles.footerDescription}>Plataforma completa de gestão condominial — financeiro, comunicação e rotina administrativa em um só lugar.</Text>
@@ -711,15 +699,11 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 72, backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border, zIndex: 20, gap: 12, ...shadow, shadowOpacity: 0.04 },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   brandLogo: { width: 30, height: 30 },
+  // Lockup completo (casa + "LAR EM DIA") na barra branca do topo. A arte é
+  // quase quadrada (900x961), então a altura é que manda: 62px preenche a
+  // barra de 72 e deixa a faixa de texto legível.
+  brandWordmark: { width: 58, height: 62 },
   brandName: { color: C.ink, fontSize: 16.5, fontWeight: '900' },
-  wordmarkRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  wordmarkLar: { color: C.ink, fontSize: 16.5, fontWeight: '900', letterSpacing: 0.2 },
-  wordmarkLarLg: { fontSize: 22 },
-  wordmarkLarOnDark: { color: '#fff' },
-  wordmarkPill: { backgroundColor: C.primary, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
-  wordmarkPillLg: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
-  wordmarkPillText: { color: '#fff', fontSize: 12, fontWeight: '900', letterSpacing: 0.3 },
-  wordmarkPillTextLg: { fontSize: 15 },
   navLinks: { flexDirection: 'row', alignItems: 'center', gap: 22, flexShrink: 1 },
   navLink: { paddingVertical: 8 },
   navLinkText: { color: C.muted, fontWeight: '700', fontSize: 13.5 },
@@ -781,7 +765,9 @@ const styles = StyleSheet.create({
   heroDevices: { flex: 1, minWidth: 320, alignItems: 'center', justifyContent: 'center', position: 'relative', paddingRight: 40, paddingBottom: 30 },
   heroPhoneOverlay: { position: 'absolute', right: 0, bottom: -6 },
   brandStamp: { position: 'absolute', left: -6, bottom: -16, backgroundColor: '#fff', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, gap: 4, transform: [{ rotate: '-4deg' }], ...shadow, shadowOpacity: 0.18 },
-  brandStampTag: { color: C.muted, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
+  // Proporção do arquivo é 900x961 (~0.94:1), quase quadrada.
+  brandStampLogo: { width: 104, height: 111 },
+  brandStampTag: { color: C.muted, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4, textAlign: 'center' },
 
   socialProof: { paddingVertical: 36, backgroundColor: C.surface, borderTopWidth: 1, borderBottomWidth: 1, borderColor: C.border },
   moduleStripLabel: { color: C.muted, fontSize: 11, fontWeight: '900', letterSpacing: 1 },

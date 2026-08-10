@@ -6,6 +6,8 @@ import { AppButton, EmptyState, Panel } from '../ui/components';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import { formatCents } from '../utils/money';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type Notice = {
   id: string; unit_id: string; unit_label: string | null; description: string; status: string;
@@ -25,6 +27,7 @@ export default function InfractionNotices({ navigation }: any) {
   const { isMobile: compact } = useBreakpoint();
   const { user, userToken } = useContext(AuthContext);
   const manager = ['sindico', 'subsindico', 'admin_geral'].includes(user?.role || '');
+  const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
   const [notices, setNotices] = useState<Notice[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -122,41 +125,56 @@ export default function InfractionNotices({ navigation }: any) {
   const canConfirm = (n: Notice) => manager && n.status === 'em_defesa';
   const canCancel = (n: Notice) => manager && n.status !== 'paga' && n.status !== 'cancelada';
 
+  const tourSteps: TourStep[] = [
+    { key: 'filters', title: 'Filtrar por status', description: 'Filtre a lista pelo status da notificação: rascunho (emitida mas ainda não enviada), enviada (aguardando o morador dar ciência), em defesa (o morador já deu ciência — ou o prazo de tolerância venceu e a ciência virou automática — e agora pode contestar), confirmada (multa aplicada e cobrança gerada), paga ou cancelada. "Todas" remove o filtro.' },
+    { key: 'list', title: 'Notificações e ações', description: 'Cada linha mostra o artigo do regimento, a unidade, a data de envio e o valor da multa (o final, se já confirmada, senão o valor base). Em "Ver detalhes" você vê o detalhamento completo: multa base, acréscimo por reincidência (quando a mesma infração já foi confirmada antes na mesma unidade), juros de mora, correção monetária (fica "Pendente" se o índice do mês ainda não foi cadastrado) e a multa por reincidência contínua enquanto a infração seguir em aberto. Dali o morador dá ciência ou contesta com uma justificativa dentro do prazo; síndico/subsíndico/admin geral confirma a notificação — o que gera automaticamente uma cobrança separada pra unidade — ou cancela a notificação a qualquer momento antes dela ser paga.' },
+  ];
+
   return (
     <>
-      <ScrollView contentContainerStyle={[styles.container, compact && styles.containerMobile]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
-        <Text style={styles.eyebrow}>REGIMENTO INTERNO</Text>
-        <Text style={styles.title}>Notificações de infração</Text>
-        <Text style={styles.subtitle}>{manager ? 'Acompanhe e confirme as notificações emitidas.' : 'Notificações recebidas pela sua unidade.'}</Text>
-
-        <Panel>
-          <Text style={styles.panelTitle}>Filtros</Text>
-          <View style={styles.filters}>
-            {['all', 'rascunho', 'enviada', 'em_defesa', 'confirmada', 'paga', 'cancelada'].map(value => (
-              <Pressable key={value} onPress={() => setStatusFilter(value)} style={[styles.chip, statusFilter === value && styles.chipOn]}>
-                <Text style={[styles.chipText, statusFilter === value && styles.chipTextOn]}>{value === 'all' ? 'Todas' : statusLabel[value]}</Text>
-              </Pressable>
-            ))}
+      <ScrollView ref={scrollRef} contentContainerStyle={[styles.container, compact && styles.containerMobile]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
+        <View style={styles.headerRow}>
+          <View style={styles.grow}>
+            <Text style={styles.eyebrow}>REGIMENTO INTERNO</Text>
+            <Text style={styles.title}>Notificações de infração</Text>
+            <Text style={styles.subtitle}>{manager ? 'Acompanhe e confirme as notificações emitidas.' : 'Notificações recebidas pela sua unidade.'}</Text>
           </View>
-        </Panel>
+          <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+        </View>
+
+        <View ref={registerSection('filters')} style={[isActive('filters') && styles.tourHighlight]}>
+          <Panel>
+            <Text style={styles.panelTitle}>Filtros</Text>
+            <View style={styles.filters}>
+              {['all', 'rascunho', 'enviada', 'em_defesa', 'confirmada', 'paga', 'cancelada'].map(value => (
+                <Pressable key={value} onPress={() => setStatusFilter(value)} style={[styles.chip, statusFilter === value && styles.chipOn]}>
+                  <Text style={[styles.chipText, statusFilter === value && styles.chipTextOn]}>{value === 'all' ? 'Todas' : statusLabel[value]}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </Panel>
+        </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        {!loading && notices.length === 0 ? (
-          <EmptyState title="Nenhuma notificação encontrada" description={manager ? 'Altere os filtros ou emita uma nova notificação.' : 'Você não tem notificações de infração.'} />
-        ) : (
-          notices.map(n => (
-            <View key={n.id} style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>{n.article_snapshot?.articleNumber} · {n.unit_label || 'Unidade'}</Text>
-                <Text style={styles.rowMeta}>{dt(n.sent_at)} · {formatCents(n.final_fine_amount_cents ?? n.base_fine_amount_cents)}</Text>
+        <View ref={registerSection('list')} style={[isActive('list') && styles.tourHighlight]}>
+          {!loading && notices.length === 0 ? (
+            <EmptyState title="Nenhuma notificação encontrada" description={manager ? 'Altere os filtros ou emita uma nova notificação.' : 'Você não tem notificações de infração.'} />
+          ) : (
+            notices.map(n => (
+              <View key={n.id} style={styles.row}>
+                <View style={styles.rowInfo}>
+                  <Text style={styles.rowTitle}>{n.article_snapshot?.articleNumber} · {n.unit_label || 'Unidade'}</Text>
+                  <Text style={styles.rowMeta}>{dt(n.sent_at)} · {formatCents(n.final_fine_amount_cents ?? n.base_fine_amount_cents)}</Text>
+                </View>
+                <Text style={[styles.badge, { backgroundColor: statusColor[n.status] || colors.muted }]}>{statusLabel[n.status] || n.status}</Text>
+                <Pressable style={styles.detailsButton} onPress={() => openDetail(n)}><Text style={styles.detailsButtonText}>Ver detalhes</Text></Pressable>
               </View>
-              <Text style={[styles.badge, { backgroundColor: statusColor[n.status] || colors.muted }]}>{statusLabel[n.status] || n.status}</Text>
-              <Pressable style={styles.detailsButton} onPress={() => openDetail(n)}><Text style={styles.detailsButtonText}>Ver detalhes</Text></Pressable>
-            </View>
-          ))
-        )}
+            ))
+          )}
+        </View>
       </ScrollView>
+      <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} />
 
       <Modal visible={!!detail} transparent animationType="fade" onRequestClose={() => setDetail(null)}>
         <View style={styles.modalOverlay}>
@@ -239,6 +257,10 @@ export default function InfractionNotices({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { width: '100%', alignSelf: 'center', padding: 24, paddingBottom: 50, gap: 14 },
   containerMobile: { paddingHorizontal: 14, paddingTop: 18, paddingBottom: 34 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
+  tourButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.softBlue },
+  tourButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
+  tourHighlight: { borderWidth: 2, borderColor: colors.primary, borderRadius: 16, padding: 6, margin: -6 },
   eyebrow: { color: colors.primary, fontWeight: '900' },
   title: { fontSize: 27, fontWeight: '900', color: colors.ink },
   subtitle: { fontSize: 14, color: colors.muted, lineHeight: 20 },

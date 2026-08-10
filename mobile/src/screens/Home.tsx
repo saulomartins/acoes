@@ -7,6 +7,8 @@ import { apiRequest } from '../api/client';
 import { syncNotificationBadge } from '../services/pushNotifications';
 import { subscribeNotificationsChanged } from '../services/notificationEvents';
 import type { FeatureKey } from '../context/AuthContext';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type MenuItem = {
   title: string;
@@ -23,9 +25,10 @@ type MenuItem = {
 // Menu hierárquico organizado por seções. `feature` só existe em itens que
 // são de um condomínio específico — controlados pelo admin_geral em
 // Condomínios > Funcionalidades ativas. Itens de plataforma (Condomínios,
-// Bancos, Planos, Auditoria, Painel) não têm `feature`: são só role-gated.
+// Bancos, Planos, Auditoria) não têm `feature`: são só role-gated.
 const buildMenuStructure = (): MenuItem[] => [
-  { title: 'Painel', shortTitle: 'Painel', description: 'Quanto foi arrecadado no mês atual, pela data do pagamento.', route: 'Dashboard', symbol: '◆', accent: colors.green, roles: ['sindico', 'subsindico'] },
+  { title: 'Painel', shortTitle: 'Painel', description: 'Quanto foi arrecadado no mês atual, pela data do pagamento.', route: 'Dashboard', symbol: '◆', accent: colors.green, roles: ['sindico', 'subsindico'], feature: 'painel' },
+  { title: 'Indicadores de boletos', shortTitle: 'Indicadores', description: 'Recebidos, não pagos e cancelados por período, com os motivos de cancelamento.', route: 'BillingAnalytics', symbol: '📈', accent: colors.teal, roles: ['sindico', 'subsindico'], feature: 'indicadores_boletos' },
   // Para Síndico/Subsíndico
   { title: 'Condomínios', shortTitle: 'Condomínios', description: 'Dados cadastrais e configuração dos condomínios.', route: 'Condominiums', symbol: '▦', accent: colors.lilac, roles: ['admin_geral'] },
   { title: 'Pessoas', shortTitle: 'Pessoas', description: 'Síndicos, subsíndicos, proprietários e inquilinos.', route: 'Users', symbol: '♙', accent: colors.sky, roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'pessoas' },
@@ -99,8 +102,14 @@ const roleLabels: Record<string, string> = {
   inquilino: 'Inquilino',
 };
 
+const tourSteps: TourStep[] = [
+  { key: 'profile', title: 'Seu perfil', description: 'Mostra o cargo com que você está logado (Síndico, Subsíndico, Proprietário, Inquilino ou Administrador geral) — é esse cargo que define quais áreas aparecem no "Acesso rápido" logo abaixo e o que você pode fazer em cada uma.' },
+  { key: 'quickAccess', title: 'Acesso rápido', description: 'Grade com as áreas liberadas pra você. Ela é montada automaticamente: primeiro filtra pelo seu cargo (ex.: só Síndico/Subsíndico veem "Prestação de contas" com formulário de lançamento, moradores só veem consulta) e depois pelas funcionalidades que o Administrador geral ativou pra esse condomínio em Condomínios > Funcionalidades ativas. Um card com "EM BREVE" ainda não tem tela associada.' },
+  { key: 'security', title: 'Ambiente seguro', description: 'Lembrete de que os dados e credenciais do condomínio só são exibidos pra perfis autorizados — cada rota do menu é validada tanto na tela quanto na API antes de mostrar qualquer informação.' },
+];
 export default function Home({ navigation }: any) {
   const { user, userToken, signOut, condominiumFeatures } = useContext(AuthContext);
+  const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
   const { width, isDesktop: desktop, isTablet: tablet } = useBreakpoint();
   const [unreadNotices, setUnreadNotices] = useState(0);
   const [unreadReports, setUnreadReports] = useState(0);
@@ -148,9 +157,12 @@ export default function Home({ navigation }: any) {
   useEffect(() => subscribeNotificationsChanged(() => { void loadAttention(); }), [loadAttention]);
 
   return (
-    <ScrollView contentContainerStyle={[styles.content, (tablet || !desktop) && styles.contentMobile]}>
+    <><ScrollView ref={scrollRef} contentContainerStyle={[styles.content, (tablet || !desktop) && styles.contentMobile]}>
       <View style={[styles.welcome, tablet && { paddingHorizontal: 20 }, !desktop && { paddingHorizontal: 16 }]}>
-        <View><Text style={styles.eyebrow}>VISÃO GERAL</Text><Text style={[styles.welcomeTitle, tablet && { fontSize: 24 }, !desktop && { fontSize: 22 }]}>Olá, {user?.username}! 👋</Text></View>
+        <View style={styles.headerRow}>
+          <View style={styles.grow}><Text style={styles.eyebrow}>VISÃO GERAL</Text><Text style={[styles.welcomeTitle, tablet && { fontSize: 24 }, !desktop && { fontSize: 22 }]}>Olá, {user?.username}! 👋</Text></View>
+          <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+        </View>
         <Text style={[styles.welcomeText, tablet && { fontSize: 14 }, !desktop && { fontSize: 13 }]}>
           {admin ? 'Acompanhe e administre os condomínios da Administração geral.' : user?.role === 'sindico' || user?.role === 'subsindico' ? 'Acompanhe e administre o seu condomínio' : 'Acompanhe as informações do seu condomínio'}
           {!admin && <Text style={styles.condominiumHighlight}> "{condominiumName || 'Carregando...'}"</Text>}
@@ -158,10 +170,13 @@ export default function Home({ navigation }: any) {
         </Text>
       </View>
 
+      <View ref={registerSection('profile')} style={[isActive('profile') && styles.tourHighlight]}>
       <View style={[styles.statGrid, tablet && { paddingHorizontal: 20, gap: 12 }, !desktop && { paddingHorizontal: 16, gap: 10 }, (tablet || !desktop) && styles.horizontalCards]}>
         <View style={[styles.stat, styles.profileStat, tablet && { minHeight: 140, padding: 16 }, !desktop && { minHeight: 120, padding: 14 }]}><View style={styles.statHead}><View style={[styles.statIcon, { backgroundColor: '#fff3de' }]}><Text style={{ color: colors.amber }}>♙</Text></View><Text style={styles.statLabel}>SEU PERFIL</Text></View><Text numberOfLines={1} style={[styles.statValue, styles.roleValue, tablet && { fontSize: 18 }, !desktop && { fontSize: 16 }]}>{roleLabels[user?.role || ''] || 'Usuário'}</Text><Text style={styles.statDescription}>acesso personalizado por permissão</Text></View>
       </View>
+      </View>
 
+      <View ref={registerSection('quickAccess')} style={[isActive('quickAccess') && styles.tourHighlight]}>
       <View style={[styles.sectionHead, tablet && { paddingHorizontal: 20 }, !desktop && { paddingHorizontal: 16 }]}><View><Text style={[styles.sectionTitle, tablet && { fontSize: 18 }, !desktop && { fontSize: 16 }]}>Acesso rápido</Text><Text style={[styles.sectionSubtitle, tablet && { fontSize: 13 }, !desktop && { fontSize: 12 }]}>Escolha uma área para continuar</Text></View></View>
       <View style={[styles.moduleGrid, desktop ? styles.moduleGridDesktop : (tablet ? styles.moduleGridTablet : styles.moduleGridMobile)]}>
         {allVisibleModules.map((item) => {
@@ -207,15 +222,23 @@ export default function Home({ navigation }: any) {
           );
         })}
       </View>
+      </View>
 
+      <View ref={registerSection('security')} style={[isActive('security') && styles.tourHighlight]}>
       <View style={[styles.securityCard, tablet && { marginHorizontal: 20, padding: 16 }, !desktop && { marginHorizontal: 16, padding: 14 }]}><View style={styles.securityIcon}><Text>🔒</Text></View><View style={styles.grow}><Text style={[styles.securityTitle, tablet && { fontSize: 14 }, !desktop && { fontSize: 13 }]}>Ambiente seguro</Text><Text style={[styles.securityText, tablet && { fontSize: 13 }, !desktop && { fontSize: 12 }]}>Seus dados e credenciais são protegidos e exibidos somente para perfis autorizados.</Text></View></View>
+      </View>
       {(tablet || !desktop) ? <Pressable onPress={() => signOut()} style={[styles.mobileExit, tablet && { marginHorizontal: 20 }, !desktop && { marginHorizontal: 16 }]}><Text style={styles.mobileExitText}>Sair da conta</Text></Pressable> : null}
     </ScrollView>
+    <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} /></>
   );
 }
 
 const styles = StyleSheet.create({
   grow: { flex: 1 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
+  tourButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.softBlue },
+  tourButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
+  tourHighlight: { borderWidth: 2, borderColor: colors.primary, borderRadius: 16, padding: 6, margin: -6 },
   content: { width: '100%', alignSelf: 'center', paddingHorizontal: 0, paddingTop: 0, paddingBottom: 60 },
   contentMobile: { paddingHorizontal: 0, paddingTop: 0, paddingBottom: 100 },
   welcome: { marginBottom: 25, paddingHorizontal: 0, paddingTop: 31 },

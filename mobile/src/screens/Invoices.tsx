@@ -8,6 +8,8 @@ import { colors } from '../ui/theme';
 import { brazilianMonthToIso, formatBrazilianDate, formatBrazilianMonth, maskBrazilianMonth } from '../utils/date';
 import { useBreakpoint } from '../ui/responsive';
 import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type InvoiceStatus = 'pending_provider' | 'issued' | 'paid' | 'overdue' | 'canceled';
 type Invoice = {
@@ -42,6 +44,7 @@ export default function Invoices({navigation}:any){
   const [beneficiaryName,setBeneficiaryName]=useState('');const [beneficiaryDocument,setBeneficiaryDocument]=useState('');
   const [description,setDescription]=useState('Taxa condominial');const [emissionMonth,setEmissionMonth]=useState(currentBrazilianMonth());const [manualAmount,setManualAmount]=useState('');
   const canManage=user?.role==='sindico'||user?.role==='subsindico';
+  const {scrollRef,tourOpen,registerSection,scrollToSection,openTour,closeTour,isActive}=useSectionTour();
   const [reasonEditingId,setReasonEditingId]=useState('');const [reasonDraft,setReasonDraft]=useState('');const [reasonSettled,setReasonSettled]=useState(false);const [reasonSaving,setReasonSaving]=useState(false);
   const [downloadingZip,setDownloadingZip]=useState(false);
 
@@ -101,19 +104,32 @@ export default function Invoices({navigation}:any){
     finally{setLoading(false)}
   };
 
-  return <ScrollView contentContainerStyle={[s.container,compact&&s.containerMobile]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load}/>}>
-    <Text style={s.eyebrow}>COBRANÇAS</Text><Text style={s.title}>Gestão de cobranças</Text>
-    <Text style={s.subtitle}>Acompanhe recebimentos, valores em aberto e atrasos por mês de referência.</Text>
+  const managerTourSteps:TourStep[]=[
+    {key:'summary',title:'Resumo e atualização automática',description:'O botão "Atualizar todos os boletos" consulta o Banco Inter e atualiza a situação (pago, vencido) de todos os boletos existentes — vale rodar com frequência, já que o sistema não recebe aviso automático do banco quando um boleto é pago. Os quatro números logo abaixo resumem só a referência selecionada no filtro: recebido, em aberto, vencidos e total de boletos.'},
+    {key:'emission',title:'Emitir boleto individual',description:'Pesquise pelo nome (mínimo 2 letras) e selecione a pessoa. Nome do beneficiário e CNPJ vêm automaticamente do cadastro do condomínio e não são editáveis aqui. Se você preencher "Valor manual do boleto", esse valor substitui o valor da tipologia (e de cobranças adicionais) e é o que efetivamente vai pro Banco Inter. Antes de emitir, o sistema valida se a pessoa está apta e avisa se já existe boleto na mesma referência, pedindo confirmação extra pra evitar duplicidade.'},
+    {key:'filters',title:'Filtros e boletos em lote',description:'Filtre por mês de referência, nome do morador ou situação (aguardando Inter, em aberto, pago, vencido, cancelado). Com um mês específico selecionado — não "Todo o histórico" — aparece o botão pra baixar todos os boletos daquela referência em um único arquivo .zip.'},
+    {key:'invoices',title:'Lista de cobranças',description:'Cada card é um boleto, agrupado por mês de referência. Boletos vencidos ganham destaque em vermelho, e parcelas de acordo de renegociação mostram a etiqueta "PARCELA DE ACORDO". Num boleto cancelado, você pode registrar o motivo do cancelamento e marcar se o valor foi recebido por fora do sistema (ex.: Pix direto na chave) — isso passa a contar no total recebido da referência.'},
+  ];
+  const residentTourSteps:TourStep[]=[
+    {key:'summary',title:'Resumo das suas cobranças',description:'O botão "Buscar boletos em aberto no banco" consulta o Banco Inter e atualiza a situação das suas cobranças (pago, vencido). Os números abaixo mostram quanto você já pagou, quanto está em aberto e quantos boletos seus estão vencidos, sempre considerando a referência selecionada no filtro.'},
+    {key:'filters',title:'Filtrar suas cobranças',description:'Filtre suas cobranças por mês de referência ou por situação: aguardando o banco, em aberto, pago, vencido ou cancelado.'},
+    {key:'invoices',title:'Seus boletos',description:'Cada card é uma cobrança sua, agrupada por mês de referência. Em boletos em aberto ou vencidos, dá pra abrir/imprimir o PDF ou copiar o código Pix Copia e Cola pra pagar direto pelo app do seu banco. Parcelas de um acordo de renegociação aparecem com a etiqueta "PARCELA DE ACORDO".'},
+  ];
+  const tourSteps=canManage?managerTourSteps:residentTourSteps;
+
+  return <><ScrollView ref={scrollRef} contentContainerStyle={[s.container,compact&&s.containerMobile]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load}/>}>
+    <View style={s.headerRow}><View style={s.grow}><Text style={s.eyebrow}>COBRANÇAS</Text><Text style={s.title}>Gestão de cobranças</Text>
+    <Text style={s.subtitle}>Acompanhe recebimentos, valores em aberto e atrasos por mês de referência.</Text></View><Pressable onPress={openTour} style={s.tourButton}><Text style={s.tourButtonText}>? Tour desta tela</Text></Pressable></View>
     <View style={s.generalAction}><AppButton title={loading?'Buscando boletos...':canManage?'Atualizar todos os boletos':'Buscar boletos em aberto no banco'} onPress={syncAll} disabled={loading} variant="secondary"/></View>
 
-    <View style={[s.summaryRow, compact && s.summaryRowMobile]}>
+    <View ref={registerSection('summary')} style={[s.summaryRow, compact && s.summaryRowMobile, isActive('summary')&&s.tourHighlight]}>
       <View style={[s.summary, compact && s.summaryMobile]}><Text style={[s.summaryValue, compact && s.summaryValueMobile]}>{money(received)}</Text><Text style={s.summaryLabel}>recebido na referência</Text></View>
       <View style={[s.summary, compact && s.summaryMobile]}><Text style={[s.summaryValue, compact && s.summaryValueMobile]}>{money(open)}</Text><Text style={s.summaryLabel}>em aberto na referência</Text></View>
       <View style={[s.summary,overdue.length>0&&s.summaryDanger, compact && s.summaryMobile]}><Text style={[s.summaryValue, compact && s.summaryValueMobile,overdue.length>0&&s.dangerText]}>{overdue.length}</Text><Text style={s.summaryLabel}>boletos vencidos</Text></View>
       <View style={[s.summary, compact && s.summaryMobile]}><Text style={[s.summaryValue, compact && s.summaryValueMobile]}>{referenceItems.length}</Text><Text style={s.summaryLabel}>boletos na referência</Text></View>
     </View>
 
-    {canManage?<Panel>
+    {canManage?<View ref={registerSection('emission')} style={[isActive('emission')&&s.tourHighlight]}><Panel>
       <Text style={s.panelTitle}>Nova emissão individual</Text>
       <Text style={s.panelText}>Pesquise pelo nome e selecione uma única pessoa. Valor, endereço, regras e vencimento serão carregados do cadastro.</Text>
       <FormFieldFull>
@@ -142,14 +158,15 @@ export default function Invoices({navigation}:any){
         </View>
       </FormGrid>
       <AppButton title="Emitir boleto para a pessoa selecionada" onPress={confirmIndividualEmission} disabled={loading}/>
-    </Panel>:null}
+    </Panel></View>:null}
 
-    <Panel><Text style={s.panelTitle}>Filtros</Text><Text style={s.label}>Mês de referência</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterScroll}><Pressable onPress={()=>setReferenceFilter('all')} style={[s.chip,referenceFilter==='all'&&s.chipOn]}><Text style={[s.chipText,referenceFilter==='all'&&s.chipTextOn]}>Todo o histórico</Text></Pressable>{references.map(value=><Pressable key={value} onPress={()=>setReferenceFilter(value)} style={[s.chip,referenceFilter===value&&s.chipOn]}><Text style={[s.chipText,referenceFilter===value&&s.chipTextOn]}>{formatBrazilianMonth(value)}{value===currentMonth()?' · atual':''}</Text></Pressable>)}</ScrollView>
+    <View ref={registerSection('filters')} style={[isActive('filters')&&s.tourHighlight]}><Panel><Text style={s.panelTitle}>Filtros</Text><Text style={s.label}>Mês de referência</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterScroll}><Pressable onPress={()=>setReferenceFilter('all')} style={[s.chip,referenceFilter==='all'&&s.chipOn]}><Text style={[s.chipText,referenceFilter==='all'&&s.chipTextOn]}>Todo o histórico</Text></Pressable>{references.map(value=><Pressable key={value} onPress={()=>setReferenceFilter(value)} style={[s.chip,referenceFilter===value&&s.chipOn]}><Text style={[s.chipText,referenceFilter===value&&s.chipTextOn]}>{formatBrazilianMonth(value)}{value===currentMonth()?' · atual':''}</Text></Pressable>)}</ScrollView>
       {canManage&&referenceFilter!=='all'?<View style={s.zipAction}><AppButton title={downloadingZip?'Baixando boletos...':`Baixar boletos de ${formatBrazilianMonth(referenceFilter)} em .zip`} onPress={downloadPdfsZip} loading={downloadingZip} variant="secondary"/></View>:null}
       <Text style={s.label}>Buscar pessoa</Text><TextInput value={search} onChangeText={setSearch} placeholder="Digite o nome do morador" style={s.input}/>
       <Text style={s.label}>Situação</Text><View style={s.filters}>{(['all','pending_provider','issued','paid','overdue','canceled'] as const).map(value=><Pressable key={value} onPress={()=>setStatusFilter(value)} style={[s.chip,statusFilter===value&&s.chipOn]}><Text style={[s.chipText,statusFilter===value&&s.chipTextOn]}>{value==='all'?'Todas':statusLabel[value]}</Text></Pressable>)}</View>
-    </Panel>
+    </Panel></View>
 
+    <View ref={registerSection('invoices')} style={[isActive('invoices')&&s.tourHighlight]}>
     {error?<Text style={s.error}>{error}</Text>:null}
     {groups.length===0?<EmptyState title="Nenhuma cobrança encontrada" description={referenceFilter===currentMonth()?'Ainda não há boletos emitidos para a referência atual.':'Altere os filtros para consultar outras cobranças.'}/>:groups.map(group=><View key={group.reference} style={s.group}>
       <View style={s.groupHeader}><View><Text style={s.groupTitle}>Referência {formatBrazilianMonth(group.reference)}</Text><Text style={s.groupMeta}>{group.items.length} cobrança(s)</Text></View><Text style={s.groupTotal}>{money(group.items.reduce((sum,item)=>sum+item.amount_cents,0))}</Text></View>
@@ -168,12 +185,17 @@ export default function Invoices({navigation}:any){
         </View>)}
       </CardGrid>
     </View>)}
+    </View>
     <AppDialog visible={Boolean(dialog)} title={dialog?.title||''} message={dialog?.message||''} tone={dialog?.tone} confirmLabel={dialog?.confirmLabel} cancelLabel={dialog?.cancelLabel} onConfirm={dialog?.onConfirm} onClose={()=>setDialog(null)}/>
-  </ScrollView>;
+  </ScrollView>
+  <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step=>scrollToSection(step.key)}/>
+  </>;
 }
 
 const s=StyleSheet.create({
   containerMobile:{paddingHorizontal:12,paddingTop:16,paddingBottom:34},
+  headerRow:{flexDirection:'row',alignItems:'flex-start',gap:12,flexWrap:'wrap'},grow:{flex:1},
+  tourButton:{borderWidth:1,borderColor:colors.primary,borderRadius:20,paddingHorizontal:14,paddingVertical:9,backgroundColor:colors.softBlue},tourButtonText:{color:colors.primaryDark,fontWeight:'900',fontSize:13},tourHighlight:{borderWidth:2,borderColor:colors.primary,borderRadius:16,padding:6,margin:-6},
   container:{width:'100%',padding:24,paddingBottom:50,gap:14,backgroundColor:colors.background},eyebrow:{color:colors.primary,fontWeight:'900'},title:{color:colors.ink,fontSize: 28,fontWeight:'900'},subtitle:{color:colors.muted,lineHeight: 22,marginBottom:4},
   summaryRow:{flexDirection:'row',flexWrap:'wrap',gap:8},summaryRowMobile:{gap:6},summary:{flex:1,minWidth:140,borderWidth:1,borderColor:colors.border,borderRadius:10,backgroundColor:'#fff',padding:12},summaryMobile:{flex:0.5,minWidth:70},summaryValue:{color:colors.ink,fontSize: 18,fontWeight:'900'},summaryValueMobile:{fontSize:16},summaryDanger:{borderColor:'#ef9a9a',backgroundColor:'#fff5f5'},summaryLabel:{color:colors.muted,marginTop:2,fontSize:13},dangerText:{color:colors.red},
   panelTitle:{color:colors.ink,fontSize: 19,fontWeight:'900',marginBottom:8},panelText:{color:colors.muted,lineHeight: 21,marginBottom:14},label:{color:colors.ink,fontWeight:'800',fontSize: 16,marginBottom:7},input:{minHeight: 52,borderWidth:1,borderColor:colors.border,borderRadius:8,paddingHorizontal:12,backgroundColor:'#fff',color:colors.ink,marginBottom:12},readonly:{backgroundColor:'#f2f4f7',color:colors.primaryDark,fontWeight:'800'},peopleList:{gap:7,marginBottom:14,maxHeight:300},person:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:10,borderWidth:1,borderColor:colors.border,borderRadius:8,padding:11,backgroundColor:'#fff'},personOn:{borderColor:colors.primary,backgroundColor:colors.softBlue},personInfo:{flex:1},personName:{color:colors.ink,fontWeight:'900'},personNameOn:{color:colors.primaryDark},personMeta:{color:colors.muted,fontSize: 15,marginTop:3},personValue:{color:colors.primaryDark,fontWeight:'900'},filterScroll:{gap:7,paddingBottom:13},filters:{flexDirection:'row',flexWrap:'wrap',gap:7},chip:{borderWidth:1,borderColor:colors.border,borderRadius:20,paddingHorizontal:12,paddingVertical:8,backgroundColor:'#fff'},chipOn:{backgroundColor:colors.primary,borderColor:colors.primary},chipText:{color:colors.muted,fontWeight:'800',fontSize: 15},chipTextOn:{color:'#fff'},

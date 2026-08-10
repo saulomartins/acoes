@@ -15,6 +15,8 @@ import { AppButton, AppDialog, EmptyState, Panel } from "../ui/components";
 import { colors, layout } from "../ui/theme";
 import { useBreakpoint } from "../ui/responsive";
 import { emitNotificationsChanged } from "../services/notificationEvents";
+import FeatureTour, { type TourStep } from "../ui/FeatureTour";
+import { useSectionTour } from "../ui/useSectionTour";
 
 type Notice = {
   id: string;
@@ -51,8 +53,17 @@ const dateTime = (value: string) =>
 
 export default function Communications({ navigation }: any) {
   const { isDesktop } = useBreakpoint();
-  const { user, userToken, pushStatus, pushError } = useContext(AuthContext);
+  const { user, userToken, pushStatus, pushError, profiles } = useContext(AuthContext);
   const manager = user?.role === "sindico" || user?.role === "subsindico";
+  // Síndico/subsíndico que também é morador deste condomínio recebe os próprios
+  // comunicados e pode se escolher no envio pessoal — a API aplica a mesma regra
+  // em POST /notifications. `profiles` já traz o perfil padrão e os extras.
+  const senderIsResident = profiles.some(
+    (profile) =>
+      profile.condominiumId === user?.condominiumId &&
+      (profile.role === "proprietario" || profile.role === "inquilino"),
+  );
+  const {scrollRef,tourOpen,registerSection,scrollToSection,openTour,closeTour,isActive}=useSectionTour();
   const [notices, setNotices] = useState<Notice[]>([]);
   const [sentHistory, setSentHistory] = useState<SentNotice[]>([]);
   const [title, setTitle] = useState("");
@@ -106,10 +117,14 @@ export default function Communications({ navigation }: any) {
     if (!manager || !userToken) return;
     apiRequest<{ users: Person[] }>("/users", userToken)
       .then((data) =>
-        setPeople(data.users.filter((item) => item.id !== user?.id)),
+        setPeople(
+          data.users.filter((item) => item.id !== user?.id || senderIsResident),
+        ),
       )
       .catch(() => setPeople([]));
-  }, [manager, user?.id, userToken]);
+  }, [manager, senderIsResident, user?.id, userToken]);
+  const personLabel = (person: Person) =>
+    `${person.full_name || person.username}${person.id === user?.id ? " (você)" : ""}`;
   const visiblePeople = people
     .filter((item) =>
       (item.full_name || item.username)
@@ -196,9 +211,19 @@ export default function Communications({ navigation }: any) {
     }
   };
   const unread = notices.filter((item) => !item.read_at).length;
+  const managerTourSteps: TourStep[] = [
+    { key: "compose", title: "Nova comunicação", description: 'Escolha entre "Todos do condomínio" (todas as pessoas ativas) ou "Pessoa específica" (pesquise pelo nome). O título precisa ter entre 3 e 120 caracteres e a mensagem entre 3 e 2.000 caracteres. Ao enviar, o aviso já sai como notificação push pro celular de quem tiver o app com push registrado — se o destinatário não tiver nenhum aparelho registrado, o aviso fica salvo mas você recebe um alerta avisando que o push não foi entregue. Se você também tem perfil de morador neste condomínio, entra automaticamente nos envios gerais e pode selecionar a si mesmo no envio pessoal.' },
+    { key: "history", title: "Histórico de envios", description: 'Cada card é um envio (geral ou pessoal) com o total de destinatários e o contador "X/Y visualizaram". Expanda a lista de destinatários pra ver, pessoa por pessoa, quando o aviso foi entregue e se/quando cada um leu — dá pra cobrar quem ainda não visualizou um comunicado importante.' },
+    { key: "notices", title: "Avisos recebidos", description: 'Sua própria caixa de entrada de avisos, inclusive os que outro síndico/subsíndico te enviar. Avisos não lidos aparecem com uma barra azul à esquerda e a etiqueta "NOVO"; toque em "Marcar como lido" pra confirmar a leitura — isso também atualiza o contador de visualizações no histórico de quem enviou.' },
+  ];
+  const residentTourSteps: TourStep[] = [
+    { key: "notices", title: "Avisos recebidos", description: 'Aqui aparecem os avisos gerais (para todo o condomínio) e os pessoais que o síndico ou subsíndico te enviarem. Os não lidos têm uma barra azul à esquerda e a etiqueta "NOVO"; toque em "Marcar como lido" quando terminar de ler — a administração consegue ver no histórico dela que você visualizou.' },
+  ];
+  const tourSteps = manager ? managerTourSteps : residentTourSteps;
   return (
     <>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[styles.content, isDesktop && styles.desktopCap]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
@@ -213,12 +238,19 @@ export default function Communications({ navigation }: any) {
         }
       >
         <View style={styles.heading}>
-          <View>
-            <Text style={styles.eyebrow}>AVISOS DO CONDOMÍNIO</Text>
-            <Text style={styles.pageTitle}>Comunicação</Text>
-            <Text style={styles.subtitle}>
-              Mensagens da administração para todos os moradores.
-            </Text>
+          <View style={styles.grow}>
+            <View style={styles.headerRow}>
+              <View style={styles.grow}>
+                <Text style={styles.eyebrow}>AVISOS DO CONDOMÍNIO</Text>
+                <Text style={styles.pageTitle}>Comunicação</Text>
+                <Text style={styles.subtitle}>
+                  Mensagens da administração para todos os moradores.
+                </Text>
+              </View>
+              <Pressable onPress={openTour} style={styles.tourButton}>
+                <Text style={styles.tourButtonText}>? Tour desta tela</Text>
+              </Pressable>
+            </View>
           </View>
           <View style={styles.counter}>
             <Text style={styles.counterValue}>{unread}</Text>
@@ -234,6 +266,7 @@ export default function Communications({ navigation }: any) {
           </View>
         ) : null}
         {manager ? (
+          <View ref={registerSection('compose')} style={[isActive('compose')&&styles.tourHighlight]}>
           <Panel>
             <Text style={styles.panelTitle}>Nova comunicação</Text>
             <Text style={styles.hint}>
@@ -292,7 +325,7 @@ export default function Communications({ navigation }: any) {
                   <View style={styles.selectedPerson}>
                     <View style={styles.grow}>
                       <Text style={styles.personName}>
-                        {selectedPerson.full_name || selectedPerson.username}
+                        {personLabel(selectedPerson)}
                       </Text>
                       <Text style={styles.personDetail}>
                         {selectedPerson.unit || "Sem unidade informada"}
@@ -314,7 +347,7 @@ export default function Communications({ navigation }: any) {
                         style={styles.personOption}
                       >
                         <Text style={styles.personName}>
-                          {person.full_name || person.username}
+                          {personLabel(person)}
                         </Text>
                         <Text style={styles.personDetail}>
                           {person.unit || "Sem unidade informada"}
@@ -366,8 +399,9 @@ export default function Communications({ navigation }: any) {
               </View>
             </View>
           </Panel>
+          </View>
         ) : null}
-        {manager ? <>
+        {manager ? <View ref={registerSection('history')} style={[isActive('history')&&styles.tourHighlight]}>
           <View style={styles.listHeader}>
             <Text style={styles.listTitle}>Histórico de envios</Text>
             <Text style={styles.autoUpdate}>{sentHistory.length} envio{sentHistory.length === 1 ? '' : 's'}</Text>
@@ -377,7 +411,8 @@ export default function Communications({ navigation }: any) {
             <Text style={styles.noticeBody}>{item.body}</Text>
             <View style={styles.recipientHistory}>{item.recipients.map(recipient => <View key={recipient.user_id} style={styles.recipientRow}><View style={styles.grow}><Text style={styles.personName}>{recipient.name}</Text><Text style={styles.personDetail}>{recipient.unit || 'Sem unidade informada'} · entregue em {dateTime(recipient.delivered_at)}</Text></View><Text style={recipient.read_at ? styles.viewedStatus : styles.pendingStatus}>{recipient.read_at ? `Visualizou em ${dateTime(recipient.read_at)}` : 'Ainda não visualizou'}</Text></View>)}</View>
           </View>)}
-        </> : null}
+        </View> : null}
+        <View ref={registerSection('notices')} style={[isActive('notices')&&styles.tourHighlight]}>
         <View style={styles.listHeader}>
           <Text style={styles.listTitle}>Avisos recebidos</Text>
           <Text style={styles.autoUpdate}>Atualização automática</Text>
@@ -425,6 +460,7 @@ export default function Communications({ navigation }: any) {
             </View>
           ))
         )}
+        </View>
       </ScrollView>
       <AppDialog
         visible={confirming}
@@ -435,8 +471,12 @@ export default function Communications({ navigation }: any) {
         }
         message={
           audience === "general"
-            ? "Todas as pessoas ativas deste condomínio receberão esta mensagem no aplicativo."
-            : `${selectedPerson?.full_name || selectedPerson?.username} será a única pessoa a receber esta mensagem.`
+            ? senderIsResident
+              ? "Todas as pessoas ativas deste condomínio receberão esta mensagem no aplicativo — incluindo você, que também tem perfil de morador."
+              : "Todas as pessoas ativas deste condomínio receberão esta mensagem no aplicativo."
+            : selectedPerson?.id === user?.id
+              ? "Você será a única pessoa a receber esta mensagem."
+              : `${selectedPerson?.full_name || selectedPerson?.username} será a única pessoa a receber esta mensagem.`
         }
         confirmLabel="Sim, enviar"
         cancelLabel="Revisar"
@@ -447,10 +487,15 @@ export default function Communications({ navigation }: any) {
         {...dialog}
         onClose={() => setDialog((current) => ({ ...current, visible: false }))}
       />
+      <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step=>scrollToSection(step.key)}/>
     </>
   );
 }
 const styles = StyleSheet.create({
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
+  tourButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.softBlue },
+  tourButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
+  tourHighlight: { borderWidth: 2, borderColor: colors.primary, borderRadius: 16, padding: 6, margin: -6 },
   pushWarning: { backgroundColor: '#fff3d6', borderWidth: 1, borderColor: '#e9c46a', borderRadius: 10, padding: 13 },
   pushWarningTitle: { color: '#7a4d00', fontSize: 14, fontWeight: '900' },
   pushWarningText: { color: '#7a4d00', fontSize: 13, marginTop: 4 },

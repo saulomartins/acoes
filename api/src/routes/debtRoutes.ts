@@ -59,6 +59,12 @@ router.get('/',asyncHandler(async(req,res)=>{
   }
 
   const rules=await getBillingRules(condominiumId);
+  // 'pending_provider' ("Aguardando Inter") fica de fora junto com 'canceled':
+  // o boleto foi mandado pro banco mas ainda não voltou confirmado, então não
+  // existe nada que o morador possa pagar. Cobrar multa/mora ou incluir num
+  // acordo um boleto que ainda não foi emitido seria errado — ele reaparece
+  // aqui assim que o Inter confirmar e o status virar 'issued'/'overdue'.
+  // Débito antigo (invoice_type='legacy') nasce como 'issued', não é afetado.
   const invoices=await query<any>(`select i.id,i.user_id,i.amount_cents,i.due_date,i.reference_month,i.status,i.paid_at,i.paid_amount_cents,i.digitable_line,
       i.invoice_type,i.negotiation_type,i.judicial_process_number,i.external_id,
       u.role payer_role,
@@ -73,7 +79,7 @@ router.get('/',asyncHandler(async(req,res)=>{
     left join blocks b on b.id=un.block_id
     left join debt_agreement_items ai on ai.invoice_id=i.id and exists(select 1 from debt_agreements active_agreement where active_agreement.id=ai.agreement_id and active_agreement.status in ('accepted','active','at_risk'))
     left join debt_agreements a on a.id=ai.agreement_id
-    where ($1::uuid[] is null or i.user_id=any($1::uuid[])) and i.condominium_id=$2 and i.status<>'canceled'::invoice_status and i.invoice_type in ('regular','legacy') and i.deleted_at is null
+    where ($1::uuid[] is null or i.user_id=any($1::uuid[])) and i.condominium_id=$2 and i.status not in ('canceled'::invoice_status,'pending_provider'::invoice_status) and i.invoice_type in ('regular','legacy') and i.deleted_at is null
     order by coalesce(i.reference_month,i.due_date),i.due_date,coalesce(u.full_name,u.username)`,[userIds,condominiumId]);
   const rows=invoices.rows.map((invoice:any)=>{const dueDate=isoDate(invoice.due_date);const open=!['paid','canceled'].includes(invoice.status);const daysLate=open&&dueDate<asOf?daysBetween(dueDate,asOf):0;const principal=Number(invoice.amount_cents);const{fineCents:fine,interestCents:interest}=invoice.frozen_by_agreement?{fineCents:Number(invoice.frozen_fine_cents),interestCents:Number(invoice.frozen_interest_cents)}:calculateLateFee(rules,principal,daysLate);return {id:invoice.id,payerId:invoice.user_id,referenceMonth:isoDate(invoice.reference_month||invoice.due_date).slice(0,7),principalCents:principal,dueDate,daysLate,status:invoice.status,fineCents:fine,interestCents:interest,updatedTotalCents:invoice.frozen_by_agreement?Number(invoice.frozen_total_cents):principal+fine+interest,frozenByAgreement:Boolean(invoice.frozen_by_agreement),open,paidAt:invoice.paid_at,paidAmountCents:invoice.paid_amount_cents,digitableLine:invoice.digitable_line,payerName:invoice.payer_name,payerUnit:invoice.payer_unit,payerRole:invoice.payer_role,invoiceType:invoice.invoice_type,negotiationType:invoice.negotiation_type,judicialProcessNumber:invoice.judicial_process_number,externalId:invoice.external_id,inAgreement:Boolean(invoice.in_agreement),adjustments:invoice.adjustments,ownedElsewhere:extraUserIds.includes(invoice.user_id)}});
   const openRows=rows.filter((row:any)=>row.open);

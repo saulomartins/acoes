@@ -5,6 +5,8 @@ import { AuthContext } from '../context/AuthContext';
 import { AppButton, AppDialog, EmptyState, Panel } from '../ui/components';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type Occurrence = {
   id: string; unit_id: string | null; related_unit_id: string | null; reported_by: string;
@@ -37,6 +39,20 @@ export default function Occurrences({ navigation }: any) {
   const [sending, setSending] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [dialog, setDialog] = useState({ visible: false, title: '', message: '', tone: 'info' as 'info' | 'success' | 'error' });
+  const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
+  const managerTourSteps: TourStep[] = [
+    { key: 'create', title: 'Registrar ocorrência', description: 'Escolha a categoria (barulho, dano, manutenção, segurança, conduta ou outros) e a unidade envolvida entre as opções listadas, depois descreva o que aconteceu. Como síndico/subsíndico você precisa selecionar a unidade antes de conseguir enviar — sem ela o botão fica desabilitado.' },
+    { key: 'filters', title: 'Filtrar por status', description: 'Veja as ocorrências por status: Aberta, Em análise, Respondida, Resolvida ou Arquivada. "Todas" mostra o livro completo do condomínio.' },
+    { key: 'list', title: 'Ocorrências do condomínio', description: 'Lista todas as ocorrências, da mais recente pra mais antiga, com quem registrou e a data da última atualização. Toque numa ocorrência pra abrir o histórico completo de mensagens abaixo.' },
+    { key: 'detail', title: 'Analisar, responder e notificar', description: 'Ao abrir uma ocorrência você pode mudar o status (o morador que registrou é avisado automaticamente da mudança) e adicionar mensagens no chat (cada mensagem sua também notifica esse morador). Se a ocorrência tiver uma unidade vinculada, o botão "Transformar em notificação" leva direto pra tela de emissão de notificação de infração, já com essa unidade preenchida.' },
+  ];
+  const residentTourSteps: TourStep[] = [
+    { key: 'create', title: 'Registrar ocorrência', description: 'Escolha a categoria (barulho, dano, manutenção, segurança, conduta ou outros) e descreva o que aconteceu com pelo menos 3 caracteres. A ocorrência é automaticamente vinculada à sua unidade, e o síndico/subsíndico é notificado assim que você registra.' },
+    { key: 'filters', title: 'Filtrar por status', description: 'Acompanhe suas ocorrências por status: Aberta, Em análise, Respondida, Resolvida ou Arquivada.' },
+    { key: 'list', title: 'Minhas ocorrências', description: 'Suas ocorrências — as que você registrou ou que estão vinculadas à sua unidade — da mais recente pra mais antiga. Toque numa pra ver a conversa completa com a administração.' },
+    { key: 'detail', title: 'Acompanhar e conversar', description: 'Veja a descrição original e troque mensagens com a administração: cada mensagem sua notifica o síndico/subsíndico, e cada resposta deles notifica você. A mudança de status é feita só pela administração — você acompanha o andamento por aqui.' },
+  ];
+  const tourSteps = manager ? managerTourSteps : residentTourSteps;
 
   const load = useCallback(async () => {
     if (!userToken) return;
@@ -109,11 +125,17 @@ export default function Occurrences({ navigation }: any) {
 
   return (
     <>
-      <ScrollView contentContainerStyle={[styles.content, isDesktop && styles.desktopCap]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
-        <Text style={styles.eyebrow}>LIVRO DE OCORRÊNCIAS</Text>
-        <Text style={styles.title}>Ocorrências</Text>
-        <Text style={styles.subtitle}>{manager ? 'Registro formal de infrações e incidentes do condomínio.' : 'Registre incidentes e acompanhe suas ocorrências.'}</Text>
+      <ScrollView ref={scrollRef} contentContainerStyle={[styles.content, isDesktop && styles.desktopCap]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
+        <View style={styles.headerRow}>
+          <View style={styles.grow}>
+            <Text style={styles.eyebrow}>LIVRO DE OCORRÊNCIAS</Text>
+            <Text style={styles.title}>Ocorrências</Text>
+            <Text style={styles.subtitle}>{manager ? 'Registro formal de infrações e incidentes do condomínio.' : 'Registre incidentes e acompanhe suas ocorrências.'}</Text>
+          </View>
+          <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+        </View>
 
+        <View ref={registerSection('create')} style={[isActive('create') && styles.tourHighlight]}>
         <Panel>
           <Text style={styles.panelTitle}>Nova ocorrência</Text>
           <Text style={styles.label}>Categoria</Text>
@@ -142,8 +164,9 @@ export default function Occurrences({ navigation }: any) {
             <AppButton title={sending ? 'Enviando...' : 'Registrar ocorrência'} onPress={create} loading={sending} disabled={description.trim().length < 3 || (manager && !unitId)} />
           </View>
         </Panel>
+        </View>
 
-        <View style={styles.filters}>
+        <View ref={registerSection('filters')} style={[styles.filters, isActive('filters') && styles.tourHighlight]}>
           {['all', 'aberta', 'em_analise', 'respondida', 'resolvida', 'arquivada'].map(value => (
             <Pressable key={value} onPress={() => setStatusFilter(value)} style={[styles.chip, statusFilter === value && styles.chipOn]}>
               <Text style={[styles.chipText, statusFilter === value && styles.chipTextOn]}>{value === 'all' ? 'Todas' : statusLabels[value]}</Text>
@@ -151,6 +174,7 @@ export default function Occurrences({ navigation }: any) {
           ))}
         </View>
 
+        <View ref={registerSection('list')} style={[isActive('list') && styles.tourHighlight]}>
         <Text style={styles.sectionTitle}>{manager ? 'Ocorrências do condomínio' : 'Minhas ocorrências'}</Text>
         {loading ? (
           <ActivityIndicator color={colors.primary} />
@@ -167,8 +191,10 @@ export default function Occurrences({ navigation }: any) {
             </Pressable>
           ))
         )}
+        </View>
 
         {selected ? (
+          <View ref={registerSection('detail')} style={[isActive('detail') && styles.tourHighlight]}>
           <Panel>
             <View style={styles.chatHead}>
               <View style={styles.grow}>
@@ -206,9 +232,11 @@ export default function Occurrences({ navigation }: any) {
               <AppButton title={sending ? 'Enviando...' : 'Adicionar atualização'} onPress={sendMessage} disabled={sending || reply.trim().length < 2} />
             </View>
           </Panel>
+          </View>
         ) : null}
       </ScrollView>
       <AppDialog {...dialog} onClose={() => setDialog(x => ({ ...x, visible: false }))} />
+      <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} />
     </>
   );
 }
@@ -216,6 +244,10 @@ export default function Occurrences({ navigation }: any) {
 const styles = StyleSheet.create({
   content: { width: '100%', alignSelf: 'center', padding: 28, paddingBottom: 70, gap: 16 },
   desktopCap: { maxWidth: 860, alignSelf: 'center', width: '100%' },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
+  tourButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.softBlue },
+  tourButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
+  tourHighlight: { borderWidth: 2, borderColor: colors.primary, borderRadius: 16, padding: 6, margin: -6 },
   eyebrow: { color: colors.primary, fontSize: 13, fontWeight: '900' },
   title: { color: colors.ink, fontSize: 27, fontWeight: '900', marginTop: 5 },
   subtitle: { color: colors.muted, fontSize: 15, marginTop: 5 },

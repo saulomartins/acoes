@@ -6,6 +6,8 @@ import { AppButton, AppDialog, EmptyState, Panel } from '../ui/components';
 import { colors, layout } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import { CardGrid, FormFieldFull, FormGrid } from '../ui/grid';
+import FeatureTour, { type TourStep } from '../ui/FeatureTour';
+import { useSectionTour } from '../ui/useSectionTour';
 
 type Article = {
   id: string; condominium_id: string; article_number: string; description: string;
@@ -36,6 +38,13 @@ export default function RegulationArticles({ navigation }: any) {
   const [editForm, setEditForm] = useState(emptyForm);
   const [error, setError] = useState('');
   const [dialog, setDialog] = useState<Dialog>(null);
+  const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
+  const tourSteps: TourStep[] = [
+    { key: 'condominium', title: 'Selecionar condomínio', description: 'Essa etapa só aparece pra administradores da plataforma (admin_geral), que cuidam de vários condomínios ao mesmo tempo — escolha aqui qual condomínio você quer configurar antes de ver ou cadastrar artigos. Síndico e subsíndico não veem esse seletor: o sistema já sabe qual é o condomínio deles.' },
+    { key: 'template', title: 'Aplicar modelo inicial', description: 'Só aparece quando o condomínio ainda não tem nenhum artigo cadastrado. Cria de uma vez um conjunto de artigos prontos (totalmente editáveis depois) como ponto de partida. Só funciona em condomínios sem nenhum artigo — se já existir pelo menos um cadastrado, a aplicação é bloqueada.' },
+    { key: 'create', title: 'Cadastrar artigo do regimento', description: 'Preencha o número do artigo, a descrição da infração coberta, a multa base (% sobre a taxa condominial da unidade) e o prazo de pagamento em dias corridos. Juros de mora (% ao mês) e multa diária por reincidência contínua são opcionais. O índice de correção monetária pode ser Fixo (você digita o % ao mês) ou IGPM/INPC (cujo percentual mensal é cadastrado à parte em Índices econômicos). A tolerância de ciência (dias após o envio) é opcional: se preenchida, notificações emitidas com este artigo recebem ciência automática depois desse prazo, mesmo que o morador não abra o app.' },
+    { key: 'list', title: 'Artigos cadastrados', description: 'Cada card mostra multa, prazo, juros, correção e reincidência configurados. "Editar" só muda a configuração viva do artigo: notificações já emitidas guardam sua própria cópia das regras no momento da emissão e nunca são reescritas por uma edição posterior. "Desativar" apenas impede o uso do artigo em novas notificações — notificações antigas continuam intactas, e dá pra reativar quando quiser.' },
+  ];
 
   useEffect(() => {
     if (!isAdminGeral || !userToken) return;
@@ -222,12 +231,18 @@ export default function RegulationArticles({ navigation }: any) {
 
   return (
     <>
-      <ScrollView contentContainerStyle={[s.container, mobile && s.containerMobile]} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}>
-        <Text style={s.eyebrow}>REGIMENTO INTERNO</Text>
-        <Text style={s.title}>Artigos do regimento</Text>
-        <Text style={s.subtitle}>Cada condomínio configura seus próprios artigos — percentuais de multa, prazos, juros e correção. Editar um artigo nunca altera notificações já emitidas.</Text>
+      <ScrollView ref={scrollRef} contentContainerStyle={[s.container, mobile && s.containerMobile]} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}>
+        <View style={s.headerRow}>
+          <View style={s.grow}>
+            <Text style={s.eyebrow}>REGIMENTO INTERNO</Text>
+            <Text style={s.title}>Artigos do regimento</Text>
+            <Text style={s.subtitle}>Cada condomínio configura seus próprios artigos — percentuais de multa, prazos, juros e correção. Editar um artigo nunca altera notificações já emitidas.</Text>
+          </View>
+          <Pressable onPress={openTour} style={s.tourButton}><Text style={s.tourButtonText}>? Tour desta tela</Text></Pressable>
+        </View>
 
         {isAdminGeral ? (
+          <View ref={registerSection('condominium')} style={[isActive('condominium') && s.tourHighlight]}>
           <Panel>
             <Text style={s.label}>Condomínio</Text>
             <View style={s.row}>
@@ -238,6 +253,7 @@ export default function RegulationArticles({ navigation }: any) {
               ))}
             </View>
           </Panel>
+          </View>
         ) : null}
 
         {error ? <Text style={s.error}>{error}</Text> : null}
@@ -247,6 +263,7 @@ export default function RegulationArticles({ navigation }: any) {
         ) : (
           <>
             {!loading && articles.length === 0 ? (
+              <View ref={registerSection('template')} style={[isActive('template') && s.tourHighlight]}>
               <Panel>
                 <Text style={s.panelTitle}>Nenhum artigo do regimento cadastrado</Text>
                 <Text style={s.hint}>Este condomínio ainda não possui artigos do regimento cadastrados. Não é possível emitir notificações de infração sem um artigo configurado. Cadastre o primeiro artigo abaixo ou aplique o modelo inicial (editável) como ponto de partida.</Text>
@@ -254,13 +271,17 @@ export default function RegulationArticles({ navigation }: any) {
                   <View style={s.formActionButton}><AppButton title="Aplicar modelo inicial" variant="secondary" onPress={applyTemplate} disabled={loading} /></View>
                 </View>
               </Panel>
+              </View>
             ) : null}
 
+            <View ref={registerSection('create')} style={[isActive('create') && s.tourHighlight]}>
             <Panel>
               <Text style={s.panelTitle}>Novo artigo</Text>
               {renderForm(form, updater => setForm(updater), create, 'Cadastrar artigo')}
             </Panel>
+            </View>
 
+            <View ref={registerSection('list')} style={[isActive('list') && s.tourHighlight]}>
             <Text style={s.panelTitle}>Artigos cadastrados</Text>
             {articles.length === 0 && loading ? null : (
               <CardGrid columns={{ mobile: 1, tablet: 1, desktop: 2 }}>
@@ -293,10 +314,12 @@ export default function RegulationArticles({ navigation }: any) {
                 ))}
               </CardGrid>
             )}
+            </View>
           </>
         )}
       </ScrollView>
       <AppDialog visible={!!dialog} title={dialog?.title || ''} message={dialog?.message || ''} tone={dialog?.tone} confirmLabel={dialog?.confirmLabel} cancelLabel={dialog?.cancelLabel} onConfirm={dialog?.onConfirm} onClose={() => setDialog(null)} />
+      <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} />
     </>
   );
 }
@@ -304,6 +327,11 @@ export default function RegulationArticles({ navigation }: any) {
 const s = StyleSheet.create({
   container: { width: '100%', alignSelf: 'center', padding: 24, paddingBottom: 50, gap: 16 },
   containerMobile: { paddingHorizontal: 14, paddingTop: 18, paddingBottom: 34 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
+  grow: { flex: 1 },
+  tourButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.softBlue },
+  tourButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
+  tourHighlight: { borderWidth: 2, borderColor: colors.primary, borderRadius: 16, padding: 6, margin: -6 },
   eyebrow: { color: colors.primary, fontWeight: '900' },
   title: { fontSize: 26, fontWeight: '900', color: colors.ink },
   subtitle: { fontSize: 14, color: colors.muted, lineHeight: 20 },
