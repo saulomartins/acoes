@@ -484,7 +484,21 @@ operação desnecessária em produção.
   HTTP 401 (não 500) e `access-control-allow-origin: https://gestaolaremdia.com`,
   confirmando que o novo caminho de múltiplos identificadores roda sem erro.
 - Android: versão `1.2.5`, versionCode `16`, build EAS
-  `433f3c68-5d59-4a31-9c91-4dcc6759b9b8`, perfil `production-apk`.
+  `433f3c68-5d59-4a31-9c91-4dcc6759b9b8`, perfil `production-apk`, concluído.
+  Arquivo `releases/lar-em-dia-1.2.5-build-16-production.apk`
+  (69.452.340 bytes). SHA-256:
+  `41FBCD2CE694542EEA658A9A685A3CDFCCDEC4FB4FC6EF41AB5AA2BDE5CB905E`,
+  conferido em três pontos: artefato do EAS, arquivo local e
+  `/data/mobile-releases/d92c94f1-0a66-42b4-b1f0-91cbe5095e57.apk` no volume.
+  Assinatura APK Scheme v2 validada, mesmo signer RSA 2048 das versões
+  anteriores (chave pública SHA-256 `2dd2dd1a3b0b3024...`).
+  O `releases:seed-android` estourou a memória de novo, como previsto na
+  seção anterior; concluído com `node dist/scripts/seedAndroidRelease.js`.
+- Central: `mobile_releases` tem 1.2.5/16 e 1.2.4/15 ambos com `active=true`.
+  Isso é esperado: `GET /mobile-releases/latest` filtra por `active=true` e
+  ordena por `published_at desc`, pegando o primeiro de cada plataforma —
+  então 1.2.5 é a versão atual e a 1.2.4 fica no histórico, disponível para
+  reativação pela própria central. Não é preciso desativar a anterior.
 
 ### Cuidado ao conferir strings acentuadas no bundle
 
