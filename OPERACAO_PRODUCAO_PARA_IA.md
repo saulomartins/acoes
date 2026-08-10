@@ -460,3 +460,37 @@ script compilado, do mesmo jeito que a seção 3 já faz com
   o banco não confirma o registro. Também saíram do total "Em aberto" do
   painel, onde eram contados duas vezes (já existia o card "Aguardando o
   banco" com os mesmos boletos).
+
+## Publicação 1.2.5 de 10/08/2026
+
+Sem migração de banco: `schema.sql` não mudou desde a 1.2.4, então o passo 3
+foi deliberadamente pulado. Rodar `setupDatabase` sem diff de schema é
+operação desnecessária em produção.
+
+- Commits publicados: `46c5f4b` (login por usuário/CPF/e-mail, ComboBox de
+  unidade, PDF só após registro no banco) e `c4112ab` (regimento restrito ao
+  condomínio, rótulos e comboboxes nas telas do admin).
+- API: deployment Railway `d7bf5c02-c840-4d96-a448-428d1c644667`,
+  status `SUCCESS`; health HTTP 200.
+- Web: deployment Cloudflare `9d8f39e4.lar-em-dia.pages.dev`; domínio
+  `gestaolaremdia.com` HTTP 200 servindo o bundle
+  `AppEntry-d8050149579af746c5f08a829f3de1e7.js`, idêntico ao gerado no build
+  local.
+- Conferido no bundle antes de publicar: contém
+  `acoes-production.up.railway.app`, nenhuma ocorrência de `localhost:3000`,
+  e os textos novos das três frentes (login por CPF/e-mail, ComboBox de
+  unidade, aviso de boleto aguardando o banco).
+- Smoke test: `POST /auth/login` em produção com um CPF inexistente devolveu
+  HTTP 401 (não 500) e `access-control-allow-origin: https://gestaolaremdia.com`,
+  confirmando que o novo caminho de múltiplos identificadores roda sem erro.
+- Android: versão `1.2.5`, versionCode `16`, build EAS
+  `433f3c68-5d59-4a31-9c91-4dcc6759b9b8`, perfil `production-apk`.
+
+### Cuidado ao conferir strings acentuadas no bundle
+
+Duas vezes um `grep` com `.` no lugar do acento deu falso negativo e passou a
+impressão de que a mudança não tinha entrado no bundle. Em UTF-8 um caractere
+acentuado ocupa 2 bytes e `.` casa 1 byte só. Ao validar um bundle, procurar
+por um trecho **sem acento** da frase, por exemplo
+`grep -c 'confirmou o registro deste boleto'` em vez de
+`grep -c 'ainda n.o confirmou'`.
