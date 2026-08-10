@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
-import { AppButton, EmptyState, Panel } from '../ui/components';
+import { AppButton, EmptyState, Panel , TextField} from '../ui/components';
 import { colors } from '../ui/theme';
 import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
@@ -190,10 +190,11 @@ export default function PlatformPlans() {
         <Text style={styles.panelTitle}>{editingId ? 'Editar plano' : 'Novo plano'}</Text>
         <FormGrid columns={{ mobile: 1, tablet: 2, desktop: 2 }}>
           <View>
-            <TextInput placeholder="Nome do plano" value={name} onChangeText={setName} style={styles.input} />
+            <TextField label="Nome do plano" required placeholder="Ex.: Plano Essencial" value={name} onChangeText={setName} />
           </View>
         </FormGrid>
 
+        <Text style={styles.fieldLabel}>Tipo de cobrança</Text>
         <View style={styles.typeRow}>
           <Pressable onPress={() => setPlanType('per_active_user')} style={[styles.typeOption, planType === 'per_active_user' && styles.typeOptionActive]}>
             <Text style={[styles.typeOptionText, planType === 'per_active_user' && styles.typeOptionTextActive]}>Por usuário ativo</Text>
@@ -221,14 +222,16 @@ export default function PlatformPlans() {
         {planType === 'per_active_user' ? (
           <FormGrid columns={{ mobile: 1, tablet: 2, desktop: 2 }}>
             <View>
-              <TextInput placeholder="Preco por usuário ativo (ex.: R$ 4,90)" value={pricePerActiveUser} onChangeText={(value) => setPricePerActiveUser(maskCurrency(value))} keyboardType="number-pad" style={styles.input} />
+              <TextField label="Preço por usuário ativo" required placeholder="Ex.: R$ 4,90" value={pricePerActiveUser} onChangeText={(value) => setPricePerActiveUser(maskCurrency(value))} keyboardType="number-pad" />
             </View>
             <View>
-              <TextInput placeholder="Valor minimo mensal (opcional)" value={minimumPrice} onChangeText={(value) => setMinimumPrice(maskCurrency(value))} keyboardType="number-pad" style={styles.input} />
+              <TextField label="Valor mínimo mensal" hint="Opcional. Cobrado quando o cálculo por usuário fica abaixo deste valor." placeholder="Opcional" value={minimumPrice} onChangeText={(value) => setMinimumPrice(maskCurrency(value))} keyboardType="number-pad" />
             </View>
           </FormGrid>
         ) : (
           <FormFieldFull>
+            <Text style={styles.fieldLabel}>Faixas de preço</Text>
+            <Text style={styles.metricHint}>Cada linha é uma faixa: de quantos usuários, até quantos (vazio = sem limite) e o valor mensal cobrado.</Text>
             {tiers.map((tier, index) => (
               <View key={index} style={styles.tierRow}>
                 <TextInput placeholder="De (usuários)" value={tier.minActiveUsers} onChangeText={(value) => updateTier(index, { minActiveUsers: value.replace(/\D/g, '') })} keyboardType="number-pad" style={[styles.input, styles.tierInput]} />

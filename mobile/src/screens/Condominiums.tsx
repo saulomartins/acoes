@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { apiRequest } from '../api/client';
 import { AuthContext, type FeatureKey } from '../context/AuthContext';
-import { AppButton, AppDialog, EmptyState, Panel } from '../ui/components';
+import { AppButton, AppDialog, EmptyState, Field, Panel, TextField } from '../ui/components';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
@@ -390,27 +390,28 @@ export default function Condominiums({ navigation }: any) {
         <Text style={styles.panelTitle}>{editingId ? 'Editar condominio' : 'Novo condominio'}</Text>
         <FormGrid columns={{ mobile: 1, tablet: 2, desktop: 2 }}>
           <View>
-            <TextInput placeholder="Nome do condominio" value={name} onChangeText={setName} style={styles.input} />
+            <TextField label="Nome do condomínio" required placeholder="Ex.: Condomínio Residencial Templum" value={name} onChangeText={setName} />
           </View>
           <View>
-            <TextInput placeholder="CNPJ (00.000.000/0000-00)" value={cnpj} onChangeText={(value)=>setCnpj(formatCnpj(value))} style={styles.input} keyboardType="number-pad" maxLength={18} />
+            <TextField label="CNPJ" placeholder="00.000.000/0000-00" value={cnpj} onChangeText={(value)=>setCnpj(formatCnpj(value))} keyboardType="number-pad" maxLength={18} />
           </View>
         </FormGrid>
         <FormGrid columns={{ mobile: 1, tablet: 2, desktop: 2 }}>
           <View>
-            <TextInput placeholder="Telefone / WhatsApp" value={phone} onChangeText={(value)=>setPhone(formatPhone(value))} style={styles.input} keyboardType="phone-pad" maxLength={15} />
+            <TextField label="Telefone / WhatsApp" placeholder="(00) 00000-0000" value={phone} onChangeText={(value)=>setPhone(formatPhone(value))} keyboardType="phone-pad" maxLength={15} />
           </View>
           <View>
-            <TextInput placeholder="E-mail" value={email} onChangeText={setEmail} style={styles.input} keyboardType="email-address" autoCapitalize="none" />
+            <TextField label="E-mail" placeholder="contato@condominio.com.br" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
           </View>
         </FormGrid>
         <FormFieldFull>
-          <View style={styles.cepRow}><TextInput placeholder="CEP (00000-000)" value={postalCode} onChangeText={(value)=>setPostalCode(formatCep(value))} onBlur={()=>{if(postalCode.replace(/\D/g,'').length===8&&!address)lookupPostalCode()}} style={[styles.input,styles.cepInput]} keyboardType="number-pad" maxLength={9}/><Pressable onPress={lookupPostalCode} disabled={isLookingUpPostalCode} style={[styles.cepButton,isLookingUpPostalCode&&styles.cepButtonDisabled]}><Text style={styles.cepButtonText}>{isLookingUpPostalCode?'Buscando...':'Buscar CEP'}</Text></Pressable></View>
-          <TextInput placeholder="Endereço (rua, número, bairro, cidade e UF)" value={address} onChangeText={setAddress} style={styles.input} />
+          <Field label="CEP"><View style={styles.cepRow}><TextInput placeholder="00000-000" value={postalCode} onChangeText={(value)=>setPostalCode(formatCep(value))} onBlur={()=>{if(postalCode.replace(/\D/g,'').length===8&&!address)lookupPostalCode()}} style={[styles.input,styles.cepInput]} keyboardType="number-pad" maxLength={9}/><Pressable onPress={lookupPostalCode} disabled={isLookingUpPostalCode} style={[styles.cepButton,isLookingUpPostalCode&&styles.cepButtonDisabled]}><Text style={styles.cepButtonText}>{isLookingUpPostalCode?'Buscando...':'Buscar CEP'}</Text></Pressable></View></Field>
+          <TextField label="Endereço completo" hint="Rua, número, bairro, cidade e UF." placeholder="Rua Exemplo, 100 - Centro, Cidade/UF" value={address} onChangeText={setAddress} />
         </FormFieldFull>
         <FormFieldFull>
+          <Text style={styles.fieldLabel}>Pasta do Google Drive (Prestação de Contas)</Text>
           <View style={styles.cepRow}>
-            <TextInput placeholder="Link da pasta do Google Drive (Prestação de Contas)" value={googleDriveFolderUrl} onChangeText={setGoogleDriveFolderUrl} style={[styles.input,styles.cepInput]} autoCapitalize="none" />
+            <TextInput placeholder="https://drive.google.com/drive/folders/..." value={googleDriveFolderUrl} onChangeText={setGoogleDriveFolderUrl} style={[styles.input,styles.cepInput]} autoCapitalize="none" />
             {editingId && googleDriveFolderUrl.trim() ? (
               <Pressable onPress={testGoogleDrive} disabled={driveTesting} style={[styles.cepButton,driveTesting&&styles.cepButtonDisabled]}><Text style={styles.cepButtonText}>{driveTesting?'Testando...':'Testar pasta'}</Text></Pressable>
             ) : null}
@@ -595,6 +596,7 @@ const styles = StyleSheet.create({
   title: { color: colors.ink, fontSize: 28, fontWeight: '900' },
   subtitle: { color: colors.muted, fontSize: 17, lineHeight: 22, marginTop: 6, marginBottom: 18 },
   panelTitle: { color: colors.ink, fontSize: 19, fontWeight: '800', marginBottom: 12 },
+  fieldLabel: { color: colors.ink, fontSize: 14.5, fontWeight: '800', marginBottom: 6 },
   input: {
     minHeight: 52,
     borderWidth: 1,

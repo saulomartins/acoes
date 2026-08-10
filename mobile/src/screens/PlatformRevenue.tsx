@@ -3,6 +3,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, Vie
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
 import { EmptyState, Panel } from '../ui/components';
+import { ComboBox } from '../ui/ComboBox';
 import { colors } from '../ui/theme';
 import { maskBrazilianDate, brazilianDateToIso, formatBrazilianDate, formatBrazilianMonth } from '../utils/date';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
@@ -65,6 +66,8 @@ export default function PlatformRevenue() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const planOptions = plans.map((plan) => ({ value: plan.id, label: plan.name }));
 
   const assignPlan = async (condominiumId: string, planId: string) => {
     if (!userToken) return;
@@ -201,13 +204,16 @@ export default function PlatformRevenue() {
                 {item.plan ? (
                   billingDateEditingId === item.condominiumId ? (
                     <View style={styles.billingDateRow}>
-                      <TextInput
-                        value={billingDateDraft}
-                        onChangeText={(value) => setBillingDateDraft(maskBrazilianDate(value))}
-                        placeholder="DD/MM/AAAA"
-                        keyboardType="number-pad"
-                        style={styles.billingDateInput}
-                      />
+                      <View style={styles.billingDateField}>
+                        <Text style={styles.pickerLabel}>Data de faturamento</Text>
+                        <TextInput
+                          value={billingDateDraft}
+                          onChangeText={(value) => setBillingDateDraft(maskBrazilianDate(value))}
+                          placeholder="DD/MM/AAAA"
+                          keyboardType="number-pad"
+                          style={styles.billingDateInput}
+                        />
+                      </View>
                       <Pressable onPress={() => saveBillingDate(item)} disabled={assigningId === item.condominiumId} style={styles.planOptionCancel}>
                         <Text style={styles.planOptionCancelText}>Salvar</Text>
                       </Pressable>
@@ -232,16 +238,17 @@ export default function PlatformRevenue() {
               <View style={styles.rowPlan}>
                 {pickerCondominiumId === item.condominiumId ? (
                   <View style={styles.planPicker}>
-                    {plans.map((plan) => (
-                      <Pressable
-                        key={plan.id}
-                        onPress={() => assignPlan(item.condominiumId, plan.id)}
-                        disabled={assigningId === item.condominiumId}
-                        style={styles.planOption}
-                      >
-                        <Text style={styles.planOptionText}>{plan.name}</Text>
-                      </Pressable>
-                    ))}
+                    <Text style={styles.pickerLabel}>Plano da plataforma</Text>
+                    <ComboBox
+                      options={planOptions}
+                      value={item.plan?.id || ''}
+                      onChange={(planId) => assignPlan(item.condominiumId, planId)}
+                      disabled={assigningId === item.condominiumId}
+                      placeholder="Selecione o plano"
+                      title="Plano da plataforma"
+                      searchPlaceholder="Buscar plano"
+                      emptyText="Nenhum plano cadastrado."
+                    />
                     <Pressable onPress={() => setPickerCondominiumId('')} style={styles.planOptionCancel}>
                       <Text style={styles.planOptionCancelText}>Cancelar</Text>
                     </Pressable>
@@ -318,6 +325,8 @@ const styles = StyleSheet.create({
   planButtonText: { color: colors.ink, fontWeight: '800' },
   planButtonAction: { color: colors.primary, fontWeight: '900', marginLeft: 'auto' },
   planPicker: { gap: 6, minWidth: 220 },
+  pickerLabel: { color: colors.ink, fontSize: 14, fontWeight: '800', marginBottom: 6 },
+  billingDateField: { flex: 1, minWidth: 0 },
   planOption: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 10, backgroundColor: '#fff' },
   planOptionText: { color: colors.ink, fontWeight: '700' },
   planOptionCancel: { paddingVertical: 6, alignItems: 'flex-start' },

@@ -15,7 +15,9 @@ const router = Router();
 router.use(authenticate);
 router.use(requireFeature('regimento_ocorrencias'));
 
-const manager = (role?: string) => role === 'sindico' || role === 'subsindico' || role === 'admin_geral';
+// Notificação de infração pertence ao condomínio; admin_geral não tem um
+// (condominium_id nulo), então não entra como gestor deste módulo.
+const manager = (role?: string) => role === 'sindico' || role === 'subsindico';
 
 type ArticleSnapshot = RegulationArticleInput & { articleNumber: string; description: string; acknowledgmentToleranceDays: number | null };
 
@@ -53,7 +55,7 @@ const resolveMonthlyCorrectionRate = async (snapshot: ArticleSnapshot): Promise<
   return getMonthlyCorrectionRate(snapshot.monetaryCorrectionIndex, monthStartIso(todayIso()));
 };
 
-router.post('/', authorize('sindico', 'subsindico', 'admin_geral'), asyncHandler(async (req, res) => {
+router.post('/', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
   const condominiumId = req.user?.condominiumId;
   if (!condominiumId) return res.status(400).json({ message: 'Condomínio obrigatório.' });
   const { unitId, articleId, description, occurrenceId } = req.body ?? {};
@@ -86,7 +88,7 @@ router.post('/', authorize('sindico', 'subsindico', 'admin_geral'), asyncHandler
   return res.status(201).json({ notice: result.rows[0], fineBreakdown: breakdown });
 }));
 
-router.post('/:id/send', authorize('sindico', 'subsindico', 'admin_geral'), asyncHandler(async (req, res) => {
+router.post('/:id/send', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
   const condominiumId = req.user?.condominiumId;
   if (!condominiumId) return res.status(400).json({ message: 'Condomínio obrigatório.' });
   const result = await query<any>(
@@ -224,7 +226,7 @@ router.post('/:id/contest', asyncHandler(async (req, res) => {
   return res.json({ notice: result.rows[0] });
 }));
 
-router.post('/:id/confirm', authorize('sindico', 'subsindico', 'admin_geral'), asyncHandler(async (req, res) => {
+router.post('/:id/confirm', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
   const condominiumId = req.user?.condominiumId;
   if (!condominiumId) return res.status(400).json({ message: 'Condomínio obrigatório.' });
 
@@ -296,7 +298,7 @@ router.post('/:id/confirm', authorize('sindico', 'subsindico', 'admin_geral'), a
   return res.json({ notice: updated, fineBreakdown: breakdown });
 }));
 
-router.post('/:id/cancel', authorize('sindico', 'subsindico', 'admin_geral'), asyncHandler(async (req, res) => {
+router.post('/:id/cancel', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
   const condominiumId = req.user?.condominiumId;
   if (!condominiumId) return res.status(400).json({ message: 'Condomínio obrigatório.' });
   const { cancellationReason } = req.body ?? {};

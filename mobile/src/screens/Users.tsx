@@ -196,6 +196,17 @@ export default function Users({ navigation }: any) {
 
   // Condomínio grande tem dezenas de apartamentos: a busca dentro do ComboBox
   // cobre bloco, número e tipologia (a tipologia vai em `description`).
+  // O filtro tem duas opções sintéticas além dos condomínios: '' = todos e
+  // '__unlinked__' = pessoas sem vínculo. Ambas viram itens da lista.
+  const condominiumFilterOptions = useMemo(
+    () => [
+      { value: '', label: 'Todos os condomínios' },
+      ...condominiums.map((item) => ({ value: item.id, label: item.name })),
+      { value: '__unlinked__', label: 'Sem condomínio' },
+    ],
+    [condominiums],
+  );
+
   const unitOptions = useMemo(
     () => managedUnits.map((item) => ({
       value: item.id,
@@ -871,20 +882,17 @@ export default function Users({ navigation }: any) {
           </View>
 
           {user?.role === 'admin_geral' ? <>
-          <Text style={styles.label}>Condomínio</Text>
-          <View style={styles.filterOptions}>
-            <Pressable onPress={() => setFilterCondominiumId('')} style={[styles.filterOption, !filterCondominiumId && styles.filterOptionActive]}>
-              <Text style={[styles.filterOptionText, !filterCondominiumId && styles.filterOptionTextActive]}>Todos</Text>
-            </Pressable>
-            {condominiums.map((item) => (
-              <Pressable key={item.id} onPress={() => setFilterCondominiumId(item.id)} style={[styles.filterOption, filterCondominiumId === item.id && styles.filterOptionActive]}>
-                <Text numberOfLines={1} style={[styles.filterOptionText, filterCondominiumId === item.id && styles.filterOptionTextActive]}>{item.name}</Text>
-              </Pressable>
-            ))}
-            <Pressable onPress={() => setFilterCondominiumId('__unlinked__')} style={[styles.filterOption, filterCondominiumId === '__unlinked__' && styles.filterOptionActive]}>
-              <Text style={[styles.filterOptionText, filterCondominiumId === '__unlinked__' && styles.filterOptionTextActive]}>Sem condomínio</Text>
-            </Pressable>
-          </View>
+          <Field label="Condomínio">
+            <ComboBox
+              options={condominiumFilterOptions}
+              value={filterCondominiumId}
+              onChange={setFilterCondominiumId}
+              placeholder="Todos os condomínios"
+              title="Filtrar por condomínio"
+              searchPlaceholder="Buscar condomínio"
+              emptyText="Nenhum condomínio encontrado."
+            />
+          </Field>
           </> : null}
 
           <Text style={styles.label}>Nome</Text>

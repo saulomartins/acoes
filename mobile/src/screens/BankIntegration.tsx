@@ -2,7 +2,8 @@ import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
-import { AppButton, EmptyState, Panel } from '../ui/components';
+import { AppButton, EmptyState, Field, Panel, TextField } from '../ui/components';
+import { ComboBox } from '../ui/ComboBox';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
@@ -57,6 +58,16 @@ export default function BankIntegration({ navigation, route }:any) {
   useEffect(()=>{load()},[load]);
 
   const reset=()=>{setEditingId(null);setName('');setProvider('inter');setClientId('');setClientSecret('');setCertPath('./certs/inter.crt');setKeyPath('./certs/inter.key');setBaseUrl(defaults.inter.baseUrl);setTokenPath(defaults.inter.tokenPath);setScopes(defaults.inter.scopes);setEnabled(true)};
+
+  // Opções dos comboboxes. A segunda linha (description) repete o que os
+  // cartões antigos mostravam, para não perder informação ao fechar a lista.
+  const bankOptions=providers.filter(item=>item.active).map(item=>({value:item.id,label:item.name,description:item.operational?'Operacional':'Adaptador pendente'}));
+  const condominiumOptions=condominiums.map(item=>({value:item.id,label:item.name,description:`Vínculo atual: ${item.bank_configuration_name||'nenhuma configuração'} · Busca: ${item.boleto_sync_mode==='from_period'&&item.boleto_sync_start_period?`a partir de ${formatBrazilianMonth(item.boleto_sync_start_period)}`:'todos'}`}));
+  const configurationOptions=configurations.map(item=>({value:item.id,label:item.name,description:`${item.bank_name||item.provider} · ${item.enabled?'ativa':'desabilitada'} · Vínculos: ${item.condominiums.map(c=>c.name).join(', ')||'nenhum'}`}));
+
+  // Escolher o condomínio também carrega o vínculo e o modo de busca atuais —
+  // era o que o onPress do cartão fazia antes de virar combobox.
+  const chooseCondominium=(id:string)=>{const item=condominiums.find(x=>x.id===id);if(!item)return;setSelectedCondominiumId(id);setSelectedConfigurationId(item.bank_configuration_id||'');setSyncMode(item.boleto_sync_mode==='from_period'?'from_period':'all');setSyncStartPeriod(formatBrazilianMonth(item.boleto_sync_start_period))};
   const chooseProvider=(id:string)=>{const bank=providers.find(x=>x.id===id);if(!bank)return;setBankId(id);const adapter=bank.adapterKey||'outro';setProvider(adapter);const value=defaults[adapter]||defaults.outro;setBaseUrl(value.baseUrl);setTokenPath(value.tokenPath);setScopes(value.scopes);if(adapter!=='inter'){setCertPath('');setKeyPath('')}};
   const edit=(item:BankConfiguration)=>{setEditingId(item.id);setName(item.name);setBankId(item.bank_id);setProvider(item.adapter_key||item.provider);setClientId(item.client_id||'');setClientSecret('');setCertPath(item.cert_path||'');setKeyPath(item.key_path||'');setBaseUrl(item.base_url||'');setTokenPath(item.token_path||'');setScopes(item.scopes||'');setEnabled(item.enabled);setNotice('');setError('')};
   const save=async()=>{if(!userToken||!name.trim())return;setLoading(true);setError('');setNotice('');try{
@@ -99,19 +110,21 @@ export default function BankIntegration({ navigation, route }:any) {
     </View>
     {error?<Text style={s.error}>{error}</Text>:null}{notice?<Text style={s.success}>{notice}</Text>:null}
 
-    {section==='banks'?<View ref={registerSection('banks')} style={[isActive('banks')&&s.tourHighlight]}><Panel><Text style={s.heading}>Cadastro de bancos</Text><Text style={s.meta}>Bancos cadastrados ficam disponíveis para criar configurações e realizar vínculos.</Text><TextInput value={newBankName} onChangeText={setNewBankName} placeholder="Nome do banco" style={s.input}/><AppButton title="Cadastrar banco" onPress={createBank} disabled={loading||!newBankName.trim()}/><CardGrid columns={{mobile:1,tablet:2,desktop:3}}>{providers.map(item=><View key={item.id} style={s.option}><Text style={s.optionText}>{item.name}</Text><Text style={s.small}>{item.operational?'Integração operacional':item.adapterKey?'Adaptador pendente':'Banco cadastrado — adaptador pendente'}</Text></View>)}</CardGrid></Panel></View>:null}
+    {section==='banks'?<View ref={registerSection('banks')} style={[isActive('banks')&&s.tourHighlight]}><Panel><Text style={s.heading}>Cadastro de bancos</Text><Text style={s.meta}>Bancos cadastrados ficam disponíveis para criar configurações e realizar vínculos.</Text><TextField label="Nome do banco" value={newBankName} onChangeText={setNewBankName} placeholder="Ex.: Banco Inter"/><AppButton title="Cadastrar banco" onPress={createBank} disabled={loading||!newBankName.trim()}/><CardGrid columns={{mobile:1,tablet:2,desktop:3}}>{providers.map(item=><View key={item.id} style={s.option}><Text style={s.optionText}>{item.name}</Text><Text style={s.small}>{item.operational?'Integração operacional':item.adapterKey?'Adaptador pendente':'Banco cadastrado — adaptador pendente'}</Text></View>)}</CardGrid></Panel></View>:null}
 
     {section==='configurations'?<><View ref={registerSection('configForm')} style={[isActive('configForm')&&s.tourHighlight]}><Panel><Text style={s.heading}>{editingId?'Editar configuração':'Nova configuração bancária'}</Text>
-      <Text style={s.label}>Banco cadastrado</Text><CardGrid columns={{mobile:1,tablet:2,desktop:3}}>{providers.filter(item=>item.active).map(item=><Pressable key={item.id} onPress={()=>chooseProvider(item.id)} style={[s.option,bankId===item.id&&s.optionActive]}><Text style={bankId===item.id?s.optionTextActive:s.optionText}>{item.name}</Text><Text style={s.small}>{item.operational?'Operacional':'Adaptador pendente'}</Text></Pressable>)}</CardGrid>
+      <Field label="Banco cadastrado" required>
+        <ComboBox options={bankOptions} value={bankId} onChange={chooseProvider} placeholder="Selecione o banco" title="Banco cadastrado" searchPlaceholder="Buscar banco" emptyText="Nenhum banco encontrado."/>
+      </Field>
       <FormGrid columns={{mobile:1,tablet:2,desktop:2}}>
-        <View><TextInput value={name} onChangeText={setName} placeholder="Nome da configuração, ex.: Templum - Banco Inter" style={s.input}/></View>
-        <View><TextInput value={clientId} onChangeText={setClientId} placeholder="Client ID / chave da aplicação" autoCapitalize="none" style={s.input}/></View>
-        <View><TextInput value={clientSecret} onChangeText={setClientSecret} placeholder={editingId?'Novo Client Secret (vazio mantém o atual)':'Client Secret'} secureTextEntry autoCapitalize="none" style={s.input}/></View>
-        {provider==='inter'?<View><TextInput value={certPath} onChangeText={setCertPath} placeholder="Caminho do certificado" style={s.input}/></View>:null}
-        {provider==='inter'?<View><TextInput value={keyPath} onChangeText={setKeyPath} placeholder="Caminho da chave privada" style={s.input}/></View>:null}
-        <View><TextInput value={baseUrl} onChangeText={setBaseUrl} placeholder="URL base da API" autoCapitalize="none" style={s.input}/></View>
-        <View><TextInput value={tokenPath} onChangeText={setTokenPath} placeholder="Endpoint de autenticação" autoCapitalize="none" style={s.input}/></View>
-        <View><TextInput value={scopes} onChangeText={setScopes} placeholder="Escopos da API" autoCapitalize="none" style={s.input}/></View>
+        <TextField label="Nome da configuração" value={name} onChangeText={setName} placeholder="Ex.: Templum - Banco Inter"/>
+        <TextField label="Client ID" hint="Chave da aplicação fornecida pelo banco." value={clientId} onChangeText={setClientId} placeholder="Client ID / chave da aplicação" autoCapitalize="none"/>
+        <TextField label="Client Secret" hint={editingId?'Deixe vazio para manter o segredo atual.':undefined} value={clientSecret} onChangeText={setClientSecret} placeholder={editingId?'Novo Client Secret (vazio mantém o atual)':'Client Secret'} secureTextEntry autoCapitalize="none"/>
+        {provider==='inter'?<TextField label="Caminho do certificado" value={certPath} onChangeText={setCertPath} placeholder="./certs/inter.crt"/>:null}
+        {provider==='inter'?<TextField label="Caminho da chave privada" value={keyPath} onChangeText={setKeyPath} placeholder="./certs/inter.key"/>:null}
+        <TextField label="URL base da API" value={baseUrl} onChangeText={setBaseUrl} placeholder="https://..." autoCapitalize="none"/>
+        <TextField label="Endpoint de autenticação" value={tokenPath} onChangeText={setTokenPath} placeholder="/oauth/v2/token" autoCapitalize="none"/>
+        <TextField label="Escopos da API" value={scopes} onChangeText={setScopes} placeholder="boleto-cobranca.write boleto-cobranca.read" autoCapitalize="none"/>
       </FormGrid>
       {selectedProvider&&!selectedProvider.operational?<Text style={s.warning}>Esta configuração poderá ser vinculada, mas emissões ficarão bloqueadas até o adaptador de {selectedProvider.name} ser implementado.</Text>:null}
       <View style={s.actions}><AppButton title={enabled?'Ativa — desabilitar':'Desabilitada — ativar'} onPress={()=>setEnabled(v=>!v)} variant="secondary"/><AppButton title={editingId?'Salvar alterações':'Cadastrar configuração'} onPress={save} disabled={loading||!name.trim()||!bankId}/>{editingId?<AppButton title="Cancelar" onPress={reset} variant="secondary"/>:null}</View>
@@ -119,15 +132,19 @@ export default function BankIntegration({ navigation, route }:any) {
 
     <View ref={registerSection('configList')} style={[isActive('configList')&&s.tourHighlight]}><Text style={s.section}>Configurações cadastradas</Text>{configurations.length?<CardGrid columns={{mobile:1,tablet:2,desktop:3}}>{configurations.map(item=><View key={item.id} style={s.card}><Text style={s.cardTitle}>{item.name}</Text><Text style={s.meta}>{item.bank_name||item.provider} · {item.enabled?'Ativa':'Desabilitada'}</Text><Text style={s.meta}>Vínculos: {item.condominiums.map(c=>c.name).join(', ')||'nenhum condomínio'}</Text><View style={s.actions}><AppButton title="Editar" onPress={()=>edit(item)} variant="secondary"/><AppButton title={testingId===item.id?'Testando conexão...':'Testar conexão'} onPress={()=>test(item.id)} disabled={Boolean(testingId)||item.provider!=='inter'||!item.enabled}/></View>{testResults[item.id]?<Text style={testResults[item.id].ok?s.testSuccess:s.testError}>{testResults[item.id].message}</Text>:null}{item.provider!=='inter'?<Text style={s.warning}>Teste indisponível: o adaptador deste banco ainda não foi implementado.</Text>:null}</View>)}</CardGrid>:<EmptyState title="Nenhum banco configurado" description="Cadastre a primeira conexão bancária acima."/>}</View></>:null}
 
-    {section==='link'?<View ref={registerSection('link')} style={[isActive('link')&&s.tourHighlight]}><Text style={s.section}>Vincular banco ao condomínio</Text><Panel><Text style={s.meta}>As opções abaixo vêm das configurações criadas em “Nova configuração bancária”.</Text><Text style={s.label}>1. Condomínio</Text><CardGrid columns={{mobile:1,tablet:2,desktop:3}}>{condominiums.map(item=><Pressable key={item.id} onPress={()=>{setSelectedCondominiumId(item.id);setSelectedConfigurationId(item.bank_configuration_id||'');setSyncMode(item.boleto_sync_mode==='from_period'?'from_period':'all');setSyncStartPeriod(formatBrazilianMonth(item.boleto_sync_start_period))}} style={[s.option,selectedCondominiumId===item.id&&s.optionActive]}><Text style={selectedCondominiumId===item.id?s.optionTextActive:s.optionText}>{item.name}</Text><Text style={s.small}>Vínculo atual: {item.bank_configuration_name||'nenhuma configuração'}</Text><Text style={s.small}>Busca de boletos: {item.boleto_sync_mode==='from_period'&&item.boleto_sync_start_period?`a partir de ${formatBrazilianMonth(item.boleto_sync_start_period)}`:'todos'}</Text></Pressable>)}</CardGrid>
-      <Text style={s.label}>2. Configuração bancária cadastrada</Text>{configurations.length===0?<EmptyState title="Nenhuma configuração bancária" description="Acesse Configurações bancárias e cadastre uma configuração antes de realizar o vínculo."/>:<CardGrid columns={{mobile:1,tablet:2,desktop:3}}>{configurations.map(item=><Pressable key={item.id} onPress={()=>setSelectedConfigurationId(item.id)} style={[s.option,selectedConfigurationId===item.id&&s.optionActive]}><Text style={selectedConfigurationId===item.id?s.optionTextActive:s.optionText}>{item.name}</Text><Text style={s.small}>Banco: {item.bank_name||item.provider} · Situação: {item.enabled?'ativa':'desabilitada'}</Text><Text style={s.small}>Condomínios vinculados: {item.condominiums.map(c=>c.name).join(', ')||'nenhum'}</Text></Pressable>)}</CardGrid>}
+    {section==='link'?<View ref={registerSection('link')} style={[isActive('link')&&s.tourHighlight]}><Text style={s.section}>Vincular banco ao condomínio</Text><Panel><Text style={s.meta}>As opções abaixo vêm das configurações criadas em “Nova configuração bancária”.</Text><Field label="1. Condomínio" required>
+        <ComboBox options={condominiumOptions} value={selectedCondominiumId} onChange={chooseCondominium} placeholder="Selecione o condomínio" title="Condomínio" searchPlaceholder="Buscar condomínio" emptyText="Nenhum condomínio encontrado."/>
+      </Field>
+      {configurations.length===0?<EmptyState title="Nenhuma configuração bancária" description="Acesse Configurações bancárias e cadastre uma configuração antes de realizar o vínculo."/>:<Field label="2. Configuração bancária cadastrada" required>
+        <ComboBox options={configurationOptions} value={selectedConfigurationId} onChange={setSelectedConfigurationId} placeholder="Selecione a configuração" title="Configuração bancária" searchPlaceholder="Buscar configuração ou banco" emptyText="Nenhuma configuração encontrada."/>
+      </Field>}
       <Text style={s.label}>3. Período de busca de boletos</Text>
       <Text style={s.meta}>Define quanto do histórico do banco entra no sistema quando o síndico clicar em "Atualizar todos os boletos". Boletos arquivados no banco nunca são importados, em nenhum dos dois modos.</Text>
       <CardGrid columns={{mobile:1,tablet:2,desktop:2}}>
         <Pressable onPress={()=>setSyncMode('all')} style={[s.option,syncMode==='all'&&s.optionActive]}><Text style={syncMode==='all'?s.optionTextActive:s.optionText}>Buscar todos os boletos</Text><Text style={s.small}>Traz todo o histórico disponível no banco.</Text></Pressable>
         <Pressable onPress={()=>setSyncMode('from_period')} style={[s.option,syncMode==='from_period'&&s.optionActive]}><Text style={syncMode==='from_period'?s.optionTextActive:s.optionText}>Buscar a partir de um período</Text><Text style={s.small}>Ignora boletos anteriores ao mês informado.</Text></Pressable>
       </CardGrid>
-      {syncMode==='from_period'?<View><TextInput value={syncStartPeriod} onChangeText={v=>setSyncStartPeriod(maskBrazilianMonth(v))} placeholder="MM/AAAA" keyboardType="number-pad" style={s.input}/><Text style={s.small}>A partir deste mês, os boletos emitidos no banco entram no sistema. Histórico anterior a esse mês não é buscado.</Text><Text style={s.warning}>Atenção: ao salvar, todo boleto já importado com vencimento anterior a este mês é excluído permanentemente do sistema (inclusive os já pagos), exceto boletos vinculados a um acordo de débito em andamento.</Text></View>:null}
+      {syncMode==='from_period'?<View><TextField label="Mês inicial da busca" value={syncStartPeriod} onChangeText={v=>setSyncStartPeriod(maskBrazilianMonth(v))} placeholder="MM/AAAA" keyboardType="number-pad"/><Text style={s.small}>A partir deste mês, os boletos emitidos no banco entram no sistema. Histórico anterior a esse mês não é buscado.</Text><Text style={s.warning}>Atenção: ao salvar, todo boleto já importado com vencimento anterior a este mês é excluído permanentemente do sistema (inclusive os já pagos), exceto boletos vinculados a um acordo de débito em andamento.</Text></View>:null}
       <AppButton title="Salvar vínculo" onPress={link} disabled={loading||!selectedCondominiumId||!selectedConfigurationId||(syncMode==='from_period'&&!syncPeriodIso)}/></Panel></View>:null}
   </ScrollView>
   <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step=>scrollToSection(step.key)}/>

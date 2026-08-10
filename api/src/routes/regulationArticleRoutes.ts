@@ -10,14 +10,13 @@ import { STARTER_REGULATION_TEMPLATE } from '../db/seeds/regulationArticleTempla
 const router = Router();
 router.use(authenticate);
 router.use(requireFeature('regimento_ocorrencias'));
-router.use(authorize('sindico', 'subsindico', 'admin_geral'));
+// Regimento é de um condomínio só. admin_geral não tem condominium_id, então
+// não há regimento que ele possa gerir — a gestão é sempre local.
+router.use(authorize('sindico', 'subsindico'));
 
-// admin_geral não tem condominiumId fixo no token (cuida de vários
-// condomínios) — precisa informar qual explicitamente. sindico/subsindico
-// nunca escolhem: sempre o próprio condomínio, ignorando qualquer valor
-// enviado no corpo/query.
-const scopedCondominiumId = (req: any): string | null =>
-  req.user?.role === 'admin_geral' ? (req.query.condominiumId || req.body?.condominiumId || null) : req.user?.condominiumId || null;
+// Só síndico/subsíndico chegam aqui, e eles nunca escolhem o condomínio:
+// é sempre o próprio, ignorando qualquer valor enviado no corpo/query.
+const scopedCondominiumId = (req: any): string | null => req.user?.condominiumId || null;
 
 const COLUMNS = `id, condominium_id, article_number, description, base_fine_percent, payment_deadline_days,
   late_interest_percent_month, monetary_correction_index, fixed_monthly_correction_percent,
@@ -81,7 +80,7 @@ router.post('/', asyncHandler(async (req, res) => {
 router.patch('/:id', asyncHandler(async (req, res) => {
   const existing = await query<{ condominium_id: string }>(`select condominium_id from regulation_articles where id=$1`, [req.params.id]);
   if (!existing.rows[0]) return res.status(404).json({ message: 'Artigo não encontrado.' });
-  if (req.user?.role !== 'admin_geral' && existing.rows[0].condominium_id !== req.user?.condominiumId) {
+  if (existing.rows[0].condominium_id !== req.user?.condominiumId) {
     return res.status(403).json({ message: 'Você não tem acesso a este condomínio.' });
   }
 

@@ -39,10 +39,14 @@ const items: Item[] = [
   { label: 'Histórico de acordos', route: 'AgreementHistory', symbol: '📋', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'historico_acordos' },
   { label: 'Config. e Enviar cobranças', route: 'BillingSettings', symbol: '⚙', roles: ['sindico', 'subsindico'], feature: 'config_enviar_cobrancas' },
   { label: 'Cobranças adicionais', route: 'UnitExtraCharges', symbol: '➕', roles: ['sindico', 'subsindico'], feature: 'cobrancas_adicionais' },
-  { label: 'Artigos do regimento', route: 'RegulationArticles', symbol: '📖', roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'regimento_ocorrencias' },
-  { label: 'Ocorrências', route: 'Occurrences', symbol: '⚑', roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
-  { label: 'Emitir notificação', route: 'InfractionNoticeIssue', symbol: '✎', roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'regimento_ocorrencias' },
-  { label: 'Notificações de infração', route: 'InfractionNotices', symbol: '⚠', roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
+  // Regimento e ocorrências são de UM condomínio: as regras, os artigos e as
+  // notificações pertencem à gestão local, e admin_geral não tem condomínio
+  // (condominium_id nulo). Por isso ele fica de fora — o catálogo de rotas em
+  // AppNavigator já o excluía, era só o menu que continuava mostrando.
+  { label: 'Artigos do regimento', route: 'RegulationArticles', symbol: '📖', roles: ['sindico', 'subsindico'], feature: 'regimento_ocorrencias' },
+  { label: 'Ocorrências', route: 'Occurrences', symbol: '⚑', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
+  { label: 'Emitir notificação', route: 'InfractionNoticeIssue', symbol: '✎', roles: ['sindico', 'subsindico'], feature: 'regimento_ocorrencias' },
+  { label: 'Notificações de infração', route: 'InfractionNotices', symbol: '⚠', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
   { label: 'Instalar aplicativo', route: 'MobileReleases', symbol: '↓', roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'] },
 ];
 

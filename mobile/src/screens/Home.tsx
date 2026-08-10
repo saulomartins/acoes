@@ -73,7 +73,8 @@ const buildMenuStructure = (): MenuItem[] => [
     ]
   },
 
-  // Regimento (submenu)
+  // Regimento (submenu). Sem admin_geral: regimento, ocorrências e
+  // notificações pertencem a um condomínio, e admin_geral não tem um.
   {
     title: 'Regimento e Ocorrências',
     shortTitle: 'Regimento',
@@ -81,13 +82,13 @@ const buildMenuStructure = (): MenuItem[] => [
     symbol: '📖',
     accent: colors.amber,
     route: 'Occurrences',
-    roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'],
+    roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'],
     feature: 'regimento_ocorrencias',
     submenu: [
-      { title: 'Artigos do regimento', shortTitle: 'Regimento', description: '', route: 'RegulationArticles', symbol: '📖', accent: colors.amber, roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'regimento_ocorrencias' },
-      { title: 'Ocorrências', shortTitle: 'Ocorrências', description: '', route: 'Occurrences', symbol: '⚑', accent: colors.teal, roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
-      { title: 'Emitir notificação', shortTitle: 'Emitir notificação', description: '', route: 'InfractionNoticeIssue', symbol: '✎', accent: colors.red, roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'regimento_ocorrencias' },
-      { title: 'Notificações de infração', shortTitle: 'Notificações', description: '', route: 'InfractionNotices', symbol: '⚠', accent: colors.primary, roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
+      { title: 'Artigos do regimento', shortTitle: 'Regimento', description: '', route: 'RegulationArticles', symbol: '📖', accent: colors.amber, roles: ['sindico', 'subsindico'], feature: 'regimento_ocorrencias' },
+      { title: 'Ocorrências', shortTitle: 'Ocorrências', description: '', route: 'Occurrences', symbol: '⚑', accent: colors.teal, roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
+      { title: 'Emitir notificação', shortTitle: 'Emitir notificação', description: '', route: 'InfractionNoticeIssue', symbol: '✎', accent: colors.red, roles: ['sindico', 'subsindico'], feature: 'regimento_ocorrencias' },
+      { title: 'Notificações de infração', shortTitle: 'Notificações', description: '', route: 'InfractionNotices', symbol: '⚠', accent: colors.primary, roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
     ]
   },
 ];
