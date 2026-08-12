@@ -1,5 +1,6 @@
 import React from 'react';
-import {Linking,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/text';
 import {colors,shadow} from '../ui/theme';
 
 const privacy=[

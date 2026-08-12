@@ -1,5 +1,6 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../ui/text';
 import { apiRequest, downloadAuthenticated, openAuthenticatedPdf } from '../api/client';
 import * as Clipboard from 'expo-clipboard';
 import { AuthContext } from '../context/AuthContext';

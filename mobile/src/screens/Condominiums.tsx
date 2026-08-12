@@ -1,5 +1,6 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../ui/text';
 import { apiRequest } from '../api/client';
 import { AuthContext, type FeatureKey } from '../context/AuthContext';
 import { AppButton, AppDialog, EmptyState, Field, Panel, TextField } from '../ui/components';

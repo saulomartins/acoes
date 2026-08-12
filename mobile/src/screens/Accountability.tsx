@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React,{useCallback,useContext,useEffect,useMemo,useState} from 'react';
-import {Platform,Pressable,ScrollView,StyleSheet,Text,TextInput,View} from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../ui/text';
 import * as DocumentPicker from 'expo-document-picker';
 import {apiRequest,apiUpload,openAuthenticatedFile} from '../api/client';
 import {AuthContext} from '../context/AuthContext';

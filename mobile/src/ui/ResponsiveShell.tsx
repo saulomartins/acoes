@@ -1,5 +1,7 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from './text';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import { AuthContext } from '../context/AuthContext';
 import { startSystemTour } from '../services/tourEvents';
@@ -58,6 +60,10 @@ const regulationRoutes = ['RegulationArticles', 'Occurrences', 'InfractionNotice
 
 export default function ResponsiveShell({ activeRoute, navigation, children }: { activeRoute: string; navigation: any; children: React.ReactNode }) {
   const { atLeastTablet: desktop, isDesktop: isWide, isTablet } = useBreakpoint();
+  // Android 15 desenha o app por baixo da status bar e da barra de gestos. Sem
+  // reservar os insets, o título de cada tela nasce colado no relógio do sistema
+  // e a barra inferior fica por baixo da barra de navegação do aparelho.
+  const insets = useSafeAreaInsets();
   const { user, userToken, signOut, condominiumFeatures, profiles, switchProfile } = useContext(AuthContext);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [switchingProfile, setSwitchingProfile] = useState(false);
@@ -170,7 +176,9 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
   }, [unreadNotices, unreadReports]);
 
   return (
-    <View style={[styles.shell, !desktop && styles.shellMobile]}>
+    // No mobile os insets vão no ScrollView e na barra inferior, para o conteúdo
+    // continuar rolando por baixo da status bar em vez de ganhar uma faixa fixa.
+    <View style={[styles.shell, !desktop && styles.shellMobile, desktop && { paddingTop: insets.top }]}>
       {desktop && (
         <>
           <View style={styles.sidebar}>
@@ -407,12 +415,15 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
 
       {!desktop ? (
         <>
-          <ScrollView contentContainerStyle={styles.mobileContentContainer}>
+          <ScrollView contentContainerStyle={[styles.mobileContentContainer, {
+            paddingTop: styles.mobileContentContainer.padding + insets.top,
+            paddingBottom: styles.mobileContentContainer.paddingBottom + insets.bottom,
+          }]}>
             {releaseBanner}
             {children}
           </ScrollView>
 
-          <View style={styles.mobileNav}>
+          <View style={[styles.mobileNav, { height: styles.mobileNav.height + insets.bottom, paddingBottom: insets.bottom }]}>
             <Pressable style={styles.mobileNavItem} onPress={() => navigation.navigate('Home')}>
               <Text style={styles.mobileNavIcon}>⌂</Text>
               <Text numberOfLines={1} style={styles.mobileNavText}>Início</Text>
@@ -430,7 +441,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                 style={styles.mobileMenuOverlay}
                 onPress={() => setMobileMenuOpen(false)}
               />
-              <View style={styles.mobileMenuDrawer}>
+              <View style={[styles.mobileMenuDrawer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
                 <View style={styles.mobileMenuHeader}>
                   <Text style={styles.mobileMenuTitle}>Menu de Navegação</Text>
                   <Pressable onPress={() => setMobileMenuOpen(false)}>

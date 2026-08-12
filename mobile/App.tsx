@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { StatusBar, StyleSheet } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { allowScreenCaptureAsync } from 'expo-screen-capture';
 import AppNavigator from './src/navigation/AppNavigator';
 import { AuthProvider } from './src/context/AuthContext';
@@ -12,10 +13,17 @@ export default function App() {
   useEffect(() => { allowScreenCaptureAsync(); }, []);
 
   return (
-    <AuthProvider>
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" translucent={false} />
-      <AppNavigator />
-    </AuthProvider>
+    // A partir do Android 15 (Expo SDK 54) o modo edge-to-edge é obrigatório: o app
+    // desenha por baixo da status bar e da barra de gestos, e backgroundColor/
+    // translucent do StatusBar não reservam mais espaço. Sem o SafeAreaProvider os
+    // títulos das telas ficavam colados no relógio do sistema. Quem consome os
+    // insets é o ResponsiveShell.
+    <SafeAreaProvider>
+      <AuthProvider>
+        <StatusBar barStyle="dark-content" />
+        <AppNavigator />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 

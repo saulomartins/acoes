@@ -1,5 +1,6 @@
 import React, { useContext, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/text';
 import { AuthContext } from '../context/AuthContext';
 import { EmptyState, Panel } from '../ui/components';
 import { colors } from '../ui/theme';

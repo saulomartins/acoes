@@ -1,22 +1,22 @@
 import React from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type TextInputProps, View } from 'react-native';
-import { colors, layout, MAX_FONT_SCALE, shadow } from './theme';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, type TextInputProps, View } from 'react-native';
+import { Text, TextInput } from './text';
+import { colors, layout, shadow } from './theme';
 
 // Props para os cartões de indicadores (recebido/em aberto/vencidos...). O valor
 // nunca quebra em duas linhas: encolhe até 80% antes disso, então "R$ 250,81"
-// deixa de virar "R$ 25 / 0,81" em tela estreita ou com fonte grande do sistema.
+// deixa de virar "R$ 25 / 0,81" em tela estreita. O teto de escala da fonte do
+// sistema não aparece aqui porque já é o padrão do Text em ./text.
 export const summaryValueProps = {
   numberOfLines: 1,
   adjustsFontSizeToFit: true,
   minimumFontScale: 0.8,
-  maxFontSizeMultiplier: MAX_FONT_SCALE,
 } as const;
 
-// O rótulo pode ocupar duas linhas, mas com o teto de escala para não empurrar
-// o cartão e forçar quebra no meio da palavra ("refer / ência").
+// O rótulo pode ocupar duas linhas; passando disso é melhor cortar do que
+// empurrar o cartão e forçar quebra no meio da palavra ("refer / ência").
 export const summaryLabelProps = {
   numberOfLines: 2,
-  maxFontSizeMultiplier: MAX_FONT_SCALE,
 } as const;
 
 // Rótulo sempre visível acima do campo: placeholder some assim que o usuário

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from './text';
 import { colors, shadow } from './theme';
 
 export type ComboBoxOption = {

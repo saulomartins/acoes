@@ -1,5 +1,6 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/text';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
 import { EmptyState, Panel, summaryLabelProps, summaryValueProps } from '../ui/components';

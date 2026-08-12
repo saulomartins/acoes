@@ -1,7 +1,15 @@
 // @ts-nocheck
 import React from 'react';
-import {StyleSheet,Text,View} from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/text';
 import {colors} from '../ui/theme';
+
+// O relatório reproduz uma folha A4 de fluxo de caixa: 4 colunas de larguras
+// fixas. Espremido nos ~310dp úteis de um celular, sobravam ~45dp por coluna e
+// o texto quebrava no meio da palavra ("30 aparta/mentos", "Serviço/forneci/
+// mento", "R$ 7.818,6/2"). Em vez de descaracterizar o documento, a folha
+// mantém uma largura mínima legível e rola na horizontal quando não cabe.
+const SHEET_MIN_WIDTH=600;
 
 const MONTHS=['JANEIRO','FEVEREIRO','MARÇO','ABRIL','MAIO','JUNHO','JULHO','AGOSTO','SETEMBRO','OUTUBRO','NOVEMBRO','DEZEMBRO'];
 const brl=(n:number)=>(Number(n||0)/100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
@@ -16,6 +24,18 @@ function Row({cells,head,bold}:{cells:string[];head?:boolean;bold?:boolean}){
 }
 
 export default function AccountabilityReportView({report,printId}:{report:any;printId?:string}){
+  const sheet=<Sheet report={report} printId={printId}/>;
+  // O portal de impressão precisa da folha crua: um ScrollView em volta cortaria
+  // o conteúdo no papel. Só a versão em tela ganha a rolagem horizontal.
+  if(printId)return sheet;
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.sheetScroll}>
+      {sheet}
+    </ScrollView>
+  );
+}
+
+function Sheet({report,printId}:{report:any;printId?:string}){
   const receiptRows=[
     report.paid_units?`${report.paid_units} apartamentos pagos`:null,
     report.exempt_units?`${report.exempt_units} isento${report.exempt_units>1?'s':''}`:null,
@@ -62,7 +82,10 @@ export default function AccountabilityReportView({report,printId}:{report:any;pr
 }
 
 const styles=StyleSheet.create({
-  sheet:{backgroundColor:'#fff',padding:24,borderWidth:1,borderColor:colors.border,borderRadius:8},
+  // flexGrow faz a folha ocupar toda a largura quando sobra espaço (tablet/web);
+  // minWidth garante o piso legível no celular, onde então aparece a rolagem.
+  sheetScroll:{flexGrow:1,minWidth:SHEET_MIN_WIDTH},
+  sheet:{flex:1,backgroundColor:'#fff',padding:24,borderWidth:1,borderColor:colors.border,borderRadius:8},
   title:{fontSize:20,fontWeight:'900',color:colors.ink,textAlign:'center'},
   subtitle:{fontSize:15,fontWeight:'800',color:colors.ink,textAlign:'center',marginTop:4,marginBottom:16},
   section:{fontWeight:'900',fontSize:14,color:colors.ink,marginTop:18,marginBottom:6},

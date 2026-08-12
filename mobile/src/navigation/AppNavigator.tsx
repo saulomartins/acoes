@@ -1,8 +1,10 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/text';
 import * as Notifications from 'expo-notifications';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ResponsiveShell from '../ui/ResponsiveShell';
 import Home from '../screens/Home';
 import Dashboard from '../screens/Dashboard';
@@ -134,6 +136,21 @@ const withResponsiveShell = (Component: React.ComponentType<any>, routeName: str
   );
 };
 
+// Telas fora do ResponsiveShell (login, termos, troca de perfil) não têm quem
+// reserve o espaço da status bar — no Android 15, com edge-to-edge obrigatório,
+// elas nasceriam por baixo do relógio do sistema. Este HOC faz o mesmo papel que
+// o shell faz para as telas autenticadas.
+const withSafeArea = (Component: React.ComponentType<any>) => {
+  return (props: any) => {
+    const insets = useSafeAreaInsets();
+    return (
+      <View style={{ flex: 1, paddingTop: insets.top, paddingBottom: insets.bottom }}>
+        <Component {...props} />
+      </View>
+    );
+  };
+};
+
 // Chamado uma única vez aqui em cima (não dentro de AppNavigator) de propósito:
 // withResponsiveShell(...) cria uma função de componente nova a cada chamada, e
 // <Stack.Screen component={...}> usa essa identidade pra decidir se é "a mesma"
@@ -174,6 +191,19 @@ const InfractionNoticeIssueScreen = withResponsiveShell(InfractionNoticeIssue, '
 const InfractionNoticesScreen = withResponsiveShell(InfractionNotices, 'InfractionNotices');
 const PollsScreen = withResponsiveShell(Polls, 'Polls');
 const SpaceReservationsScreen = withResponsiveShell(SpaceReservations, 'SpaceReservations');
+
+// Pré-computadas pelo mesmo motivo das de cima: manter a identidade da função
+// estável entre renders para o React Navigation não remontar a tela ativa.
+const LoginScreen = withSafeArea(Login);
+const RegisterScreen = withSafeArea(Register);
+const LandingScreen = withSafeArea(Landing);
+const ForgotPasswordScreen = withSafeArea(ForgotPassword);
+const ResetPasswordScreen = withSafeArea(ResetPassword);
+const LegalDocumentScreen = withSafeArea(LegalDocument);
+const SelectProfileScreen = withSafeArea(SelectProfile);
+const TermsAcceptanceScreen = withSafeArea(TermsAcceptance);
+const ForcePasswordChangeScreen = withSafeArea(ForcePasswordChange);
+const ClearanceVerifyStandaloneScreen = withSafeArea(ClearanceVerify);
 
 const resolveNotificationScreen = (payload: unknown): 'Communications' | 'Reports' | 'Debts' | 'Occurrences' | 'InfractionNotices' | 'Invoices' | 'Polls' | 'SpaceReservations' | undefined => {
   if (!payload || typeof payload !== 'object') return undefined;
@@ -236,21 +266,21 @@ export default function AppNavigator() {
       <NavigationContainer ref={navigationRef} linking={{ prefixes: ['laremdia://', 'appcond://'], config: { screens: isWeb ? { Landing: '', Login: 'login', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?' } : { Login: '', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?' } } }}>
         <Stack.Navigator screenOptions={{ animation: 'fade', contentStyle: { backgroundColor: '#f5f7fb' } }}>
           {userToken && user?.mustChangePassword ? (
-            <Stack.Screen name="ForcePasswordChange" component={ForcePasswordChange} options={{ headerShown: false }} />
+            <Stack.Screen name="ForcePasswordChange" component={ForcePasswordChangeScreen} options={{ headerShown: false }} />
           ) : userToken && user?.termsAcceptedVersion !== CURRENT_TERMS_VERSION ? (
             <>
-              <Stack.Screen name="TermsAcceptance" component={TermsAcceptance} options={{ headerShown: false }} />
-              <Stack.Screen name="LegalDocument" component={LegalDocument} options={{ headerShown: false }} />
+              <Stack.Screen name="TermsAcceptance" component={TermsAcceptanceScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="LegalDocument" component={LegalDocumentScreen} options={{ headerShown: false }} />
             </>
           ) : userToken && needsProfileSelection ? (
-            <Stack.Screen name="SelectProfile" component={SelectProfile} options={{ headerShown: false }} />
+            <Stack.Screen name="SelectProfile" component={SelectProfileScreen} options={{ headerShown: false }} />
           ) : userToken ? (
             <>
               <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ headerShown: false }} />
               <Stack.Screen name="BillingAnalytics" component={BillingAnalyticsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Clearances" component={ClearancesScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="ClearanceVerify" component={ClearanceVerify} options={{ headerShown: false }} />
+              <Stack.Screen name="ClearanceVerify" component={ClearanceVerifyStandaloneScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Condominiums" component={CondominiumsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Users" component={UsersScreen} options={{ headerShown: false }} />
               <Stack.Screen name="BankIntegration" component={BankIntegrationScreen} options={{ headerShown: false }} />
@@ -281,13 +311,13 @@ export default function AppNavigator() {
             </>
           ) : (
             <>
-              {isWeb ? <Stack.Screen name="Landing" component={Landing} options={{ headerShown: false }} /> : null}
-              <Stack.Screen name="Login" component={Login} options={{ headerShown: false }} />
-              <Stack.Screen name="Register" component={Register} options={{ headerShown: false }} />
-              <Stack.Screen name="ForgotPassword" component={ForgotPassword} options={{ headerShown: false }} />
-              <Stack.Screen name="LegalDocument" component={LegalDocument} options={{ headerShown: false }} />
-              <Stack.Screen name="ResetPassword" component={ResetPassword} options={{ headerShown: false }} />
-              <Stack.Screen name="ClearanceVerify" component={ClearanceVerify} options={{ headerShown: false }} />
+              {isWeb ? <Stack.Screen name="Landing" component={LandingScreen} options={{ headerShown: false }} /> : null}
+              <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="LegalDocument" component={LegalDocumentScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="ClearanceVerify" component={ClearanceVerifyStandaloneScreen} options={{ headerShown: false }} />
             </>
           )}
         </Stack.Navigator>

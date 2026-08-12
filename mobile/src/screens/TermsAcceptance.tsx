@@ -1,5 +1,6 @@
 import React,{useContext,useState} from 'react';
-import {ActivityIndicator,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/text';
 import {apiRequest} from '../api/client';
 import {AuthContext} from '../context/AuthContext';
 import {colors,shadow} from '../ui/theme';

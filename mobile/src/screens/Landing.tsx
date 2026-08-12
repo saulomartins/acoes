@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Image, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, Easing, Image, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../ui/text';
 import { LinearGradient } from 'expo-linear-gradient';
 import { API_BASE_URL } from '../api/client';
 import { useBreakpoint } from '../ui/responsive';

@@ -5,10 +5,9 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from "react-native";
+import { Text, TextInput } from "../ui/text";
 import { apiRequest } from "../api/client";
 import { AuthContext } from "../context/AuthContext";
 import { AppButton, AppDialog, EmptyState, Panel } from "../ui/components";

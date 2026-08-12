@@ -1,5 +1,6 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../ui/text';
 import * as DocumentPicker from 'expo-document-picker';
 import { apiFormUpload, apiRequest, downloadAuthenticated } from '../api/client';
 import { AuthContext } from '../context/AuthContext';

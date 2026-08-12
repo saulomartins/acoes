@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../ui/text';
 import { API_BASE_URL } from '../api/client';
 import { AppButton } from '../ui/components';
 import { colors, layout, shadow } from '../ui/theme';

@@ -1,5 +1,6 @@
 import React,{useCallback,useEffect,useMemo,useState} from 'react';
-import {ActivityIndicator,Pressable,StyleSheet,Text,View} from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/text';
 import {apiRequest} from '../api/client';
 import {colors} from '../ui/theme';
 

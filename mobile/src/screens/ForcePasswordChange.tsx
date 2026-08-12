@@ -1,5 +1,6 @@
 import React, { useContext, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../ui/text';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
 import { AppButton } from '../ui/components';

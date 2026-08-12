@@ -1,8 +1,10 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../ui/text';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
 import { AppButton, AppDialog, EmptyState, Panel } from '../ui/components';
+import { ComboBox } from '../ui/ComboBox';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
@@ -149,13 +151,17 @@ export default function Occurrences({ navigation }: any) {
           {manager ? (
             <>
               <Text style={styles.label}>Unidade</Text>
-              <View style={styles.categories}>
-                {units.map(u => (
-                  <Pressable key={u.id} onPress={() => setUnitId(u.id)} style={[styles.category, unitId === u.id && styles.categoryActive]}>
-                    <Text style={[styles.categoryText, unitId === u.id && styles.categoryTextActive]}>{u.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
+              {/* Em chips, um condomínio de 36 unidades virava 18 linhas e
+                  empurrava descrição e botão para fora da tela no celular. */}
+              <ComboBox
+                options={units.map(u => ({ value: u.id, label: u.label }))}
+                value={unitId}
+                onChange={setUnitId}
+                placeholder="Selecione a unidade"
+                searchPlaceholder="Buscar por bloco ou apartamento"
+                title="Unidade"
+                emptyText="Nenhuma unidade encontrada."
+              />
             </>
           ) : null}
           <Text style={styles.label}>Descrição</Text>
