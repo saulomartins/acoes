@@ -3,7 +3,7 @@ import { Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleS
 import * as DocumentPicker from 'expo-document-picker';
 import { apiRequest, apiUpload } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
-import { AppButton, EmptyState } from '../ui/components';
+import { AppButton, EmptyState, summaryLabelProps, summaryValueProps } from '../ui/components';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import { brazilianDateToIso, formatBrazilianDate, formatBrazilianMonth, maskBrazilianDate } from '../utils/date';
@@ -452,9 +452,9 @@ export default function Debts({ navigation }: any) {
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
       {data ? <>
         <View ref={registerSection('summary')} style={[styles.summaryRow,isActive('summary')&&styles.tourHighlight]}>
-          <View style={styles.summary}><Text style={styles.summaryValue}>{units.length}</Text><Text style={styles.summaryLabel}>apartamentos listados</Text></View>
-          <View style={styles.summary}><Text style={styles.summaryValue}>{data.totals.openCount}</Text><Text style={styles.summaryLabel}>referências em aberto</Text></View>
-          <View style={styles.summaryTotal}><Text style={styles.summaryTotalValue}>{money(data.totals.updatedTotalCents)}</Text><Text style={styles.summaryTotalLabel}>total atualizado do condomínio</Text></View>
+          <View style={styles.summary}><Text {...summaryValueProps} style={styles.summaryValue}>{units.length}</Text><Text {...summaryLabelProps} style={styles.summaryLabel}>apartamentos listados</Text></View>
+          <View style={styles.summary}><Text {...summaryValueProps} style={styles.summaryValue}>{data.totals.openCount}</Text><Text {...summaryLabelProps} style={styles.summaryLabel}>referências em aberto</Text></View>
+          <View style={styles.summaryTotal}><Text {...summaryValueProps} style={styles.summaryTotalValue}>{money(data.totals.updatedTotalCents)}</Text><Text {...summaryLabelProps} style={styles.summaryTotalLabel}>total atualizado do condomínio</Text></View>
         </View>
 
         {agreements.length?<View ref={registerSection('agreements')} style={[styles.agreements,isActive('agreements')&&styles.tourHighlight]}><Text style={styles.sectionTitle}>Propostas e acordos</Text><Text style={styles.sectionHint}>{manager?'Acompanhe propostas, aceites e emissão das parcelas.':'Consulte abaixo todos os valores, débitos incluídos, vencimentos e situação do seu acordo.'}</Text>{agreements.map(agreement=>{const discount=Math.max(0,agreement.original_total_cents-agreement.negotiated_total_cents);const orderedItems=[...(agreement.items||[])].sort((a,b)=>b.referenceMonth.localeCompare(a.referenceMonth));const orderedInstallments=[...(agreement.installments||[])].sort((a,b)=>a.number-b.number);const paid=orderedInstallments.filter(item=>item.status==='paid').length;return <View key={agreement.id} style={[styles.agreementCard,agreement.status==='breached'&&styles.agreementCardDanger]}>

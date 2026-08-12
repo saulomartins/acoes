@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
-import { EmptyState, Panel } from '../ui/components';
+import { EmptyState, Panel, summaryLabelProps, summaryValueProps } from '../ui/components';
 import DateRangeCalendar from '../ui/DateRangeCalendar';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
@@ -95,16 +95,16 @@ export default function BillingAnalytics() {
         <>
           <View ref={registerSection('summary')} style={[s.summaryRow, compact && s.summaryRowMobile, isActive('summary') && s.tourHighlight]}>
             <View style={[s.summary, s.summaryReceived, compact && s.summaryMobile]}>
-              <Text style={[s.summaryValue, s.receivedText]}>{money(summary.received.totalCents)}</Text>
-              <Text style={s.summaryLabel}>recebidos · {summary.received.count} boleto{summary.received.count === 1 ? '' : 's'}</Text>
+              <Text {...summaryValueProps} style={[s.summaryValue, s.receivedText]}>{money(summary.received.totalCents)}</Text>
+              <Text {...summaryLabelProps} style={s.summaryLabel}>recebidos · {summary.received.count} boleto{summary.received.count === 1 ? '' : 's'}</Text>
             </View>
             <View style={[s.summary, compact && s.summaryMobile]}>
-              <Text style={s.summaryValue}>{money(summary.unpaid.totalCents)}</Text>
-              <Text style={s.summaryLabel}>não pagos · {summary.unpaid.count} boleto{summary.unpaid.count === 1 ? '' : 's'}</Text>
+              <Text {...summaryValueProps} style={s.summaryValue}>{money(summary.unpaid.totalCents)}</Text>
+              <Text {...summaryLabelProps} style={s.summaryLabel}>não pagos · {summary.unpaid.count} boleto{summary.unpaid.count === 1 ? '' : 's'}</Text>
             </View>
             <View style={[s.summary, s.summaryMuted, compact && s.summaryMobile]}>
-              <Text style={s.summaryValue}>{money(summary.canceled.totalCents)}</Text>
-              <Text style={s.summaryLabel}>cancelados · {summary.canceled.count} boleto{summary.canceled.count === 1 ? '' : 's'}</Text>
+              <Text {...summaryValueProps} style={s.summaryValue}>{money(summary.canceled.totalCents)}</Text>
+              <Text {...summaryLabelProps} style={s.summaryLabel}>cancelados · {summary.canceled.count} boleto{summary.canceled.count === 1 ? '' : 's'}</Text>
             </View>
           </View>
 

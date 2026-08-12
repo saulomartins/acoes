@@ -32,3 +32,9 @@ export const layout = {
   radius: 14,
   controlRadius: 12,
 };
+
+// Teto para o "tamanho da fonte" do sistema (Android/iOS). Sem ele o usuário que
+// configura fonte grande no aparelho recebe texto até 2x maior, e blocos densos
+// (cartões de indicadores, etiquetas de situação) quebram palavras no meio.
+// 1.3 preserva a acessibilidade sem destruir o layout.
+export const MAX_FONT_SCALE = 1.3;

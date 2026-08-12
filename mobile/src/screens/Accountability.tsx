@@ -2,7 +2,6 @@
 import React,{useCallback,useContext,useEffect,useMemo,useState} from 'react';
 import {Platform,Pressable,ScrollView,StyleSheet,Text,TextInput,View} from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import {allowScreenCaptureAsync,preventScreenCaptureAsync} from 'expo-screen-capture';
 import {apiRequest,apiUpload,openAuthenticatedFile} from '../api/client';
 import {AuthContext} from '../context/AuthContext';
 import {AppButton,AppDialog,EmptyState,Panel} from '../ui/components';
@@ -41,8 +40,10 @@ export default function Accountability({navigation}:any){
  const total=useMemo(()=>draft.expenses.reduce((sum,item)=>sum+Number(item.amountCents||0),0),[draft.expenses]);
  const load=useCallback(async()=>{if(!userToken)return;try{setItems((await apiRequest<{reports:Report[]}>('/accountability',userToken)).reports)}catch(e){setError(e instanceof Error?e.message:'Falha ao carregar')}},[userToken]);
  useEffect(()=>{load()},[load]);
- useEffect(()=>{if(readingReport){allowScreenCaptureAsync('accountability-view')}else{preventScreenCaptureAsync('accountability-view')}},[readingReport]);
- useEffect(()=>()=>{preventScreenCaptureAsync('accountability-view')},[]);
+ // Captura de tela liberada — ver allowScreenCaptureAsync em App.tsx. Esta tela
+ // chamava preventScreenCaptureAsync, que liga o FLAG_SECURE da Activity inteira,
+ // e a limpeza no unmount também chamava "prevent" em vez de "allow": bastava
+ // abrir Prestação de contas uma vez para o print ficar bloqueado em TODO o app.
  useEffect(()=>{if(Platform.OS!=='web')return;if(document.getElementById('accountability-print-style'))return;const style=document.createElement('style');style.id='accountability-print-style';style.textContent=`#${PRINT_AREA_ID}{display:none}@media print{body *{visibility:hidden}#${PRINT_AREA_ID}{display:block;position:absolute;left:0;top:0;width:100%}#${PRINT_AREA_ID} *{visibility:visible;-webkit-print-color-adjust:exact;print-color-adjust:exact}}`;document.head.appendChild(style)},[]);
  useEffect(()=>{if(Platform.OS!=='web')return;const stop=(event:KeyboardEvent)=>{if(readingReport)return;if(event.key==='PrintScreen'||(event.ctrlKey&&['p','s'].includes(event.key.toLowerCase()))){event.preventDefault();setError('Captura, impressão e salvamento desta tela não são permitidos.')}};document.addEventListener('keydown',stop);return()=>document.removeEventListener('keydown',stop)},[readingReport]);
  const field=(key:keyof Draft,value:any)=>setDraft(current=>({...current,[key]:value}));

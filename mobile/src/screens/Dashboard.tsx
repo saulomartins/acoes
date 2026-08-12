@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useEffect, useMemo, useState } from 're
 import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
-import { EmptyState, Panel } from '../ui/components';
+import { EmptyState, Panel, summaryLabelProps, summaryValueProps } from '../ui/components';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import { formatBrazilianDate, formatBrazilianMonth } from '../utils/date';
@@ -145,24 +145,24 @@ export default function Dashboard() {
           <View ref={registerSection('summary')} style={[isActive('summary') && s.tourHighlight]}>
           <View style={[s.summaryRow, compact && s.summaryRowMobile]}>
             <View style={[s.summary, s.summaryPaid, compact && s.summaryMobile]}>
-              <Text style={[s.summaryValue, s.paidText]}>{money(summary.paid.totalCents)}</Text>
-              <Text style={s.summaryLabel}>pagos · {summary.paid.count} boleto{summary.paid.count === 1 ? '' : 's'}</Text>
+              <Text {...summaryValueProps} style={[s.summaryValue, s.paidText]}>{money(summary.paid.totalCents)}</Text>
+              <Text {...summaryLabelProps} style={s.summaryLabel}>pagos · {summary.paid.count} boleto{summary.paid.count === 1 ? '' : 's'}</Text>
             </View>
             <View style={[s.summary, compact && s.summaryMobile]}>
-              <Text style={s.summaryValue}>{money(summary.open.totalCents)}</Text>
-              <Text style={s.summaryLabel}>em aberto · {summary.open.count} boleto{summary.open.count === 1 ? '' : 's'}</Text>
+              <Text {...summaryValueProps} style={s.summaryValue}>{money(summary.open.totalCents)}</Text>
+              <Text {...summaryLabelProps} style={s.summaryLabel}>em aberto · {summary.open.count} boleto{summary.open.count === 1 ? '' : 's'}</Text>
             </View>
             <View style={[s.summary, s.summaryMuted, compact && s.summaryMobile]}>
-              <Text style={s.summaryValue}>{money(summary.canceled.totalCents)}</Text>
-              <Text style={s.summaryLabel}>cancelados · {summary.canceled.count} boleto{summary.canceled.count === 1 ? '' : 's'}</Text>
+              <Text {...summaryValueProps} style={s.summaryValue}>{money(summary.canceled.totalCents)}</Text>
+              <Text {...summaryLabelProps} style={s.summaryLabel}>cancelados · {summary.canceled.count} boleto{summary.canceled.count === 1 ? '' : 's'}</Text>
             </View>
             <View style={[s.summary, s.summaryDanger, compact && s.summaryMobile]}>
-              <Text style={[s.summaryValue, s.dangerText]}>{money(summary.overdue.totalCents)}</Text>
-              <Text style={s.summaryLabel}>vencidos · {summary.overdue.count} boleto{summary.overdue.count === 1 ? '' : 's'}</Text>
+              <Text {...summaryValueProps} style={[s.summaryValue, s.dangerText]}>{money(summary.overdue.totalCents)}</Text>
+              <Text {...summaryLabelProps} style={s.summaryLabel}>vencidos · {summary.overdue.count} boleto{summary.overdue.count === 1 ? '' : 's'}</Text>
             </View>
             <View style={[s.summary, s.summaryPending, compact && s.summaryMobile]}>
-              <Text style={[s.summaryValue, s.pendingText]}>{money(summary.pendingBank.totalCents)}</Text>
-              <Text style={s.summaryLabel}>aguardando o banco · {summary.pendingBank.count} boleto{summary.pendingBank.count === 1 ? '' : 's'}</Text>
+              <Text {...summaryValueProps} style={[s.summaryValue, s.pendingText]}>{money(summary.pendingBank.totalCents)}</Text>
+              <Text {...summaryLabelProps} style={s.summaryLabel}>aguardando o banco · {summary.pendingBank.count} boleto{summary.pendingBank.count === 1 ? '' : 's'}</Text>
             </View>
           </View>
 

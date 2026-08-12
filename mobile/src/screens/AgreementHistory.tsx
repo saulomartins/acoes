@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useEffect, useMemo, useState } from 're
 import { Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, Modal } from 'react-native';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
-import { AppButton, EmptyState, Panel } from '../ui/components';
+import { AppButton, EmptyState, Panel, summaryLabelProps, summaryValueProps } from '../ui/components';
 import { colors } from '../ui/theme';
 import { formatBrazilianDate, formatBrazilianMonth } from '../utils/date';
 import { useBreakpoint } from '../ui/responsive';
@@ -174,10 +174,10 @@ export default function AgreementHistory({ navigation }: any) {
       <Text style={styles.subtitle}>{manager ? 'Acordos encerrados, quitados e rompidos' : 'Acompanhe seus acordos finalizados'}</Text></View><Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable></View>
 
       <View ref={registerSection('summary')} style={[styles.summaryRow, compact && styles.summaryRowMobile, isActive('summary')&&styles.tourHighlight]}>
-        <View style={[styles.summary, compact && styles.summaryMobile]}><Text style={[styles.summaryValue, compact && styles.summaryValueMobile]}>{agreements.length}</Text><Text style={styles.summaryLabel}>acordos no histórico</Text></View>
-        <View style={[styles.summary, compact && styles.summaryMobile]}><Text style={[styles.summaryValue, compact && styles.summaryValueMobile, { color: colors.green }]}>{settledCount}</Text><Text style={styles.summaryLabel}>quitados</Text></View>
-        <View style={[styles.summary, breachedCount > 0 && styles.summaryDanger, compact && styles.summaryMobile]}><Text style={[styles.summaryValue, compact && styles.summaryValueMobile, breachedCount > 0 && styles.dangerText]}>{breachedCount}</Text><Text style={styles.summaryLabel}>rompidos</Text></View>
-        <View style={[styles.summary, compact && styles.summaryMobile]}><Text style={[styles.summaryValue, compact && styles.summaryValueMobile]}>{money(negotiatedTotal)}</Text><Text style={styles.summaryLabel}>total negociado</Text></View>
+        <View style={[styles.summary, compact && styles.summaryMobile]}><Text {...summaryValueProps} style={[styles.summaryValue, compact && styles.summaryValueMobile]}>{agreements.length}</Text><Text {...summaryLabelProps} style={styles.summaryLabel}>acordos no histórico</Text></View>
+        <View style={[styles.summary, compact && styles.summaryMobile]}><Text {...summaryValueProps} style={[styles.summaryValue, compact && styles.summaryValueMobile, { color: colors.green }]}>{settledCount}</Text><Text {...summaryLabelProps} style={styles.summaryLabel}>quitados</Text></View>
+        <View style={[styles.summary, breachedCount > 0 && styles.summaryDanger, compact && styles.summaryMobile]}><Text {...summaryValueProps} style={[styles.summaryValue, compact && styles.summaryValueMobile, breachedCount > 0 && styles.dangerText]}>{breachedCount}</Text><Text {...summaryLabelProps} style={styles.summaryLabel}>rompidos</Text></View>
+        <View style={[styles.summary, compact && styles.summaryMobile]}><Text {...summaryValueProps} style={[styles.summaryValue, compact && styles.summaryValueMobile]}>{money(negotiatedTotal)}</Text><Text {...summaryLabelProps} style={styles.summaryLabel}>total negociado</Text></View>
       </View>
 
       <View ref={registerSection('filters')} style={[isActive('filters')&&styles.tourHighlight]}><Panel>
@@ -408,11 +408,12 @@ const styles = StyleSheet.create({
   tourButton:{borderWidth:1,borderColor:colors.primary,borderRadius:20,paddingHorizontal:14,paddingVertical:9,backgroundColor:colors.softBlue},tourButtonText:{color:colors.primaryDark,fontWeight:'900',fontSize:13},tourHighlight:{borderWidth:2,borderColor:colors.primary,borderRadius:16,padding:6,margin:-6},
 
   summaryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  summaryRowMobile: { gap: 6 },
+  summaryRowMobile: { gap: 8 },
   summary: { flex: 1, minWidth: 140, borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: '#fff', padding: 12 },
-  summaryMobile: { flex: 0.5, minWidth: 70 },
+  // 2 cartões por linha no celular — ver comentário equivalente em Invoices.tsx.
+  summaryMobile: { flexBasis: '47%', minWidth: 0, paddingHorizontal: 10 },
   summaryValue: { fontSize: 18, fontWeight: '900', color: colors.ink },
-  summaryValueMobile: { fontSize: 16 },
+  summaryValueMobile: { fontSize: 17 },
   summaryLabel: { fontSize: 13, color: colors.muted, marginTop: 2 },
   summaryDanger: { borderColor: '#ef9a9a', backgroundColor: '#fff5f5' },
   dangerText: { color: colors.red },
