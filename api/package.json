@@ -7,7 +7,7 @@
     "start": "node dist/index.js",
     "build": "tsc -p .",
     "db:setup": "ts-node --files src/scripts/setupDatabase.ts",
-    "releases:seed-android": "ts-node --files src/scripts/seedAndroidRelease.ts",
+    "releases:seed-android": "ts-node --transpile-only src/scripts/seedAndroidRelease.ts",
     "releases:publish-android-link": "ts-node --files src/scripts/publishAndroidReleaseLink.ts",
     "units:link-complements": "ts-node --files src/scripts/linkUsersToUnitsFromAddressComplement.ts",
     "inter:sync": "ts-node --files src/scripts/syncInterIntegration.ts",
