@@ -205,7 +205,8 @@ type Feature = { title: string; icon: string; description: string; highlight?: s
 // fornecedores: isso não está implementado, então não entra aqui).
 const FEATURES: Feature[] = [
   { title: 'Gestão financeira', icon: '$', description: 'Receitas, despesas e saldo do condomínio, sempre atualizados e no automático.', highlight: 'Economia de tempo' },
-  { title: 'Cobrança por Pix e boleto', icon: '▤', description: 'Boleto e Pix emitidos direto pelo Banco Inter, com multa e juros configurados uma vez.' },
+  { title: 'Cobrança por Pix e boleto', icon: '▤', description: 'Boleto e Pix emitidos direto pelo Banco Inter, com multa, juros e detalhamento de taxas configurados uma vez.' },
+  { title: 'Consumo de água, gás e energia', icon: '💧', description: 'Tarifa por condomínio e lançamento mensal de consumo por unidade, somado ao boleto da taxa condominial.', highlight: 'Transparência no consumo' },
   { title: 'Prestação de contas', icon: '◍', description: 'Relatório mensal com comprovantes anexados, claro e disponível para todos os moradores.', highlight: 'Transparência financeira' },
   { title: 'Gestão de débitos', icon: '↓', description: 'Acordo, parcelamento e edição de débitos antigos para reduzir a inadimplência.', highlight: 'Redução da inadimplência' },
   { title: 'Avisos e comunicação', icon: '◉', description: 'Avisos com confirmação de leitura — sem se perder no grupo de WhatsApp.', highlight: 'Comunicação centralizada' },
@@ -222,7 +223,7 @@ const FEATURES: Feature[] = [
 ];
 
 const FEATURE_GROUPS = [
-  { title: 'Financeiro e cobranças', description: 'Controle, arrecadação e transparência financeira.', items: ['Gestão financeira','Cobrança por Pix e boleto','Prestação de contas','Gestão de débitos','Cobranças adicionais','Histórico de acordos'] },
+  { title: 'Financeiro e cobranças', description: 'Controle, arrecadação e transparência financeira.', items: ['Gestão financeira','Cobrança por Pix e boleto','Consumo de água, gás e energia','Prestação de contas','Gestão de débitos','Cobranças adicionais','Histórico de acordos'] },
   { title: 'Comunicação e participação', description: 'Moradores informados e participando das decisões.', items: ['Avisos e comunicação','Relatos e solicitações','Enquetes','Regimento e ocorrências','Notificações de infração'] },
   { title: 'Operação e experiência', description: 'Rotina administrativa organizada para gestão e moradores.', items: ['Unidades e moradores','Reserva de espaços','APP do Morador','Painel com indicadores'] },
 ];
