@@ -244,6 +244,20 @@ router.get('/', asyncHandler(async (req, res) => {
             invoices.external_id, invoices.digitable_line, invoices.pdf_url, invoices.created_at,
             invoices.barcode, invoices.pix_copy_paste, invoices.paid_at, invoices.paid_amount_cents, invoices.batch_id,
             invoices.reference_month, invoices.invoice_type, invoices.agreement_id, invoices.cancellation_reason,
+            invoices.condo_fee_percent, invoices.condo_fee_cents, invoices.improvement_fee_percent, invoices.improvement_fee_cents, invoices.condo_base_fee_cents,
+            coalesce((select json_agg(json_build_object('description', ec.description, 'amount_cents', eci.amount_cents))
+              from unit_extra_charge_installments eci join unit_extra_charges ec on ec.id = eci.charge_id
+              where eci.invoice_id = invoices.id and eci.status = 'applied'), '[]'::json) as extra_charge_items,
+            coalesce((select json_agg(json_build_object('utility_type', ucc.utility_type, 'quantity', ucc.quantity, 'unit_price_cents', ucc.unit_price_cents, 'amount_cents', ucc.amount_cents))
+              from unit_consumption_charges ucc
+              where ucc.invoice_id = invoices.id and ucc.status = 'applied'
+                -- Some linha desligada: se o condomínio desligou "Cobrança por
+                -- consumo" depois de ter usado, boletos antigos não voltam a
+                -- mostrar o detalhamento de consumo. Sem linha em
+                -- condominium_features = ativo por padrão, mesmo fallback do
+                -- requireFeature.
+                and coalesce((select cf.consumo_individualizado from condominium_features cf where cf.condominium_id = invoices.condominium_id), true) = true
+              ), '[]'::json) as consumption_items,
             users.username as user_username,
             users.full_name as user_full_name
      from invoices

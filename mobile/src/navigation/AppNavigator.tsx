@@ -21,6 +21,7 @@ import BankIntegration from '../screens/BankIntegration';
 import BankIntegrationGuide from '../screens/BankIntegrationGuide';
 import UnitTypes from '../screens/UnitTypes';
 import UnitExtraCharges from '../screens/UnitExtraCharges';
+import UnitConsumption from '../screens/UnitConsumption';
 import BillingSettings from '../screens/BillingSettings';
 import Units from '../screens/Units';
 import Debts from '../screens/Debts';
@@ -70,6 +71,7 @@ type RootStackParamList = {
   BankIntegrationGuide: undefined;
   UnitTypes: undefined;
   UnitExtraCharges: undefined;
+  UnitConsumption: undefined;
   Units: undefined;
   Invoices: undefined;
   BillingSettings: undefined;
@@ -98,7 +100,7 @@ const navigationRef = createNavigationContainerRef<RootStackParamList>();
 // No app nativo instalado (Android/iOS) o usuário já decidiu usar o app —
 // a primeira tela deve ser sempre o Login, nunca a landing de vendas.
 const isWeb = Platform.OS === 'web';
-export const CURRENT_TOUR_VERSION='2026-08-04-1';
+export const CURRENT_TOUR_VERSION='2026-08-13-1';
 type TourStep={route:keyof RootStackParamList;title:string;description:string;roles:string[];feature?:FeatureKey};
 const TOUR_STEPS:TourStep[]=[
   {route:'Home',title:'Início',description:'Resumo das informações mais importantes e atalhos para as rotinas do condomínio.',roles:['sindico','subsindico','proprietario','inquilino']},
@@ -109,6 +111,7 @@ const TOUR_STEPS:TourStep[]=[
   {route:'Invoices',title:'Gestão de cobranças',description:'Emissão e acompanhamento de boletos, Pix, pagamentos e valores em aberto.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'gestao_cobrancas'},
   {route:'BillingSettings',title:'Configurar e enviar cobranças',description:'Regras de vencimento, multa, juros e emissão das cobranças mensais.',roles:['sindico','subsindico'],feature:'config_enviar_cobrancas'},
   {route:'UnitExtraCharges',title:'Cobranças adicionais',description:'Valores extraordinários por unidade, com parcelas e acompanhamento.',roles:['sindico','subsindico'],feature:'cobrancas_adicionais'},
+  {route:'UnitConsumption',title:'Consumo (água/gás/energia)',description:'Tarifas e lançamento mensal de consumo por unidade, somado ao boleto da taxa condominial.',roles:['sindico','subsindico'],feature:'consumo_individualizado'},
   {route:'Debts',title:'Gestão de débitos',description:'Consulta, negociação e acompanhamento dos débitos do condomínio.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'gestao_debitos'},
   {route:'AgreementHistory',title:'Histórico de acordos',description:'Acordos, parcelas e pagamentos organizados em um único histórico.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'historico_acordos'},
   {route:'Accountability',title:'Prestação de contas',description:'Receitas, despesas, relatórios mensais e comprovantes disponíveis com transparência.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'prestacao_contas'},
@@ -173,6 +176,7 @@ const BanksScreen = withResponsiveShell(BankIntegration, 'Banks');
 const BankIntegrationGuideScreen = withResponsiveShell(BankIntegrationGuide, 'BankIntegrationGuide');
 const UnitTypesScreen = withResponsiveShell(UnitTypes, 'UnitTypes');
 const UnitExtraChargesScreen = withResponsiveShell(UnitExtraCharges, 'UnitExtraCharges');
+const UnitConsumptionScreen = withResponsiveShell(UnitConsumption, 'UnitConsumption');
 const UnitsScreen = withResponsiveShell(Units, 'Units');
 const InvoicesScreen = withResponsiveShell(Invoices, 'Invoices');
 const BillingSettingsScreen = withResponsiveShell(BillingSettings, 'BillingSettings');
@@ -290,6 +294,7 @@ export default function AppNavigator() {
               <Stack.Screen name="BankIntegrationGuide" component={BankIntegrationGuideScreen} options={{ headerShown: false }} />
               <Stack.Screen name="UnitTypes" component={UnitTypesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="UnitExtraCharges" component={UnitExtraChargesScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="UnitConsumption" component={UnitConsumptionScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Units" component={UnitsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Invoices" component={InvoicesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="BillingSettings" component={BillingSettingsScreen} options={{ headerShown: false }} />

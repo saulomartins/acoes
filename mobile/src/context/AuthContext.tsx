@@ -39,7 +39,8 @@ export type FeatureKey =
   | 'gestao_cobrancas' | 'gestao_debitos' | 'historico_acordos'
   | 'config_enviar_cobrancas' | 'cobrancas_adicionais'
   | 'painel' | 'indicadores_boletos' | 'nada_consta'
-  | 'avisos_comunicacao' | 'relatos_solicitacoes' | 'enquetes' | 'reserva_espacos' | 'regimento_ocorrencias';
+  | 'avisos_comunicacao' | 'relatos_solicitacoes' | 'enquetes' | 'reserva_espacos' | 'regimento_ocorrencias'
+  | 'consumo_individualizado';
 
 type AuthContextType = {
   user: AuthUser | null;

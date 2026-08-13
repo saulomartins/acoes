@@ -54,6 +54,7 @@ const FEATURE_CATALOG: Record<FeatureKey, { label: string; dependsOn: FeatureKey
   painel: { label: 'Painel financeiro', dependsOn: ['gestao_cobrancas'] },
   indicadores_boletos: { label: 'Indicadores de boletos', dependsOn: ['gestao_cobrancas'] },
   nada_consta: { label: 'Nada consta (quitação)', dependsOn: ['gestao_cobrancas'] },
+  consumo_individualizado: { label: 'Cobrança por consumo (água/gás/energia)', dependsOn: ['config_enviar_cobrancas'] },
 };
 const FEATURE_LABELS: Record<FeatureKey, string> = Object.fromEntries(
   Object.entries(FEATURE_CATALOG).map(([key, value]) => [key, value.label]),

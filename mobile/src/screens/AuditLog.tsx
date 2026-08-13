@@ -12,7 +12,7 @@ type Condominium = { id: string; name: string; cnpj: string | null; address: str
 type AuditFeature =
   | 'pessoas' | 'tipologias' | 'blocos_unidades' | 'prestacao_contas'
   | 'gestao_cobrancas' | 'gestao_debitos' | 'historico_acordos'
-  | 'config_enviar_cobrancas' | 'cobrancas_adicionais'
+  | 'config_enviar_cobrancas' | 'cobrancas_adicionais' | 'consumo_individualizado'
   | 'regimento' | 'ocorrencias' | 'notificacoes_infracao';
 type AuditEntry = { id: string; actor_name: string; actor_role: string; feature: AuditFeature; action: string; description: string; created_at: string };
 
@@ -26,6 +26,7 @@ const featureLabel: Record<AuditFeature, string> = {
   historico_acordos: 'Histórico de acordos',
   config_enviar_cobrancas: 'Config. e Enviar cobranças',
   cobrancas_adicionais: 'Cobranças adicionais',
+  consumo_individualizado: 'Cobrança por consumo (água/gás/energia)',
   regimento: 'Regimento',
   ocorrencias: 'Ocorrências',
   notificacoes_infracao: 'Notificações de infração',

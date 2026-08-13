@@ -36,6 +36,7 @@ const todayIso = () => {
   return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
 };
 const formatDateBr = (iso: string) => `${iso.slice(8,10)}/${iso.slice(5,7)}/${iso.slice(0,4)}`;
+const moneyBRL = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const REQUIRED_BILLING_FIELDS: Array<{ key: string; label: string }> = [
   { key: 'full_name', label: 'nome completo' },
   { key: 'cpf', label: 'CPF' },
@@ -77,6 +78,43 @@ const extraChargesByUnit = async (unitIds: (string | null | undefined)[], refere
   }
   return map;
 };
+const UTILITY_LABEL: Record<string, string> = { agua: 'Água', gas: 'Gás', energia: 'Energia' };
+type ConsumptionItem = { utilityType: string; quantity: number; unitPriceCents: number; amountCents: number };
+type ConsumptionMapEntry = { sumCents: number; chargeIds: string[]; descriptions: string[]; items: ConsumptionItem[] };
+// Mesmo fallback do requireFeature: sem linha em condominium_features, a
+// feature conta como ativa (condomínio nunca configurado por lá). Exportada
+// porque invoiceRoutes também precisa gatear consumption_items da mesma forma.
+export const isConsumptionFeatureEnabled = async (condominiumId: string | null | undefined) => {
+  if (!condominiumId) return false;
+  const result = await query<{ enabled: boolean }>(`select consumo_individualizado as enabled from condominium_features where condominium_id=$1`, [condominiumId]);
+  return result.rows[0] ? result.rows[0].enabled : true;
+};
+// Espelha extraChargesByUnit, mas lê de unit_consumption_charges (módulo
+// "Cobrança por consumo", opcional por condomínio). Quando o condomínio não
+// tem a feature ligada, retorna sempre vazio — nem lançamentos antigos (de
+// quando a feature esteve ligada) voltam a ser cobrados ou exibidos.
+// `items` guarda cada tipo (água/gás/energia) separado — a soma/descrições
+// combinadas continuam existindo pra quem só precisa do total.
+const consumptionChargesByUnit = async (condominiumId: string | null | undefined, unitIds: (string | null | undefined)[], referenceMonthDate: string) => {
+  const map = new Map<string, ConsumptionMapEntry>();
+  const ids = [...new Set(unitIds.filter((id): id is string => Boolean(id)))];
+  if (!ids.length || !(await isConsumptionFeatureEnabled(condominiumId))) return map;
+  const rows = await query<{ unit_id: string; utility_type: string; id: string; amount_cents: number; quantity: number; unit_price_cents: number }>(
+    `select unit_id, utility_type, id, amount_cents, quantity, unit_price_cents
+     from unit_consumption_charges
+     where unit_id = any($1::uuid[]) and reference_month = $2::date and status = 'pending'`,
+    [ids, referenceMonthDate],
+  );
+  for (const row of rows.rows) {
+    const entry = map.get(row.unit_id) || { sumCents: 0, chargeIds: [], descriptions: [], items: [] };
+    entry.sumCents += Number(row.amount_cents);
+    entry.chargeIds.push(row.id);
+    entry.items.push({ utilityType: row.utility_type, quantity: Number(row.quantity), unitPriceCents: Number(row.unit_price_cents), amountCents: Number(row.amount_cents) });
+    entry.descriptions.push(UTILITY_LABEL[row.utility_type] || row.utility_type);
+    map.set(row.unit_id, entry);
+  }
+  return map;
+};
 router.use(authenticate, authorize('sindico', 'subsindico'), requireFeature('config_enviar_cobrancas'));
 
 router.get('/settings', asyncHandler(async (req, res) => {
@@ -98,23 +136,35 @@ router.put('/settings', asyncHandler(async (req, res) => {
     return res.status(400).json({ message: 'Os prazos devem estar entre 0 e 60 dias.' });
   }
   if (!body.receiveBoleto && !body.receivePix) return res.status(400).json({ message: 'Selecione boleto e/ou Pix.' });
+  const percentOrNull = (value: unknown, label: string) => {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) throw Object.assign(new Error(`${label} deve estar entre 0 e 100.`), { statusCode: 400 });
+    return parsed;
+  };
+  let condoFeePercent: number | null; let improvementFeePercent: number | null;
+  try {
+    condoFeePercent = percentOrNull(body.condoFeePercent, 'A taxa de condomínio');
+    improvementFeePercent = percentOrNull(body.improvementFeePercent, 'A taxa de melhoria');
+  } catch (error: any) { return res.status(error?.statusCode || 400).json({ message: error.message }); }
   const result = await query(
     `insert into billing_settings (condominium_id, description_template, receive_boleto, receive_pix,
        allow_after_due, days_after_due, fine_type, fine_value, interest_type, interest_value,
-       discount_type, discount_value, discount_days, updated_by, updated_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
+       discount_type, discount_value, discount_days, condo_fee_percent, improvement_fee_percent, updated_by, updated_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now())
      on conflict (condominium_id) do update set description_template=excluded.description_template,
        receive_boleto=excluded.receive_boleto, receive_pix=excluded.receive_pix,
        allow_after_due=excluded.allow_after_due, days_after_due=excluded.days_after_due,
        fine_type=excluded.fine_type, fine_value=excluded.fine_value,
        interest_type=excluded.interest_type, interest_value=excluded.interest_value,
        discount_type=excluded.discount_type, discount_value=excluded.discount_value,
-       discount_days=excluded.discount_days, updated_by=excluded.updated_by, updated_at=now()
+       discount_days=excluded.discount_days, condo_fee_percent=excluded.condo_fee_percent,
+       improvement_fee_percent=excluded.improvement_fee_percent, updated_by=excluded.updated_by, updated_at=now()
      returning *`,
-    [condominiumId, String(body.descriptionTemplate || 'Taxa condominial - {tipologia}'),
+    [condominiumId, String(body.descriptionTemplate ?? ''),
       Boolean(body.receiveBoleto), Boolean(body.receivePix), Boolean(body.allowAfterDue), daysAfterDue,
       body.fineType || 'NONE', Number(body.fineValue || 0), body.interestType || 'NONE', Number(body.interestValue || 0),
-      body.discountType || 'NONE', Number(body.discountValue || 0), discountDays, req.user?.id],
+      body.discountType || 'NONE', Number(body.discountValue || 0), discountDays, condoFeePercent, improvementFeePercent, req.user?.id],
   );
   await logAudit(req, 'config_enviar_cobrancas', 'updated', 'Atualizou a configuração de cobranças');
   return res.json({ settings: result.rows[0] });
@@ -144,14 +194,15 @@ router.post('/batches/preview', asyncHandler(async (req, res) => {
     [condominiumId, userIds, `${referenceMonth}-01`],
   );
   const extraMap = await extraChargesByUnit(result.rows.map(row => row.unit_id), `${referenceMonth}-01`);
-  const items = result.rows.map(row => {const dueDate=`${referenceMonth}-${String(row.preferred_due_day).padStart(2,'0')}`;const extra=row.unit_id?extraMap.get(row.unit_id):undefined;
+  const consumptionMap = await consumptionChargesByUnit(condominiumId, result.rows.map(row => row.unit_id), `${referenceMonth}-01`);
+  const items = result.rows.map(row => {const dueDate=`${referenceMonth}-${String(row.preferred_due_day).padStart(2,'0')}`;const extra=row.unit_id?extraMap.get(row.unit_id):undefined;const consumption=row.unit_id?consumptionMap.get(row.unit_id):undefined;
     const override=Number(amountOverrides[row.id]); const hasOverride=Number.isInteger(override)&&override>0;
-    const feeCents=hasOverride?override:Number(row.fee_cents||0)+(extra?.sumCents||0);
+    const feeCents=hasOverride?override:Number(row.fee_cents||0)+(extra?.sumCents||0)+(consumption?.sumCents||0);
     const missingFields=missingBillingFields(row,Boolean(hasOverride||row.fee_cents));
     // Duplicidade não bloqueia mais a validade: uma pessoa pode ter mais de um
     // boleto na mesma referência (ex.: cobrança extra). O front decide se pede
     // confirmação extra mostrando existingAmountCents/existingStatus.
-    return ({ ...row, extraChargeCents: extra?.sumCents||0, manualOverride: hasOverride,
+    return ({ ...row, extraChargeCents: extra?.sumCents||0, consumptionChargeCents: consumption?.sumCents||0, manualOverride: hasOverride,
     existingAmountCents: row.existing_amount_cents, existingStatus: row.existing_status,
     valid: Boolean(!missingFields.length && !row.billing_exempt && dueDate>=todayIso()),
     issues: [missingFields.length ? `Cadastro incompleto: falta preencher ${missingFields.join(', ')}` : null,
@@ -170,8 +221,10 @@ router.post('/batches', asyncHandler(async (req, res) => {
   if (!/^\d{4}-\d{2}$/.test(String(referenceMonth || '')) || !Array.isArray(userIds) || !userIds.length) {
     return res.status(400).json({ message: 'Informe mês de referência e pessoas.' });
   }
+  // Opcional: quando vazia, a observação do boleto usa só o padrão "Taxa
+  // condominial - {tipologia}" + o detalhamento de taxas/consumo (ver
+  // /batches/:id/issue) — não é mais obrigatório digitar algo aqui.
   const billingDescription=String(description||'').trim();
-  if(!billingDescription) return res.status(400).json({message:'Informe a descrição que será exibida no boleto.'});
   if(billingDescription.length>100) return res.status(400).json({message:'A descrição deve ter no máximo 100 caracteres.'});
   const condominium=await query<{name:string;cnpj:string|null}>(`select name,cnpj from condominiums where id=$1`,[condominiumId]);
   if(!condominium.rows[0]?.name||!condominium.rows[0]?.cnpj) return res.status(400).json({message:'Complete o nome e o CNPJ do condomínio antes de gerar boletos.'});
@@ -188,7 +241,8 @@ router.post('/batches', asyncHandler(async (req, res) => {
   const withoutAmount=people.rows.filter((person:any)=>!overrideFor(person.id)&&!person.fee_cents);
   if (withoutAmount.length) return res.status(400).json({ message: `${withoutAmount.map((p:any)=>p.full_name||p.username).join(', ')} sem valor de tipologia. Informe um valor manual ou complete o cadastro da unidade.` });
   const extraMap = await extraChargesByUnit(people.rows.map((p:any)=>p.unit_id), `${referenceMonth}-01`);
-  const amountFor=(person:any)=>overrideFor(person.id)??(Number(person.fee_cents||0)+(extraMap.get(person.unit_id)?.sumCents||0));
+  const consumptionMap = await consumptionChargesByUnit(condominiumId, people.rows.map((p:any)=>p.unit_id), `${referenceMonth}-01`);
+  const amountFor=(person:any)=>overrideFor(person.id)??(Number(person.fee_cents||0)+(extraMap.get(person.unit_id)?.sumCents||0)+(consumptionMap.get(person.unit_id)?.sumCents||0));
   const batch = await withTransaction(async client=>{
     const batchId=randomUUID(); const total=people.rows.reduce((sum:number,p:any)=>sum+amountFor(p),0);
     const created=await client.query(
@@ -352,12 +406,21 @@ router.get('/batches/:id/items', asyncHandler(async (req,res)=>{
      from billing_batch_items bi left join users u on u.id=bi.user_id left join units un on un.id=u.unit_id left join blocks blk on blk.id=un.block_id
      where bi.batch_id=$1 order by bi.source_row nulls last,bi.created_at`,[req.params.id]);
   const extraMap=batch.rows[0].reference_month?await extraChargesByUnit(items.rows.map((item:any)=>item.unit_id),interDate(batch.rows[0].reference_month)):new Map();
+  const consumptionMap=batch.rows[0].reference_month?await consumptionChargesByUnit(req.user?.condominiumId,items.rows.map((item:any)=>item.unit_id),interDate(batch.rows[0].reference_month)):new Map();
+  const feeSettings=await query<{condo_fee_percent:number|null;improvement_fee_percent:number|null}>(`select condo_fee_percent,improvement_fee_percent from billing_settings where condominium_id=$1`,[req.user?.condominiumId]);
+  const condoFeePercent=Number(feeSettings.rows[0]?.condo_fee_percent||0);
+  const improvementFeePercent=Number(feeSettings.rows[0]?.improvement_fee_percent||0);
   const itemsWithBreakdown=items.rows.map((item:any)=>{
     const hasOverride=Number.isInteger(item.amount_override_cents)&&item.amount_override_cents>0;
-    if(hasOverride) return {...item,manualOverride:true,extraChargeCents:0,extraChargeDescriptions:[],baseFeeCents:Number(item.amount_cents||0)};
+    if(hasOverride) return {...item,manualOverride:true,extraChargeCents:0,extraChargeDescriptions:[],consumptionChargeCents:0,consumptionItems:[],baseFeeCents:Number(item.amount_cents||0),condoFeeCents:null,improvementFeeCents:null};
     const extra=item.unit_id?extraMap.get(item.unit_id):undefined;
+    const consumption=item.unit_id?consumptionMap.get(item.unit_id):undefined;
     const extraCents=extra?.sumCents||0;
-    return {...item,manualOverride:false,extraChargeCents:extraCents,extraChargeDescriptions:extra?.descriptions||[],baseFeeCents:Number(item.amount_cents||0)-extraCents};
+    const consumptionCents=consumption?.sumCents||0;
+    const baseFeeCents=Number(item.amount_cents||0)-extraCents-consumptionCents;
+    const condoFeeCents=condoFeePercent>0?Math.round(baseFeeCents*condoFeePercent/100):null;
+    const improvementFeeCents=improvementFeePercent>0?Math.round(baseFeeCents*improvementFeePercent/100):null;
+    return {...item,manualOverride:false,extraChargeCents:extraCents,extraChargeDescriptions:extra?.descriptions||[],consumptionChargeCents:consumptionCents,consumptionChargeDescriptions:consumption?.descriptions||[],consumptionItems:consumption?.items||[],baseFeeCents,condoFeePercent:condoFeeCents!==null?condoFeePercent:null,condoFeeCents,improvementFeePercent:improvementFeeCents!==null?improvementFeePercent:null,improvementFeeCents};
   });
   return res.json({batch:batch.rows[0],items:itemsWithBreakdown});
 }));
@@ -381,7 +444,8 @@ router.post('/batches/:batchId/items', asyncHandler(async (req,res)=>{
   if(person.rows[0].duplicate) return res.status(409).json({message:'Esta pessoa já possui cobrança nesta referência.'});
   if(person.rows[0].already_in_batch) return res.status(409).json({message:'Esta pessoa já está neste lote.'});
   const extraMap=await extraChargesByUnit([person.rows[0].unit_id],referenceMonth);
-  const amountCents=Number(person.rows[0].fee_cents||0)+(extraMap.get(person.rows[0].unit_id)?.sumCents||0);
+  const consumptionMap=await consumptionChargesByUnit(condominiumId,[person.rows[0].unit_id],referenceMonth);
+  const amountCents=Number(person.rows[0].fee_cents||0)+(extraMap.get(person.rows[0].unit_id)?.sumCents||0)+(consumptionMap.get(person.rows[0].unit_id)?.sumCents||0);
   const dueDate=`${referenceMonth.slice(0,7)}-${String(person.rows[0].preferred_due_day).padStart(2,'0')}`;
   if(dueDate<todayIso()) return res.status(400).json({message:`O vencimento ${formatDateBr(dueDate)} já passou. Ajuste o dia preferido da pessoa antes de adicionar.`});
   const item=await withTransaction(async client=>{
@@ -449,19 +513,24 @@ router.post('/batches/:id/issue', asyncHandler(async (req,res)=>{
   if(!batch) return res.status(409).json({message:'O lote precisa estar confirmado antes do envio ao banco.'});
   const integration=await getInterIntegration(condominiumId!);
   if(!integration?.enabled) return res.status(400).json({message:'Integração Banco Inter não configurada ou desabilitada.'});
+  const feeSettings=await query<{condo_fee_percent:number|null;improvement_fee_percent:number|null}>(`select condo_fee_percent,improvement_fee_percent from billing_settings where condominium_id=$1`,[condominiumId]);
+  const condoFeePercent=Number(feeSettings.rows[0]?.condo_fee_percent||0);
+  const improvementFeePercent=Number(feeSettings.rows[0]?.improvement_fee_percent||0);
   const items=await query<any>(
     `select bi.*,u.full_name,u.username,u.cpf,u.email,u.phone,u.street,u.address_number,u.address_complement,u.neighborhood,u.city,u.state,u.postal_code,u.unit,un.id unit_id,
             ut.name unit_type_name,ut.fee_cents
      from billing_batch_items bi join users u on u.id=bi.user_id left join units un on un.id=u.unit_id left join unit_types ut on ut.id=un.unit_type_id
      where bi.batch_id=$1 and bi.status in ('confirmed','failed') order by bi.created_at`,[batch.id]);
   const extraMap=await extraChargesByUnit(items.rows.map((item:any)=>item.unit_id),batch.reference_month);
+  const consumptionMap=await consumptionChargesByUnit(condominiumId,items.rows.map((item:any)=>item.unit_id),batch.reference_month);
   await query(`update billing_batches set status='processing' where id=$1`,[batch.id]);
   let issued=0;let failed=0;const failures:Array<{payerName:string;reason:string}>=[];
   for(const item of items.rows){
     let reservationKey:string|null=null;
     const extra=item.unit_id?extraMap.get(item.unit_id):undefined;
+    const consumption=item.unit_id?consumptionMap.get(item.unit_id):undefined;
     const hasOverride=Number.isInteger(item.amount_override_cents)&&item.amount_override_cents>0;
-    const amountCents=hasOverride?item.amount_override_cents:Number(item.fee_cents||0)+(extra?.sumCents||0);
+    const amountCents=hasOverride?item.amount_override_cents:Number(item.fee_cents||0)+(extra?.sumCents||0)+(consumption?.sumCents||0);
     try{
       const missingFieldsMessage=missingBillingFieldsMessage(item,Boolean(amountCents));
       if(missingFieldsMessage) throw new Error(missingFieldsMessage);
@@ -479,12 +548,38 @@ router.post('/batches/:id/issue', asyncHandler(async (req,res)=>{
       if(!reservation.rows[0]) throw new Error('Já existe uma emissão em andamento para este CPF. Aguarde alguns instantes e tente novamente.');
       const dueDate=interDate(item.due_date);
       if(dueDate<todayIso()) throw new Error(`O vencimento ${formatDateBr(dueDate)} já passou. Escolha um vencimento igual ou posterior a ${formatDateBr(todayIso())}.`);
-      const description=(batch.description||`Taxa condominial - ${item.unit_type_name||item.unit}`)+(!hasOverride&&extra?.descriptions.length?` + ${extra.descriptions.join(', ')}`:'');
+      // O detalhamento de Taxa de condomínio/Taxa de melhoria decompõe só a
+      // tipologia (item.fee_cents) — override manual fica de fora (o valor
+      // manual substitui o cálculo padrão por completo).
+      const feeCents=Number(item.fee_cents||0);
+      const condoBaseFeeCents=!hasOverride?feeCents:null;
+      const condoFeeCents=!hasOverride&&condoFeePercent>0?Math.round(feeCents*condoFeePercent/100):null;
+      const improvementFeeCents=!hasOverride&&improvementFeePercent>0?Math.round(feeCents*improvementFeePercent/100):null;
+      // Não usa mais a tipologia da unidade (ex.: "AREA COMUM") na observação
+      // — só o que o síndico digitou (se digitou algo) + o detalhamento.
+      const tipologiaLabel=item.unit_type_name||item.unit||'';
+      const baseDescription=(batch.description||'').replace('{tipologia}',tipologiaLabel).trim();
+      // A observação sempre traz: o que o síndico digitou (se houver) + Tx
+      // cond./Tx Melhoria (quando configuradas) + cobranças adicionais e
+      // consumo (quando existirem no mês), sempre com valor — não depende
+      // de nenhuma escolha na hora de emitir. O campo do Banco Inter
+      // (mensagem.linha1) aceita só 78 caracteres, então o formato é
+      // abreviado e createInterBoleto ainda corta em 78 como rede de
+      // segurança se a soma de tudo passar do previsto (prioridade: o texto
+      // digitado primeiro, detalhamento de taxas depois).
+      const breakdownParts=!hasOverride?[
+        condoFeeCents!==null?`Tx cond. ${condoFeePercent}%:${moneyBRL(condoFeeCents)}`:null,
+        improvementFeeCents!==null?`Tx Melhoria ${improvementFeePercent}%:${moneyBRL(improvementFeeCents)}`:null,
+        extra?.descriptions.length?`${extra.descriptions.join('/')}:${moneyBRL(extra.sumCents)}`:null,
+        consumption?.descriptions.length?`${consumption.descriptions.join('/')}:${moneyBRL(consumption.sumCents)}`:null,
+      ].filter((part):part is string=>Boolean(part)):[];
+      const description=[baseDescription,...breakdownParts].filter(Boolean).join('+')||'Taxa condominial';
       const boleto=await createInterBoleto({payerName:item.full_name,payerDocument:item.cpf,amountCents,dueDate,description,payerEmail:item.email,payerPhone:item.phone,payerStreet:item.street,payerNumber:item.address_number,payerComplement:item.address_complement,payerNeighborhood:item.neighborhood,payerCity:item.city,payerState:item.state,payerPostalCode:item.postal_code,payerUnit:item.unit},integration);
-      const invoice=await query<any>(`insert into invoices(id,condominium_id,user_id,amount_cents,due_date,reference_month,batch_id,status,provider,external_id,digitable_line,pdf_url) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,[randomUUID(),condominiumId,item.user_id,amountCents,item.due_date,batch.reference_month,batch.id,boleto.status==='issued'?'issued':'pending_provider',boleto.provider,boleto.externalId,boleto.digitableLine,boleto.pdfUrl]);
+      const invoice=await query<any>(`insert into invoices(id,condominium_id,user_id,amount_cents,due_date,reference_month,batch_id,status,provider,external_id,digitable_line,pdf_url,condo_fee_percent,condo_fee_cents,improvement_fee_percent,improvement_fee_cents,condo_base_fee_cents) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) returning id`,[randomUUID(),condominiumId,item.user_id,amountCents,item.due_date,batch.reference_month,batch.id,boleto.status==='issued'?'issued':'pending_provider',boleto.provider,boleto.externalId,boleto.digitableLine,boleto.pdfUrl,condoFeeCents!==null?condoFeePercent:null,condoFeeCents,improvementFeeCents!==null?improvementFeePercent:null,improvementFeeCents,condoBaseFeeCents]);
       await query(`update billing_batch_items set status='issued',invoice_id=$1,amount_cents=$2,issues='[]'::jsonb where id=$3`,[invoice.rows[0].id,amountCents,item.id]);
       await query(`update inter_issuance_guards set invoice_id=$1,reservation_key=null where payer_cpf=$2 and reservation_key=$3`,[invoice.rows[0].id,payerCpf,reservationKey]);
       if(!hasOverride&&extra?.installmentIds.length) await query(`update unit_extra_charge_installments set status='applied',invoice_id=$1,applied_at=now() where id=any($2::uuid[])`,[invoice.rows[0].id,extra.installmentIds]);
+      if(!hasOverride&&consumption?.chargeIds.length) await query(`update unit_consumption_charges set status='applied',invoice_id=$1,applied_at=now() where id=any($2::uuid[])`,[invoice.rows[0].id,consumption.chargeIds]);
       await notifyNewInvoice({id:invoice.rows[0].id,condominiumId:condominiumId!,userId:item.user_id,amountCents,dueDate:item.due_date});
       issued+=1;
     }catch(error:any){failed+=1;if(reservationKey)await query(`delete from inter_issuance_guards where payer_cpf=$1 and reservation_key=$2 and invoice_id is null`,[String(item.cpf).replace(/\D/g,''),reservationKey]);const reason=issuanceErrorMessage(error);console.error('Falha na emissão do item do lote',{batchId:batch.id,itemId:item.id,code:error?.code||null,reason});failures.push({payerName:item.full_name||item.username||item.payer_name,reason});await query(`update billing_batch_items set status='failed',issues=$1 where id=$2`,[JSON.stringify([reason]),item.id]);}

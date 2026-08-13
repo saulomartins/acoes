@@ -11,6 +11,7 @@ export type AuditFeature =
   | 'historico_acordos'
   | 'config_enviar_cobrancas'
   | 'cobrancas_adicionais'
+  | 'consumo_individualizado'
   | 'enquetes'
   | 'reserva_espacos'
   | 'regimento'

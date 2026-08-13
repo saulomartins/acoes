@@ -453,6 +453,19 @@ alter table invoices add column if not exists deleted_at timestamptz;
 alter table invoices add column if not exists deleted_by uuid references users(id) on delete set null;
 alter table invoices add column if not exists deletion_reason text;
 
+-- Snapshot do detalhamento Taxa de condomínio/Taxa de melhoria calculado no
+-- momento da emissão (a partir de billing_settings.condo_fee_percent /
+-- improvement_fee_percent), para o card de Gestão de cobranças não depender de
+-- reconsultar a configuração atual, que pode mudar depois.
+alter table invoices add column if not exists condo_fee_percent numeric(5,2);
+alter table invoices add column if not exists condo_fee_cents integer;
+alter table invoices add column if not exists improvement_fee_percent numeric(5,2);
+alter table invoices add column if not exists improvement_fee_cents integer;
+-- Valor da tipologia (antes de cobranças adicionais/unit_extra_charges), para o
+-- card de Gestão de cobranças poder mostrar "Valor condomínio" + "Valor
+-- adicional" separados, independente de haver detalhamento percentual configurado.
+alter table invoices add column if not exists condo_base_fee_cents integer;
+
 alter table debt_agreements add column if not exists deleted_at timestamptz;
 alter table debt_agreements add column if not exists deleted_by uuid references users(id) on delete set null;
 
@@ -493,6 +506,14 @@ create table if not exists billing_settings (
   updated_by uuid references users(id) on delete set null,
   updated_at timestamptz not null default now()
 );
+
+-- Percentuais opcionais para decompor visualmente o valor da tipologia em
+-- "Taxa de condomínio" + "Taxa de melhoria" nos boletos e no card de Gestão de
+-- cobranças. Nunca são enviados ao Banco Inter como campo estruturado — no
+-- máximo entram como texto na observação do boleto, por escolha do síndico a
+-- cada emissão.
+alter table billing_settings add column if not exists condo_fee_percent numeric(5,2);
+alter table billing_settings add column if not exists improvement_fee_percent numeric(5,2);
 
 create table if not exists billing_batches (
   id uuid primary key default gen_random_uuid(),
@@ -958,6 +979,47 @@ create index if not exists unit_extra_charges_unit_idx on unit_extra_charges(uni
 -- aquele boleto — é o valor que efetivamente vai para o banco.
 alter table billing_batch_items add column if not exists amount_override_cents integer;
 
+-- Cobrança por consumo (água/gás/energia) — módulo opcional, ligado por
+-- condomínio via condominium_features.consumo_individualizado. Diferente de
+-- unit_extra_charges (valor fixo, N parcelas fixas), aqui o valor é
+-- recalculado todo mês a partir da quantidade consumida informada pelo
+-- síndico, então não há "número de parcelas" — é recorrente enquanto o
+-- síndico continuar lançando.
+create table if not exists condominium_utility_rates (
+  condominium_id uuid not null references condominiums(id) on delete cascade,
+  utility_type text not null check (utility_type in ('agua','gas','energia')),
+  unit_price_cents integer not null check (unit_price_cents >= 0),
+  updated_by uuid references users(id) on delete set null,
+  updated_at timestamptz not null default now(),
+  primary key (condominium_id, utility_type)
+);
+
+-- Um lançamento por unidade/tipo/mês. unit_price_cents fica congelado no
+-- momento do lançamento (não muda retroativamente se a tarifa for
+-- atualizada depois). Ciclo de vida do status espelha
+-- unit_extra_charge_installments: pending -> applied quando entra num
+-- boleto emitido (invoice_id/applied_at preenchidos).
+create table if not exists unit_consumption_charges (
+  id uuid primary key default gen_random_uuid(),
+  condominium_id uuid not null references condominiums(id) on delete cascade,
+  unit_id uuid not null references units(id) on delete cascade,
+  utility_type text not null check (utility_type in ('agua','gas','energia')),
+  reference_month date not null,
+  quantity numeric(12,3) not null check (quantity >= 0),
+  unit_price_cents integer not null,
+  amount_cents integer not null,
+  status text not null default 'pending' check (status in ('pending','applied','canceled')),
+  invoice_id uuid references invoices(id) on delete set null,
+  applied_at timestamptz,
+  created_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (unit_id, utility_type, reference_month)
+);
+create index if not exists unit_consumption_charges_condo_reference_idx
+  on unit_consumption_charges(condominium_id, reference_month);
+create index if not exists unit_consumption_charges_lookup_idx
+  on unit_consumption_charges(reference_month, status) where status = 'pending';
+
 -- Log de auditoria de ações de síndico/subsíndico, visível só para
 -- admin_geral, navegável por condomínio. actor_role/actor_name ficam
 -- congelados no momento da ação (não via join), para o registro
@@ -971,7 +1033,7 @@ create table if not exists audit_log (
   feature text not null check (feature in (
     'pessoas','tipologias','blocos_unidades','prestacao_contas',
     'gestao_cobrancas','gestao_debitos','historico_acordos',
-    'config_enviar_cobrancas','cobrancas_adicionais',
+    'config_enviar_cobrancas','cobrancas_adicionais','consumo_individualizado',
     'enquetes','reserva_espacos',
     'regimento','ocorrencias','notificacoes_infracao'
   )),
@@ -991,7 +1053,7 @@ alter table audit_log drop constraint if exists audit_log_feature_check;
 alter table audit_log add constraint audit_log_feature_check check (feature in (
   'pessoas','tipologias','blocos_unidades','prestacao_contas',
   'gestao_cobrancas','gestao_debitos','historico_acordos',
-  'config_enviar_cobrancas','cobrancas_adicionais',
+  'config_enviar_cobrancas','cobrancas_adicionais','consumo_individualizado',
   'enquetes','reserva_espacos',
   'regimento','ocorrencias','notificacoes_infracao'
 ));
@@ -1161,6 +1223,11 @@ alter table condominium_features alter column reserva_espacos set default false;
 alter table condominium_features add column if not exists painel boolean not null default true;
 alter table condominium_features add column if not exists indicadores_boletos boolean not null default true;
 alter table condominium_features add column if not exists nada_consta boolean not null default true;
+-- Cobrança por consumo é um módulo novo e opcional: default false preserva o
+-- comportamento de 100% dos condomínios existentes (inclusive os sem linha
+-- nesta tabela, que resolvem features ausentes como "ativo" — aqui o default
+-- da coluna evita isso).
+alter table condominium_features add column if not exists consumo_individualizado boolean not null default false;
 
 -- Nada consta / Declaração de quitação condominial.
 --

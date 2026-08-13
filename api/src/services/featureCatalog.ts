@@ -20,7 +20,8 @@ export type FeatureKey =
   | 'relatos_solicitacoes'
   | 'enquetes'
   | 'reserva_espacos'
-  | 'regimento_ocorrencias';
+  | 'regimento_ocorrencias'
+  | 'consumo_individualizado';
 
 export const FEATURE_CATALOG: Record<FeatureKey, { label: string; dependsOn: FeatureKey[] }> = {
   pessoas: { label: 'Pessoas', dependsOn: [] },
@@ -32,6 +33,10 @@ export const FEATURE_CATALOG: Record<FeatureKey, { label: string; dependsOn: Fea
   historico_acordos: { label: 'Histórico de acordos', dependsOn: ['gestao_debitos'] },
   config_enviar_cobrancas: { label: 'Config. e enviar cobranças', dependsOn: ['gestao_cobrancas'] },
   cobrancas_adicionais: { label: 'Cobranças adicionais', dependsOn: ['config_enviar_cobrancas'] },
+  // Desligada por padrão mesmo para condomínios novos: cobrança fixa por
+  // tipologia continua sendo o padrão, e este módulo só soma consumo em cima
+  // dela quando o admin_geral ligar explicitamente para aquele condomínio.
+  consumo_individualizado: { label: 'Cobrança por consumo (água/gás/energia)', dependsOn: ['config_enviar_cobrancas'] },
   // Painéis de leitura: só somam os boletos já existentes, então não fazem
   // sentido sem Gestão de cobranças ligada.
   painel: { label: 'Painel financeiro', dependsOn: ['gestao_cobrancas'] },
@@ -72,6 +77,7 @@ export const NEW_CONDOMINIUM_FEATURE_DEFAULTS: Record<FeatureKey, boolean> = {
   historico_acordos: false,
   cobrancas_adicionais: false,
   regimento_ocorrencias: false,
+  consumo_individualizado: false,
 };
 
 export const isFeatureKey = (value: unknown): value is FeatureKey =>

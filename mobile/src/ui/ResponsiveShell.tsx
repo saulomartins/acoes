@@ -41,6 +41,7 @@ const items: Item[] = [
   { label: 'Histórico de acordos', route: 'AgreementHistory', symbol: '📋', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'historico_acordos' },
   { label: 'Config. e Enviar cobranças', route: 'BillingSettings', symbol: '⚙', roles: ['sindico', 'subsindico'], feature: 'config_enviar_cobrancas' },
   { label: 'Cobranças adicionais', route: 'UnitExtraCharges', symbol: '➕', roles: ['sindico', 'subsindico'], feature: 'cobrancas_adicionais' },
+  { label: 'Consumo (água/gás/energia)', route: 'UnitConsumption', symbol: '💧', roles: ['sindico', 'subsindico'], feature: 'consumo_individualizado' },
   // Regimento e ocorrências são de UM condomínio: as regras, os artigos e as
   // notificações pertencem à gestão local, e admin_geral não tem condomínio
   // (condominium_id nulo). Por isso ele fica de fora — o catálogo de rotas em
@@ -53,10 +54,12 @@ const items: Item[] = [
 ];
 
 const roleLabels: Record<string, string> = { admin_geral: 'Administrador geral', sindico: 'Síndico', subsindico: 'Subsíndico', proprietario: 'Proprietário', inquilino: 'Inquilino' };
-const billingRoutes = ['Invoices', 'Debts', 'AgreementHistory', 'BillingSettings', 'UnitExtraCharges'];
+const billingRoutes = ['Invoices', 'Debts', 'AgreementHistory', 'BillingSettings', 'UnitExtraCharges', 'UnitConsumption'];
 const noticeRoutes = ['Communications', 'Reports'];
 const bankRoutes = ['Banks', 'BankConfigurations', 'BankLink', 'BankIntegration', 'BankIntegrationGuide'];
 const regulationRoutes = ['RegulationArticles', 'Occurrences', 'InfractionNoticeIssue', 'InfractionNotices'];
+const participationRoutes = ['Polls', 'SpaceReservations'];
+const platformRoutes = ['Condominiums', 'PlatformPlans', 'PlatformRevenue', 'AuditLog'];
 
 export default function ResponsiveShell({ activeRoute, navigation, children }: { activeRoute: string; navigation: any; children: React.ReactNode }) {
   const { atLeastTablet: desktop, isDesktop: isWide, isTablet } = useBreakpoint();
@@ -87,19 +90,25 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
   // condominiumFeatures === null (admin_geral ou ainda carregando) nunca
   // esconde nada por funcionalidade, só o papel filtra nesse caso.
   const visible = items.filter((item) => item.roles.includes(user?.role || '') && (!item.feature || user?.role === 'admin_geral' || condominiumFeatures?.[item.feature] === true));
-  const mainItems = visible.filter((item) => !billingRoutes.includes(item.route) && !noticeRoutes.includes(item.route) && !bankRoutes.includes(item.route) && !regulationRoutes.includes(item.route));
+  const mainItems = visible.filter((item) => !billingRoutes.includes(item.route) && !noticeRoutes.includes(item.route) && !bankRoutes.includes(item.route) && !regulationRoutes.includes(item.route) && !participationRoutes.includes(item.route) && !platformRoutes.includes(item.route));
   const bankItems = visible.filter((item) => bankRoutes.includes(item.route));
   const billingItems = visible.filter((item) => billingRoutes.includes(item.route));
   const noticeItems = visible.filter((item) => noticeRoutes.includes(item.route)).sort((a, b) => noticeRoutes.indexOf(a.route) - noticeRoutes.indexOf(b.route));
   const regulationItems = visible.filter((item) => regulationRoutes.includes(item.route)).sort((a, b) => regulationRoutes.indexOf(a.route) - regulationRoutes.indexOf(b.route));
+  const participationItems = visible.filter((item) => participationRoutes.includes(item.route)).sort((a, b) => participationRoutes.indexOf(a.route) - participationRoutes.indexOf(b.route));
+  const platformItems = visible.filter((item) => platformRoutes.includes(item.route)).sort((a, b) => platformRoutes.indexOf(a.route) - platformRoutes.indexOf(b.route));
   const billingActive = billingRoutes.includes(activeRoute);
   const noticeActive = noticeRoutes.includes(activeRoute);
   const bankActive = bankRoutes.includes(activeRoute);
   const regulationActive = regulationRoutes.includes(activeRoute);
+  const participationActive = participationRoutes.includes(activeRoute);
+  const platformActive = platformRoutes.includes(activeRoute);
   const [billingOpen, setBillingOpen] = useState(billingActive);
   const [noticeOpen, setNoticeOpen] = useState(noticeActive);
   const [bankOpen, setBankOpen] = useState(bankActive);
   const [regulationOpen, setRegulationOpen] = useState(regulationActive);
+  const [participationOpen, setParticipationOpen] = useState(participationActive);
+  const [platformOpen, setPlatformOpen] = useState(platformActive);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
   const initials = (user?.username || 'U').slice(0, 2).toUpperCase();
@@ -122,6 +131,8 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
   }, [noticeActive]);
   useEffect(() => { setBankOpen(bankActive); }, [bankActive]);
   useEffect(() => { setRegulationOpen(regulationActive); }, [regulationActive]);
+  useEffect(() => { setParticipationOpen(participationActive); }, [participationActive]);
+  useEffect(() => { setPlatformOpen(platformActive); }, [platformActive]);
 
   useEffect(() => {
     setCondominiumName(user?.condominiumName || '');
@@ -320,6 +331,66 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                     {regulationOpen && (
                       <View style={styles.subnav}>
                         {regulationItems.map((item) => (
+                          <Pressable
+                            key={item.route}
+                            style={[styles.subnavItem, activeRoute === item.route && styles.subnavItemActive]}
+                            onPress={() => navigation.navigate(item.route)}
+                          >
+                            <View style={[styles.subnavDot, activeRoute === item.route && styles.subnavDotActive]} />
+                            <Text style={styles.subnavText}>{item.label}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                </>
+              )}
+
+              {participationItems.length > 0 && (
+                <>
+                  <Text style={[styles.navLabel, { marginTop: 28 }]}>PARTICIPAÇÃO</Text>
+                  <View style={styles.navList}>
+                    <Pressable
+                      style={[styles.navItem, participationActive && styles.navItemActive]}
+                      onPress={() => setParticipationOpen(!participationOpen)}
+                    >
+                      <Text style={styles.navSymbol}>✓</Text>
+                      <Text style={[styles.navText, participationActive && styles.navActive]}>Participação</Text>
+                      <Text style={styles.navChevron}>{participationOpen ? '⌃' : '⌄'}</Text>
+                    </Pressable>
+                    {participationOpen && (
+                      <View style={styles.subnav}>
+                        {participationItems.map((item) => (
+                          <Pressable
+                            key={item.route}
+                            style={[styles.subnavItem, activeRoute === item.route && styles.subnavItemActive]}
+                            onPress={() => navigation.navigate(item.route)}
+                          >
+                            <View style={[styles.subnavDot, activeRoute === item.route && styles.subnavDotActive]} />
+                            <Text style={styles.subnavText}>{item.label}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                </>
+              )}
+
+              {platformItems.length > 0 && (
+                <>
+                  <Text style={[styles.navLabel, { marginTop: 28 }]}>PLATAFORMA</Text>
+                  <View style={styles.navList}>
+                    <Pressable
+                      style={[styles.navItem, platformActive && styles.navItemActive]}
+                      onPress={() => setPlatformOpen(!platformOpen)}
+                    >
+                      <Text style={styles.navSymbol}>▦</Text>
+                      <Text style={[styles.navText, platformActive && styles.navActive]}>Plataforma</Text>
+                      <Text style={styles.navChevron}>{platformOpen ? '⌃' : '⌄'}</Text>
+                    </Pressable>
+                    {platformOpen && (
+                      <View style={styles.subnav}>
+                        {platformItems.map((item) => (
                           <Pressable
                             key={item.route}
                             style={[styles.subnavItem, activeRoute === item.route && styles.subnavItemActive]}
