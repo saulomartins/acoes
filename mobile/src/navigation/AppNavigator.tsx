@@ -226,7 +226,16 @@ export default function AppNavigator() {
 
   useEffect(()=>subscribeSystemTour(startTour),[startTour]);
   useEffect(()=>{if(!userToken)autoTourStarted.current=false;},[userToken]);
-  useEffect(()=>{if(!userToken||!user||user.mustChangePassword||user.termsAcceptedVersion!=='2026-08-04'||user.tourCompletedVersion===CURRENT_TOUR_VERSION||autoTourStarted.current)return;if(!['sindico','subsindico','proprietario','inquilino'].includes(user.role))return;autoTourStarted.current=true;const timer=setTimeout(startTour,500);return()=>clearTimeout(timer);},[startTour,user,userToken]);
+  // O tour só pode começar depois que a navegação principal existe. Cada passo
+  // faz navigationRef.navigate(step.route), e enquanto uma tela de bloqueio
+  // está no ar (trocar senha, aceitar termos, escolher perfil) o Stack só tem
+  // aquela tela — o navigate não acha a rota e o tour aparecia sobreposto,
+  // apontando para telas que não estão montadas. Foi o que acontecia com quem
+  // tem mais de um perfil: o tour abria por cima de "Entrar como".
+  // needsProfileSelection está nas dependências de propósito, para o tour
+  // disparar sozinho assim que o perfil for escolhido; autoTourStarted só é
+  // marcado quando o tour realmente começa, então nada é perdido no caminho.
+  useEffect(()=>{if(!userToken||!user||user.mustChangePassword||needsProfileSelection||user.termsAcceptedVersion!==CURRENT_TERMS_VERSION||user.tourCompletedVersion===CURRENT_TOUR_VERSION||autoTourStarted.current)return;if(!['sindico','subsindico','proprietario','inquilino'].includes(user.role))return;autoTourStarted.current=true;const timer=setTimeout(startTour,500);return()=>clearTimeout(timer);},[startTour,user,userToken,needsProfileSelection]);
 
   useEffect(() => {
     const receivedSubscription = Notifications.addNotificationReceivedListener((event) => {

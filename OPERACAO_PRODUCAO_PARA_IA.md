@@ -508,3 +508,83 @@ acentuado ocupa 2 bytes e `.` casa 1 byte só. Ao validar um bundle, procurar
 por um trecho **sem acento** da frase, por exemplo
 `grep -c 'confirmou o registro deste boleto'` em vez de
 `grep -c 'ainda n.o confirmou'`.
+
+## Publicação 1.2.9 de 13/08/2026
+
+Origem: conciliação dos boletos do condomínio Templum contra o relatório do
+Banco Inter do período 01/01/2026 a 13/08/2026. Dos 268 boletos do relatório,
+259 casaram com a base; as divergências viraram as correções desta versão.
+
+- API: deployment Railway `c5fa59e1-474e-4e81-a947-c6ba702b0795`, status
+  `SUCCESS`; health HTTP 200.
+- Banco: `dist/scripts/setupDatabase.js` executado dentro do contêiner
+  (`schema.sql` copiado para `dist/db` antes, como manda a seção 3).
+  Resultado `Schema applied successfully`. Diff de +69 linhas; o único `drop`
+  era da constraint `invoice_adjustments_type_check`, recriada na linha
+  seguinte com dois valores a mais. Nada destrutivo.
+- Web: deployment Cloudflare `e5047592.lar-em-dia.pages.dev`; domínio
+  `gestaolaremdia.com` HTTP 200 servindo o bundle
+  `AppEntry-2be84c391a9eda3e86cb7ea5a55d2048.js`, idêntico ao gerado no build
+  local. Conferido antes de publicar: contém
+  `acoes-production.up.railway.app`, nenhuma ocorrência de `localhost:3000`,
+  e os textos novos das quatro frentes.
+- Smoke test: `POST /auth/login` em produção com usuário inexistente devolveu
+  HTTP 401 (não 500) e `access-control-allow-origin: https://gestaolaremdia.com`.
+- Android: versão `1.2.9`, versionCode `21`, build EAS
+  `a85d1f43-fe81-40e0-9fd0-0e41923f2511`, perfil `production-apk`.
+
+### O que mudou
+
+- **Boleto EXPIRADO deixou de ser exibido como "Vencido".** `INTER_STATUS_MAP`
+  mapeia `EXPIRADO` para `overdue`, e o morador via "pague este boleto" num
+  boleto que o Inter não aceita mais receber. A nova coluna
+  `invoices.provider_situation` guarda a situação crua do banco e a tela passa
+  a rotular por ela. O backfill promoveu a situação que já estava em
+  `invoice_events`: em produção, 19 boletos `EXPIRADO`, 22 `RECEBIDO`,
+  13 `A_RECEBER`, 8 `CANCELADO`, 3 `ATRASADO`, 1 `EM_PROCESSAMENTO` e
+  1 `FALHA_EMISSAO`.
+- **Retirar boleto da dívida, com justificativa obrigatória.**
+  `PATCH /invoices/:id/debt-exclusion` (síndico/subsíndico). Um boleto
+  expirado pode ter a dívida já quitada por um boleto posterior que
+  consolidou o débito — caso real observado: um morador com quatro boletos
+  expirados consolidados num quinto de R$ 1.055,52, pago via Pix, continuava
+  aparecendo com R$ 1.537,14 em atraso. A retirada sai de Gestão de débitos,
+  do painel e dos indicadores, é reversível e grava em `invoice_adjustments`.
+- **Boletos do banco sem morador vinculado viraram pendência fixa.** A lista
+  já era detectada em `importCharges`, mas só aparecia numa mensagem
+  passageira do sync-all — na prática ninguém via. Agora persiste em
+  `bank_unmatched_charges` e aparece em Gestão de cobranças. Em Templum eram
+  8 boletos (R$ 2.182,40) de três pessoas sem cadastro no condomínio.
+- **`pending_provider` não vira mais `overdue`.** `transitionOverdueInvoices`
+  marcava como vencido um boleto que o banco ainda não confirmou — sem linha
+  digitável nem Pix, o morador não teria como pagar, e ainda recebia push de
+  cobrança. Agora só `issued` transiciona.
+- **`importCharges` grava `invoice_events`.** Havia 214 boletos pagos sem
+  nenhum evento, o que destruía a trilha de conciliação contra o extrato.
+- **Gestão de débitos:** filtro por apartamento ou morador (ignora acento),
+  chip "somente com débito em aberto", e separação visual entre os cards, que
+  antes ficavam colados por falta de `gap` no container.
+- **Tour guiado:** deixou de abrir por cima da tela "Entrar como". O efeito de
+  autostart não checava `needsProfileSelection`, e como o Stack só monta
+  aquela tela, cada passo navegava para uma rota inexistente.
+
+### Guia de expansão bancária atualizado
+
+O que foi construído aqui é **parcialmente** agnóstico a banco, e isso está
+registrado na tela do admin geral:
+
+- Agnóstico e reaproveitável: a retirada da dívida (vive em colunas da
+  fatura, não consulta provedor), a garantia de que nenhuma rotina que fala
+  com o banco escreve nessas colunas, e `bank_unmatched_charges`.
+- Preso ao Inter: a detecção de "expirado" compara `provider_situation` com a
+  palavra `EXPIRADO`, que é vocabulário do Inter. Em outro banco a mesma
+  condição tem outro nome e o boleto impagável voltaria a aparecer como
+  "Vencido", inclusive oferecendo pagar via Pix. Precisa virar um mapa por
+  provedor antes do segundo banco entrar.
+
+### Limitação conhecida desta revisão
+
+`GET /invoices` re-sincroniza com o Inter todo boleto em aberto a cada
+carregamento da tela. Alguns boletos já acumulavam mais de 120 eventos de
+sync. É uma chamada à API do banco por boleto por abertura de tela; não foi
+tratado aqui e merece tarefa própria.

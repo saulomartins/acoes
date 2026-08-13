@@ -466,6 +466,68 @@ alter table invoices add column if not exists improvement_fee_cents integer;
 -- adicional" separados, independente de haver detalhamento percentual configurado.
 alter table invoices add column if not exists condo_base_fee_cents integer;
 
+-- Última situação crua devolvida pelo Banco Inter (A_RECEBER, ATRASADO,
+-- EXPIRADO, EM_PROCESSAMENTO, ...). invoice_status é grosso demais para a tela:
+-- EXPIRADO e ATRASADO viram os dois 'overdue', e o morador acabava vendo
+-- "Vencido — pague este boleto" num boleto que o banco não aceita mais receber.
+-- Guardar a situação original permite rotular corretamente sem inflar o enum,
+-- que é usado em filtros e queries em toda a base.
+alter table invoices add column if not exists provider_situation text;
+alter table invoices add column if not exists provider_situation_at timestamptz;
+
+-- Retirada manual da dívida (Gestão de cobranças). Um boleto EXPIRADO no banco
+-- é impagável, mas a dívida por trás pode continuar existindo (o morador
+-- simplesmente não pagou) ou já ter sido quitada por um boleto posterior que
+-- consolidou o débito. O sistema não tem como distinguir os dois casos, então
+-- quem decide é o síndico: ele retira o boleto da dívida com uma justificativa
+-- obrigatória, e isso passa a valer em Gestão de débitos, no painel e nos
+-- indicadores. O boleto continua visível e o registro é reversível — nada é
+-- apagado, só deixa de contar como valor a receber.
+alter table invoices add column if not exists debt_excluded_at timestamptz;
+alter table invoices add column if not exists debt_excluded_by uuid references users(id) on delete set null;
+alter table invoices add column if not exists debt_exclusion_reason text;
+create index if not exists invoices_debt_excluded_idx on invoices(condominium_id) where debt_excluded_at is not null;
+
+-- Backfill: a situação do banco já estava gravada em invoice_events desde
+-- sempre, só não era promovida para a linha do boleto. Sem isto, um boleto
+-- EXPIRADO continuaria aparecendo como "Vencido" até a próxima sincronização.
+-- Idempotente: só preenche quem ainda está nulo.
+update invoices i set
+  provider_situation = ult.provider_status,
+  provider_situation_at = ult.created_at
+from (
+  select distinct on (invoice_id) invoice_id, provider_status, created_at
+  from invoice_events
+  where provider_status is not null
+  order by invoice_id, created_at desc
+) ult
+where ult.invoice_id = i.id and i.provider_situation is null;
+
+-- Boletos que existem no Banco Inter mas cujo CPF do pagador não bate com
+-- nenhum morador cadastrado no condomínio. A importação já os detectava, mas
+-- só os mostrava numa mensagem passageira ao final de "Atualizar todos os
+-- boletos" — na prática ninguém via, e boletos reais do banco ficavam
+-- invisíveis no sistema por meses. Persistir permite exibi-los como pendência
+-- fixa em Gestão de cobranças até que alguém cadastre o morador ou dispense o
+-- aviso.
+create table if not exists bank_unmatched_charges (
+  id uuid primary key default gen_random_uuid(),
+  condominium_id uuid not null references condominiums(id) on delete cascade,
+  external_id text not null,
+  payer_document text not null,
+  payer_name text,
+  due_date date,
+  amount_cents integer,
+  provider_situation text,
+  first_seen_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now(),
+  dismissed_at timestamptz,
+  dismissed_by uuid references users(id) on delete set null,
+  unique (condominium_id, external_id)
+);
+create index if not exists bank_unmatched_charges_condominium_idx
+  on bank_unmatched_charges(condominium_id, dismissed_at, due_date desc);
+
 alter table debt_agreements add column if not exists deleted_at timestamptz;
 alter table debt_agreements add column if not exists deleted_by uuid references users(id) on delete set null;
 
@@ -478,7 +540,7 @@ create table if not exists invoice_adjustments (
   id uuid primary key default gen_random_uuid(),
   invoice_id uuid not null references invoices(id) on delete cascade,
   condominium_id uuid not null references condominiums(id) on delete cascade,
-  type text not null check (type in ('edit','partial_payment','delete')),
+  type text not null check (type in ('edit','partial_payment','delete','debt_excluded','debt_restored')),
   amount_cents integer,
   previous_amount_cents integer,
   previous_due_date date,
@@ -488,6 +550,12 @@ create table if not exists invoice_adjustments (
   created_at timestamptz not null default now()
 );
 create index if not exists invoice_adjustments_invoice_idx on invoice_adjustments(invoice_id, created_at desc);
+-- O create table acima só vale para base nova; em base existente o check
+-- antigo continua valendo, então precisa ser recriado explicitamente para
+-- aceitar a retirada/devolução de boleto da dívida.
+alter table invoice_adjustments drop constraint if exists invoice_adjustments_type_check;
+alter table invoice_adjustments add constraint invoice_adjustments_type_check
+  check (type in ('edit','partial_payment','delete','debt_excluded','debt_restored'));
 
 create table if not exists billing_settings (
   condominium_id uuid primary key references condominiums(id) on delete cascade,

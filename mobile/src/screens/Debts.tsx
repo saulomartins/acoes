@@ -113,6 +113,8 @@ export default function Debts({ navigation }: any) {
   const [detailsPerson,setDetailsPerson]=useState<PersonGroup|null>(null);
   const [detailsInstallmentsAgreement,setDetailsInstallmentsAgreement]=useState<Agreement|null>(null);
   const [notice,setNotice]=useState('');
+  const [unitSearch,setUnitSearch]=useState('');
+  const [onlyOpen,setOnlyOpen]=useState(false);
 
   const [showLegacyForm,setShowLegacyForm]=useState(false);
   const [legacyMode,setLegacyMode]=useState<'manual'|'import'>('manual');
@@ -224,6 +226,27 @@ export default function Debts({ navigation }: any) {
     if (!data) return [];
     return groupByUnit(data.rows.filter(row => row.ownedElsewhere), null);
   }, [data]);
+
+  // Busca por apartamento OU nome do morador. Um apartamento entra na lista se
+  // o próprio número casar (aí ele aparece inteiro) ou se algum morador casar —
+  // nesse caso só os moradores que casaram são exibidos, senão pesquisar por
+  // um nome traria de volta todos os outros responsáveis da mesma unidade.
+  // Normaliza acento para "Veronica" achar "Verônica".
+  const normalize = (value: string) => value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLocaleLowerCase('pt-BR').trim();
+  const filterUnits = useCallback((groups: UnitGroup[]) => {
+    const term = normalize(unitSearch);
+    return groups.map(group => {
+      const unitMatches = term.length === 0 || normalize(group.unit).includes(term);
+      const people = group.people
+        .filter(person => unitMatches || normalize(person.payerName).includes(term))
+        .filter(person => !onlyOpen || person.openCount > 0);
+      return { ...group, people, openCount: people.reduce((sum, p) => sum + p.openCount, 0), updatedTotalCents: people.reduce((sum, p) => sum + p.updatedTotalCents, 0) };
+    }).filter(group => group.people.length > 0);
+  }, [unitSearch, onlyOpen]);
+
+  const visibleUnits = useMemo(() => filterUnits(units), [units, filterUnits]);
+  const visibleOwnedElsewhereUnits = useMemo(() => filterUnits(ownedElsewhereUnits), [ownedElsewhereUnits, filterUnits]);
+  const isFiltering = unitSearch.trim().length > 0 || onlyOpen;
 
   const filteredLegacyPeople = useMemo(() => {
     const term = legacyPersonSearch.trim().toLocaleLowerCase('pt-BR');
@@ -468,14 +491,34 @@ export default function Debts({ navigation }: any) {
           <View style={styles.agreementActions}>{manager&&agreement.status==='draft'?<View style={styles.smallAction}><AppButton title="Enviar proposta" onPress={()=>agreementAction(agreement,'send')} disabled={loading}/></View>:null}{!manager&&agreement.status==='sent'?<View style={styles.acceptAction}><AppButton title="Li as condições e aceito o acordo" onPress={()=>agreementAction(agreement,'accept')} disabled={loading}/></View>:null}{manager&&agreement.status==='accepted'?<View style={styles.smallAction}><AppButton title="Gerar boletos" onPress={()=>agreementAction(agreement,'issue')} disabled={loading}/></View>:null}{manager&&canDeleteAgreement(agreement)?<View style={styles.smallAction}><AppButton title="Excluir acordo" onPress={()=>{setJustifyingAgreement(agreement.id);setJustification('');setShouldRecalculate(false)}} disabled={loading}/></View>:null}</View>
         </View>})}</View>:null}
 
-        <View ref={registerSection('units')} style={[isActive('units')&&styles.tourHighlight]}>
-        {units.length ? units.map(group => renderUnitGroup(group)) : <EmptyState title="Nenhum débito encontrado" description={manager ? 'Não há cobranças registradas para os apartamentos.' : 'Não há cobranças registradas para o seu apartamento.'} />}
+        <View ref={registerSection('units')} style={[styles.unitsSection,isActive('units')&&styles.tourHighlight]}>
+        {units.length ? <View style={styles.searchBox}>
+          <View style={styles.searchField}>
+            <Text style={styles.fieldLabel}>Buscar apartamento ou morador</Text>
+            <TextInput value={unitSearch} onChangeText={setUnitSearch} placeholder="Ex.: 301, Bloco A - 12 ou Maria Cristina" style={styles.input}/>
+          </View>
+          <View style={styles.searchSide}>
+            <Pressable onPress={()=>setOnlyOpen(current=>!current)} style={[styles.filterChip,onlyOpen&&styles.filterChipOn]}>
+              <Text style={[styles.filterChipText,onlyOpen&&styles.filterChipTextOn]}>Somente com débito em aberto</Text>
+            </Pressable>
+            {isFiltering?<Pressable onPress={()=>{setUnitSearch('');setOnlyOpen(false)}} style={styles.clearFilter}><Text style={styles.clearFilterText}>Limpar filtros</Text></Pressable>:null}
+          </View>
+          {isFiltering?<Text style={styles.searchResult}>{visibleUnits.length} de {units.length} apartamento(s) · {money(visibleUnits.reduce((sum,group)=>sum+group.updatedTotalCents,0))} em aberto no resultado</Text>:null}
+        </View> : null}
+
+        <View style={styles.unitsList}>
+        {!units.length
+          ? <EmptyState title="Nenhum débito encontrado" description={manager ? 'Não há cobranças registradas para os apartamentos.' : 'Não há cobranças registradas para o seu apartamento.'} />
+          : visibleUnits.length
+            ? visibleUnits.map(group => renderUnitGroup(group))
+            : <EmptyState title="Nenhum resultado" description="Nenhum apartamento ou morador corresponde ao que você buscou. Ajuste os filtros acima." />}
+        </View>
         </View>
 
         {!manager && ownedElsewhereUnits.length ? <View ref={registerSection('ownedElsewhere')} style={[styles.ownedElsewhereSection,isActive('ownedElsewhere')&&styles.tourHighlight]}>
           <Text style={styles.sectionTitle}>Apartamentos que você acompanha</Text>
           <Text style={styles.sectionHint}>Você é proprietário adicional dessas unidades — só visualização, o morador é quem responde pela cobrança.</Text>
-          {ownedElsewhereUnits.map(group => renderUnitGroup(group))}
+          <View style={styles.unitsList}>{visibleOwnedElsewhereUnits.map(group => renderUnitGroup(group))}</View>
         </View> : null}
       </> : null}
 
@@ -843,11 +886,28 @@ const styles = StyleSheet.create({
   summaryTotalValue: { color: '#fff', fontSize: 21, fontWeight: '900' }, summaryTotalLabel: { color: '#fff', marginTop: 3 },
   agreements:{gap:8},sectionTitle:{color:colors.ink,fontSize:20,fontWeight:'900'},sectionHint:{color:colors.muted,lineHeight:20,marginBottom:3},agreementCard:{gap:13,borderWidth:1,borderColor:colors.border,borderRadius:11,backgroundColor:'#fff',padding:16},agreementCardDanger:{borderColor:colors.red,backgroundColor:'#fffafa'},agreementHeader:{flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:10},grow:{flex:1,minWidth:220},agreementCode:{color:colors.primary,fontSize:12,fontWeight:'900'},agreementTitle:{color:colors.ink,fontSize:18,fontWeight:'900',marginTop:3},agreementStatus:{color:colors.primaryDark,backgroundColor:colors.softBlue,paddingHorizontal:10,paddingVertical:6,borderRadius:9,overflow:'hidden',fontWeight:'900'},agreementStatusDanger:{color:'#fff',backgroundColor:colors.red},agreementStatusSuccess:{color:'#fff',backgroundColor:colors.green},agreementValues:{flexDirection:'row',flexWrap:'wrap',gap:8},agreementValueBox:{flexGrow:1,minWidth:165,borderWidth:1,borderColor:colors.border,borderRadius:8,backgroundColor:'#f8fafc',padding:11},valueLabel:{color:colors.muted,fontSize:13,fontWeight:'800'},valueText:{color:colors.ink,fontSize:17,fontWeight:'900',marginTop:4},valueStrong:{color:colors.primaryDark,fontSize:19,fontWeight:'900',marginTop:4},discountValue:{color:colors.green,fontSize:17,fontWeight:'900',marginTop:4},agreementInfo:{gap:5,borderLeftWidth:3,borderLeftColor:colors.primary,paddingLeft:11},infoText:{color:colors.muted,lineHeight:20},infoStrong:{color:colors.ink,fontWeight:'800'},agreementSection:{borderTopWidth:1,borderTopColor:colors.border,paddingTop:11,gap:7},agreementSectionTitle:{color:colors.ink,fontSize:16,fontWeight:'900'},detailRow:{flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:10,borderWidth:1,borderColor:colors.border,borderRadius:8,padding:10},detailTitle:{color:colors.ink,fontWeight:'900'},detailMeta:{color:colors.muted,fontSize:13,marginTop:3},detailAmounts:{minWidth:210,alignItems:'flex-end'},detailTotal:{color:colors.red,fontWeight:'900',marginTop:3},installmentTrigger:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8,borderTopWidth:1,borderTopColor:colors.border,paddingTop:11},installmentHeader:{flex:1,flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8},installmentModalList:{gap:8},progress:{color:colors.primaryDark,fontWeight:'900'},installmentValue:{color:colors.ink,fontWeight:'900',minWidth:95,textAlign:'right'},installmentStatus:{color:colors.primaryDark,backgroundColor:colors.softBlue,paddingHorizontal:8,paddingVertical:5,borderRadius:8,overflow:'hidden',fontSize:12,fontWeight:'900',minWidth:120,textAlign:'center'},installmentPaid:{color:colors.green,backgroundColor:colors.softGreen},installmentOverdue:{color:'#fff',backgroundColor:colors.red},installmentCanceled:{color:'#fff',backgroundColor:colors.red},breachBox:{borderWidth:1,borderColor:colors.red,borderRadius:8,backgroundColor:'#fff1f1',padding:11},breachTitle:{color:colors.red,fontWeight:'900'},breachText:{color:colors.ink,lineHeight:20,marginTop:4},agreementActions:{flexDirection:'row',justifyContent:'flex-end',flexWrap:'wrap',gap:8},smallAction:{minWidth:170},acceptAction:{flexGrow:1,minWidth:260},
   ownedElsewhereSection: { gap: 10, marginTop: 22, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 18 },
-  unitCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 11, backgroundColor: '#fff', overflow: 'hidden' },
+  unitsSection: { gap: 14 },
+  // Os cards de apartamento eram irmãos diretos sem gap, então encostavam um no
+  // outro e a lista virava um bloco só. Espaçamento + sombra + faixa lateral dão
+  // o limite de onde um apartamento termina e o próximo começa.
+  unitsList: { gap: 18 },
+  searchBox: { gap: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 11, backgroundColor: '#fff', padding: 14 },
+  searchField: { gap: 4 },
+  searchSide: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  filterChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 13, paddingVertical: 8, backgroundColor: '#fff' },
+  filterChipOn: { borderColor: colors.primary, backgroundColor: colors.softBlue },
+  filterChipText: { color: colors.muted, fontWeight: '800' },
+  filterChipTextOn: { color: colors.primaryDark },
+  clearFilter: { paddingHorizontal: 10, paddingVertical: 8 },
+  clearFilterText: { color: colors.primary, fontWeight: '900' },
+  searchResult: { color: colors.muted, fontWeight: '800' },
+  unitCard: { borderWidth: 1, borderColor: colors.border, borderLeftWidth: 5, borderLeftColor: colors.primary, borderRadius: 11, backgroundColor: '#fff', overflow: 'hidden', shadowColor: '#0f172a', shadowOpacity: 0.08, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   unitHeader: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: 16, backgroundColor: '#dbeaf7' },
   unitIdentity: { flex: 1, minWidth: 190 }, unitLabel: { color: colors.primary, fontSize: 12, fontWeight: '900' }, unitTitle: { color: colors.ink, fontSize: 21, fontWeight: '900', marginTop: 2 },
   unitTotalBox: { minWidth: 190, alignItems: 'flex-end' }, openBadge: { color: '#fff', backgroundColor: colors.red, fontWeight: '900', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 12, overflow: 'hidden', marginBottom: 7 }, unitTotalLabel: { color: colors.muted, fontWeight: '800' }, unitTotal: { color: colors.red, fontSize: 22, fontWeight: '900', marginTop: 2 },
-  personCard: { borderTopWidth: 1, borderTopColor: colors.border },
+  // Divisor grosso entre moradores do mesmo apartamento: com 1px o proprietário
+  // e o inquilino pareciam um bloco contínuo de informação.
+  personCard: { borderTopWidth: 6, borderTopColor: '#eef2f7' },
   personHeader: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: 14, backgroundColor: '#f7f9fc' },
   personRole: { color: colors.primary, fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
   personName: { color: colors.ink, fontSize: 17, fontWeight: '900', marginTop: 2 },

@@ -67,13 +67,42 @@ export const syncInterInvoice = async (invoice: { id:string; condominium_id:stri
   const providerDueDate=/^\d{4}-\d{2}-\d{2}$/.test(inter.cobranca.dataVencimento||'')?inter.cobranca.dataVencimento:null;
   const updated=await query(`update invoices set status=$1,digitable_line=$2,pdf_url=$3,barcode=$4,pix_copy_paste=$5,
     due_date=coalesce($6::date,due_date),paid_at=coalesce(paid_at,$7),
-    paid_amount_cents=case when $1::invoice_status='paid'::invoice_status then amount_cents else paid_amount_cents end
-    where id=$8 returning *`,[status,inter.boleto?.linhaDigitavel||null,`/cobranca/v3/cobrancas/${invoice.external_id}/pdf`,inter.boleto?.codigoBarras||null,inter.pix?.pixCopiaECola||null,providerDueDate,paidAt,invoice.id]);
+    paid_amount_cents=case when $1::invoice_status='paid'::invoice_status then amount_cents else paid_amount_cents end,
+    provider_situation=$9,provider_situation_at=now()
+    where id=$8 returning *`,[status,inter.boleto?.linhaDigitavel||null,`/cobranca/v3/cobrancas/${invoice.external_id}/pdf`,inter.boleto?.codigoBarras||null,inter.pix?.pixCopiaECola||null,providerDueDate,paidAt,invoice.id,inter.cobranca.situacao||null]);
   await query(`insert into invoice_events(id,invoice_id,event_type,provider_status,details) values($1,$2,'provider_sync',$3,$4)`,[randomUUID(),invoice.id,inter.cobranca.situacao,JSON.stringify(inter)]);
   return {invoice:updated.rows[0],inter};
 };
 
-export type UnmatchedCharge = { payerName: string; payerDocument: string; dueDate: string; amountCents: number };
+export type UnmatchedCharge = { payerName: string; payerDocument: string; dueDate: string; amountCents: number; externalId: string; situacao: string | null };
+
+// Grava as cobranças sem morador correspondente para que virem pendência fixa
+// em Gestão de cobranças. Antes elas só existiam na resposta do sync-all, um
+// diálogo que some assim que o síndico fecha — foi assim que oito boletos reais
+// do banco (R$ 2.182,40) ficaram invisíveis no sistema. As que voltaram a
+// casar (o morador foi cadastrado) saem da lista automaticamente.
+const persistUnmatchedCharges = async (condominiumId: string, unmatched: UnmatchedCharge[], scannedExternalIds: string[]) => {
+  for (const item of unmatched) {
+    await query(
+      `insert into bank_unmatched_charges
+         (condominium_id, external_id, payer_document, payer_name, due_date, amount_cents, provider_situation)
+       values ($1,$2,$3,$4,$5,$6,$7)
+       on conflict (condominium_id, external_id) do update set
+         payer_name=excluded.payer_name, due_date=excluded.due_date,
+         amount_cents=excluded.amount_cents, provider_situation=excluded.provider_situation,
+         last_seen_at=now()`,
+      [condominiumId, item.externalId, item.payerDocument, item.payerName, item.dueDate, item.amountCents, item.situacao],
+    );
+  }
+  const stillUnmatched = unmatched.map(item => item.externalId);
+  if (scannedExternalIds.length) {
+    await query(
+      `delete from bank_unmatched_charges
+       where condominium_id=$1 and external_id = any($2::text[]) and external_id <> all($3::text[])`,
+      [condominiumId, scannedExternalIds, stillUnmatched],
+    );
+  }
+};
 export type ConflictedCharge = { payerName: string; dueDate: string; reason: string };
 
 // Importa/atualiza localmente as cobranças relevantes encontradas no Inter
@@ -111,6 +140,8 @@ const importCharges = async (
         payerDocument,
         dueDate: charge.dataVencimento,
         amountCents: Number.isFinite(amountCents) ? amountCents : 0,
+        externalId: charge.codigoSolicitacao,
+        situacao: charge.situacao || null,
       });
       continue;
     }
@@ -120,11 +151,12 @@ const importCharges = async (
     const paidAmountCents = isPaid ? amountCents : null;
     const paidAt = isPaid ? (charge.dataSituacao || null) : null;
     try {
-      const result = await query(
+      const result = await query<{ id: string; inserted: boolean }>(
         `insert into invoices (
            id, condominium_id, user_id, amount_cents, due_date, reference_month, status, provider,
-           external_id, digitable_line, pdf_url, barcode, pix_copy_paste, invoice_type, paid_amount_cents, paid_at
-         ) values ($1,$2,$3,$4,$5,date_trunc('month',$5::date)::date,$6,'inter',$7,$8,$9,$10,$11,'regular',$12,$13)
+           external_id, digitable_line, pdf_url, barcode, pix_copy_paste, invoice_type, paid_amount_cents, paid_at,
+           provider_situation, provider_situation_at
+         ) values ($1,$2,$3,$4,$5,date_trunc('month',$5::date)::date,$6,'inter',$7,$8,$9,$10,$11,'regular',$12,$13,$14,now())
          on conflict (external_id) where external_id is not null do update set
            condominium_id=excluded.condominium_id, user_id=excluded.user_id,
            amount_cents=excluded.amount_cents, due_date=excluded.due_date, status=excluded.status,
@@ -132,13 +164,26 @@ const importCharges = async (
            barcode=coalesce(excluded.barcode,invoices.barcode),
            pix_copy_paste=coalesce(excluded.pix_copy_paste,invoices.pix_copy_paste),
            paid_amount_cents=coalesce(excluded.paid_amount_cents,invoices.paid_amount_cents),
-           paid_at=coalesce(excluded.paid_at,invoices.paid_at)
-         returning (xmax = 0) as inserted`,
+           paid_at=coalesce(excluded.paid_at,invoices.paid_at),
+           provider_situation=excluded.provider_situation,
+           provider_situation_at=excluded.provider_situation_at
+         returning id, (xmax = 0) as inserted`,
         [randomUUID(), condominiumId, userId, amountCents, charge.dataVencimento,
          status, charge.codigoSolicitacao,
          item.boleto?.linhaDigitavel || null, `/cobranca/v3/cobrancas/${charge.codigoSolicitacao}/pdf`,
-         item.boleto?.codigoBarras || null, item.pix?.pixCopiaECola || null, paidAmountCents, paidAt],
+         item.boleto?.codigoBarras || null, item.pix?.pixCopiaECola || null, paidAmountCents, paidAt,
+         charge.situacao || null],
       );
+      // A importação em lote também deixa rastro. Sem isto um boleto marcado
+      // como pago aqui ficava sem nenhum invoice_event, e a conciliação contra
+      // o extrato do banco não tinha como provar de onde veio a baixa.
+      const savedId = result.rows[0]?.id;
+      if (savedId) {
+        await query(
+          `insert into invoice_events(id,invoice_id,event_type,provider_status,details) values($1,$2,'provider_import',$3,$4)`,
+          [randomUUID(), savedId, charge.situacao || null, JSON.stringify(item)],
+        );
+      }
       if (result.rows[0]?.inserted) imported += 1;
     } catch (error: any) {
       const reason = error?.code === '23505'
@@ -226,6 +271,11 @@ export const discoverOpenInterInvoicesForCondominium = async (condominiumId: str
   const bankCharges = await listInterBoletosByPayer(null, start, end, integration);
   const { open, paid, all } = relevantInterCharges(bankCharges);
   const { imported, unmatched, conflicts } = await importCharges(condominiumId, all, document => userIdByCpf.get(document));
+  await persistUnmatchedCharges(
+    condominiumId,
+    unmatched,
+    all.map(item => item.cobranca?.codigoSolicitacao).filter((id): id is string => Boolean(id)),
+  );
   return { found: all.length, foundOpen: open.length, foundPaid: paid.length, imported, unmatched, conflicts };
 };
 
@@ -244,6 +294,8 @@ router.get('/', asyncHandler(async (req, res) => {
             invoices.external_id, invoices.digitable_line, invoices.pdf_url, invoices.created_at,
             invoices.barcode, invoices.pix_copy_paste, invoices.paid_at, invoices.paid_amount_cents, invoices.batch_id,
             invoices.reference_month, invoices.invoice_type, invoices.agreement_id, invoices.cancellation_reason,
+            invoices.provider_situation, invoices.debt_excluded_at, invoices.debt_exclusion_reason,
+            excluder.full_name as debt_excluded_by_name,
             invoices.condo_fee_percent, invoices.condo_fee_cents, invoices.improvement_fee_percent, invoices.improvement_fee_cents, invoices.condo_base_fee_cents,
             coalesce((select json_agg(json_build_object('description', ec.description, 'amount_cents', eci.amount_cents))
               from unit_extra_charge_installments eci join unit_extra_charges ec on ec.id = eci.charge_id
@@ -262,6 +314,7 @@ router.get('/', asyncHandler(async (req, res) => {
             users.full_name as user_full_name
      from invoices
      join users on users.id = invoices.user_id
+     left join users excluder on excluder.id = invoices.debt_excluded_by
      where ($1::uuid is null or invoices.user_id = $1)
        and ($2::uuid is null or invoices.condominium_id = $2)
        and ($3::text is null or invoices.status = $3::invoice_status)
@@ -319,20 +372,27 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), requireFeat
     bank_paid_cents: number; bank_paid_count: number; pix_settled_cents: number; pix_settled_count: number;
     open_cents: number; open_count: number; canceled_cents: number; canceled_count: number;
     overdue_cents: number; overdue_count: number; pending_provider_cents: number; pending_provider_count: number;
+    debt_excluded_cents: number; debt_excluded_count: number;
   }>(
+    // debt_excluded_at (boleto retirado da dívida pelo síndico) sai de "Em
+    // aberto" e de "Atrasados" e ganha bucket próprio — do contrário a retirada
+    // não teria efeito nenhum no painel, que é justamente onde o síndico olha o
+    // total a receber.
     `select
        coalesce(sum(coalesce(paid_amount_cents, amount_cents)) filter (where paid_at is not null and status <> 'canceled'), 0)::int as bank_paid_cents,
        count(*) filter (where paid_at is not null and status <> 'canceled')::int as bank_paid_count,
        coalesce(sum(coalesce(paid_amount_cents, amount_cents)) filter (where paid_at is not null and status = 'canceled'), 0)::int as pix_settled_cents,
        count(*) filter (where paid_at is not null and status = 'canceled')::int as pix_settled_count,
-       coalesce(sum(amount_cents) filter (where status = 'issued' and paid_at is null), 0)::int as open_cents,
-       count(*) filter (where status = 'issued' and paid_at is null)::int as open_count,
+       coalesce(sum(amount_cents) filter (where status = 'issued' and paid_at is null and debt_excluded_at is null), 0)::int as open_cents,
+       count(*) filter (where status = 'issued' and paid_at is null and debt_excluded_at is null)::int as open_count,
        coalesce(sum(amount_cents) filter (where status = 'canceled' and paid_at is null), 0)::int as canceled_cents,
        count(*) filter (where status = 'canceled' and paid_at is null)::int as canceled_count,
-       coalesce(sum(amount_cents) filter (where status = 'overdue'), 0)::int as overdue_cents,
-       count(*) filter (where status = 'overdue')::int as overdue_count,
+       coalesce(sum(amount_cents) filter (where status = 'overdue' and debt_excluded_at is null), 0)::int as overdue_cents,
+       count(*) filter (where status = 'overdue' and debt_excluded_at is null)::int as overdue_count,
        coalesce(sum(amount_cents) filter (where status = 'pending_provider' and paid_at is null), 0)::int as pending_provider_cents,
-       count(*) filter (where status = 'pending_provider' and paid_at is null)::int as pending_provider_count
+       count(*) filter (where status = 'pending_provider' and paid_at is null)::int as pending_provider_count,
+       coalesce(sum(amount_cents) filter (where debt_excluded_at is not null and paid_at is null), 0)::int as debt_excluded_cents,
+       count(*) filter (where debt_excluded_at is not null and paid_at is null)::int as debt_excluded_count
      from invoices
      where condominium_id = $1 and deleted_at is null ${scopeSql}`,
     [condominiumId, referenceMonth],
@@ -376,7 +436,7 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), requireFeat
             to_char(min(i.due_date),'YYYY-MM-DD') as oldest_due_date,
             (current_date - min(i.due_date))::int as days_overdue
      from invoices i join users u on u.id = i.user_id
-     where i.condominium_id = $1 and i.status = 'overdue' and i.deleted_at is null ${scopeSql}
+     where i.condominium_id = $1 and i.status = 'overdue' and i.deleted_at is null and i.debt_excluded_at is null ${scopeSql}
      group by u.id, u.full_name, u.username, u.unit
      order by overdue_cents desc`,
     [condominiumId, referenceMonth],
@@ -391,7 +451,7 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), requireFeat
   const row = totals.rows[0] || {
     bank_paid_cents: 0, bank_paid_count: 0, pix_settled_cents: 0, pix_settled_count: 0,
     open_cents: 0, open_count: 0, canceled_cents: 0, canceled_count: 0, overdue_cents: 0, overdue_count: 0,
-    pending_provider_cents: 0, pending_provider_count: 0,
+    pending_provider_cents: 0, pending_provider_count: 0, debt_excluded_cents: 0, debt_excluded_count: 0,
   };
 
   return res.json({
@@ -415,6 +475,7 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), requireFeat
       })),
     },
     open: { totalCents: row.open_cents, count: row.open_count },
+    debtExcluded: { totalCents: row.debt_excluded_cents, count: row.debt_excluded_count },
     canceled: { totalCents: row.canceled_cents, count: row.canceled_count },
     pendingBank: {
       totalCents: row.pending_provider_cents,
@@ -472,8 +533,8 @@ router.get('/analytics', authorize('sindico', 'subsindico'), requireFeature('ind
     `select
        coalesce(sum(coalesce(paid_amount_cents, amount_cents)) filter (where paid_at is not null and paid_at::date between $2::date and $3::date), 0)::int as received_cents,
        count(*) filter (where paid_at is not null and paid_at::date between $2::date and $3::date)::int as received_count,
-       coalesce(sum(amount_cents) filter (where status in ('issued','pending_provider','overdue') and paid_at is null and due_date between $2::date and $3::date), 0)::int as unpaid_cents,
-       count(*) filter (where status in ('issued','pending_provider','overdue') and paid_at is null and due_date between $2::date and $3::date)::int as unpaid_count,
+       coalesce(sum(amount_cents) filter (where status in ('issued','pending_provider','overdue') and paid_at is null and debt_excluded_at is null and due_date between $2::date and $3::date), 0)::int as unpaid_cents,
+       count(*) filter (where status in ('issued','pending_provider','overdue') and paid_at is null and debt_excluded_at is null and due_date between $2::date and $3::date)::int as unpaid_count,
        coalesce(sum(amount_cents) filter (where status = 'canceled' and paid_at is null and due_date between $2::date and $3::date), 0)::int as canceled_cents,
        count(*) filter (where status = 'canceled' and paid_at is null and due_date between $2::date and $3::date)::int as canceled_count
      from invoices
@@ -946,6 +1007,116 @@ router.patch('/:id/cancellation-reason', authorize('sindico', 'subsindico'), asy
     cancellationReason: updated.rows[0].cancellation_reason,
     paidAmountCents: updated.rows[0].paid_amount_cents,
     paidAt: updated.rows[0].paid_at,
+  });
+}));
+
+// Boletos que existem no Banco Inter e não têm morador correspondente no
+// sistema (CPF do pagador não bate com ninguém cadastrado). Ficam aqui como
+// pendência até que alguém cadastre/corrija o morador — aí a próxima
+// sincronização os remove sozinha — ou dispense o aviso explicitamente.
+router.get('/unmatched-bank-charges', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
+  const result = await query<{
+    id: string; external_id: string; payer_document: string; payer_name: string | null;
+    due_date: string; amount_cents: number; provider_situation: string | null; first_seen_at: string;
+  }>(
+    `select id, external_id, payer_document, payer_name, due_date, amount_cents, provider_situation, first_seen_at
+     from bank_unmatched_charges
+     where condominium_id=$1 and dismissed_at is null
+     order by due_date desc`,
+    [req.user?.condominiumId],
+  );
+  return res.json({
+    charges: result.rows.map(item => ({
+      id: item.id,
+      externalId: item.external_id,
+      payerDocument: item.payer_document,
+      payerName: item.payer_name,
+      dueDate: item.due_date,
+      amountCents: item.amount_cents,
+      providerSituation: item.provider_situation,
+      firstSeenAt: item.first_seen_at,
+    })),
+    totalCents: result.rows.reduce((total, item) => total + Number(item.amount_cents || 0), 0),
+  });
+}));
+
+router.patch('/unmatched-bank-charges/:id/dismiss', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
+  const result = await query<{ id: string; payer_name: string | null }>(
+    `update bank_unmatched_charges set dismissed_at=now(), dismissed_by=$1
+     where id=$2 and condominium_id=$3 and dismissed_at is null
+     returning id, payer_name`,
+    [req.user?.id, req.params.id, req.user?.condominiumId],
+  );
+  if (!result.rows[0]) return res.status(404).json({ message: 'Pendência não encontrada.' });
+  await logAudit(req, 'gestao_cobrancas', 'updated', `Dispensou aviso de boleto sem morador vinculado: ${result.rows[0].payer_name || 'pagador desconhecido'}`, { entityId: req.params.id });
+  return res.json({ dismissed: true });
+}));
+
+// Retira (ou devolve) um boleto da dívida do morador, com justificativa
+// obrigatória. Existe por causa dos boletos EXPIRADO no Banco Inter: o boleto
+// não pode mais ser pago, mas o sistema não tem como saber se a dívida por trás
+// continua de pé (o morador simplesmente não pagou) ou se já foi quitada por um
+// boleto posterior que consolidou o débito — caso real observado, em que um
+// morador teve quatro boletos expirados consolidados num quinto, pago via Pix,
+// e continuou aparecendo com os quatro antigos em atraso.
+//
+// Quem decide é o síndico. A retirada não apaga nem cancela nada: o boleto
+// segue visível, com a justificativa e o autor registrados, e apenas deixa de
+// entrar em Gestão de débitos, no painel e nos indicadores. É reversível a
+// qualquer momento enviando excluded=false.
+router.patch('/:id/debt-exclusion', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
+  const excluded = req.body?.excluded !== false;
+  const reason = String(req.body?.reason || '').trim();
+  if (excluded && !reason) return res.status(400).json({ message: 'Informe a justificativa para retirar este boleto da dívida.' });
+  if (reason.length > 500) return res.status(400).json({ message: 'A justificativa deve ter no máximo 500 caracteres.' });
+
+  const result = await query<{ id: string; status: string; amount_cents: number; debt_excluded_at: string | null }>(
+    `select id, status, amount_cents, debt_excluded_at from invoices
+     where id=$1 and condominium_id=$2 and deleted_at is null`,
+    [req.params.id, req.user?.condominiumId],
+  );
+  const invoice = result.rows[0];
+  if (!invoice) return res.status(404).json({ message: 'Cobrança não encontrada.' });
+  if (invoice.status === 'paid') {
+    return res.status(409).json({ message: 'Este boleto já está pago; não há dívida para retirar.' });
+  }
+  if (excluded && invoice.debt_excluded_at) {
+    return res.status(409).json({ message: 'Este boleto já está fora da dívida.' });
+  }
+  if (!excluded && !invoice.debt_excluded_at) {
+    return res.status(409).json({ message: 'Este boleto já conta na dívida.' });
+  }
+
+  const updated = await query<{ debt_excluded_at: string | null; debt_exclusion_reason: string | null }>(
+    `update invoices set
+       debt_excluded_at = case when $1 then now() else null end,
+       debt_excluded_by = case when $1 then $2::uuid else null end,
+       debt_exclusion_reason = case when $1 then $3 else null end
+     where id=$4 returning debt_excluded_at, debt_exclusion_reason`,
+    [excluded, req.user?.id, reason || null, req.params.id],
+  );
+
+  // Mesma trilha usada pelas edições manuais de débito em Gestão de débitos,
+  // para a retirada aparecer no histórico do boleto junto com o resto.
+  await query(
+    `insert into invoice_adjustments(invoice_id,condominium_id,type,previous_amount_cents,previous_due_date,previous_status,reason,created_by)
+     select $1,$2,$3,amount_cents,due_date,status,$4,$5 from invoices where id=$1`,
+    [req.params.id, req.user?.condominiumId, excluded ? 'debt_excluded' : 'debt_restored', reason || 'Boleto devolvido à dívida.', req.user?.id],
+  );
+
+  await logAudit(
+    req,
+    'gestao_cobrancas',
+    'updated',
+    excluded
+      ? `Retirou um boleto da dívida: ${reason}`
+      : 'Devolveu um boleto à dívida.',
+    { entityId: req.params.id },
+  );
+
+  return res.json({
+    debtExcludedAt: updated.rows[0].debt_excluded_at,
+    debtExclusionReason: updated.rows[0].debt_exclusion_reason,
   });
 }));
 

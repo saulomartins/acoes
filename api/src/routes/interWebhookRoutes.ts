@@ -23,8 +23,9 @@ router.post('/:secret', asyncHandler(async (req,res)=>{
     const result=await query<any>(
       `update invoices set status=$1,digitable_line=coalesce($2,digitable_line),barcode=coalesce($3,barcode),
        pix_copy_paste=coalesce($4,pix_copy_paste),paid_at=case when $1='paid' then coalesce(paid_at,now()) else paid_at end,
-       paid_amount_cents=coalesce($5,paid_amount_cents) where external_id=$6 returning id`,
-      [status,callback.linhaDigitavel||null,callback.codigoBarras||null,callback.pixCopiaECola||null,paidCents,externalId]);
+       paid_amount_cents=coalesce($5,paid_amount_cents),
+       provider_situation=$7,provider_situation_at=now() where external_id=$6 returning id`,
+      [status,callback.linhaDigitavel||null,callback.codigoBarras||null,callback.pixCopiaECola||null,paidCents,externalId,callback.situacao||null]);
     if(result.rows[0]){
       updated++;
       await query(`insert into invoice_events(id,invoice_id,event_type,provider_status,details) values($1,$2,'inter_webhook',$3,$4)`,[randomUUID(),result.rows[0].id,callback.situacao||null,JSON.stringify(callback)]);

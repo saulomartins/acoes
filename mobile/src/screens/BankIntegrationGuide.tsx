@@ -238,6 +238,11 @@ const risks: Risk[] = [
     where: 'api/src/services/interService.ts',
   },
   {
+    title: 'Tela de cobranças compara a situação crua do banco',
+    detail: 'A coluna provider_situation guarda a situação exatamente como o banco devolveu, e a tela decide o rótulo comparando com a palavra "EXPIRADO", que é vocabulário do Inter. Em outro banco a mesma condição tem outro nome, e um boleto impagável voltaria a ser exibido como "Vencido" — inclusive oferecendo pagar via Pix. A tela precisa perguntar "este boleto está expirado?" a uma função por provedor, em vez de comparar a palavra direto.',
+    where: 'mobile/src/screens/Invoices.tsx (isExpiredAtBank) + api/src/services/interService.ts',
+  },
+  {
     title: 'Segredo de webhook único e global',
     detail: 'O webhook valida um segredo vindo de variável de ambiente, o mesmo para toda a plataforma. Com vários bancos e várias configurações, o segredo precisa ser por configuração bancária, e a rota precisa identificar de qual provedor veio a notificação.',
     where: 'api/src/routes/interWebhookRoutes.ts',
@@ -251,6 +256,27 @@ const risks: Risk[] = [
     title: 'Cliente HTTP sem suporte a PFX e a chave em query',
     detail: 'O cliente atual lê certificado e chave em arquivos PEM separados e monta apenas cabeçalhos. Os bancos com ICP-Brasil entregam o certificado em formato PFX com senha, e o Banco do Brasil exige uma chave de aplicação passada na query string da requisição.',
     where: 'api/src/services/interService.ts',
+  },
+];
+
+// Contraparte dos riscos: o que já foi construído sem amarra a banco nenhum.
+// Registrado para ninguém refazer por precaução, nem tratar como pendência de
+// migração quando o segundo banco entrar.
+const providerAgnostic: Risk[] = [
+  {
+    title: 'Retirar boleto da dívida, com justificativa',
+    detail: 'O síndico pode tirar um boleto da dívida informando o motivo, e isso vale em Gestão de débitos, no painel e nos indicadores. O mecanismo vive em colunas da própria fatura e não consulta o provedor em momento nenhum, então funciona igual para qualquer banco, inclusive para lançamento manual e débito antigo, sem uma linha a mais.',
+    where: 'invoices.debt_excluded_at + PATCH /invoices/:id/debt-exclusion',
+  },
+  {
+    title: 'A decisão do síndico sobrevive à sincronização',
+    detail: 'Nenhuma rotina que fala com o banco escreve nas colunas de retirada da dívida: sincronizar, importar em lote e receber webhook só leem. Isso é uma garantia estrutural, não uma coincidência — vale para qualquer adaptador futuro, desde que o novo adaptador siga a mesma regra e não tente "corrigir" esses campos a partir do que o banco devolveu.',
+    where: 'api/src/routes/invoiceRoutes.ts + interWebhookRoutes.ts',
+  },
+  {
+    title: 'Boletos do banco sem morador vinculado',
+    detail: 'Cobranças encontradas no banco cujo CPF do pagador não bate com ninguém cadastrado ficam registradas como pendência fixa em Gestão de cobranças. A tabela guarda o identificador externo e o provedor não aparece na regra, então qualquer adaptador que devolva pagador e documento alimenta o mesmo aviso.',
+    where: 'bank_unmatched_charges',
   },
 ];
 
@@ -493,6 +519,19 @@ export default function BankIntegrationGuide() {
       </Section>
 
       <Section
+        title="O que já é agnóstico e não precisa ser refeito"
+        description="Partes construídas sem amarra a banco nenhum. Valem para o segundo banco sem alteração — não trate como pendência de migração."
+      >
+        {providerAgnostic.map((item) => (
+          <View key={item.title} style={s.agnosticCard}>
+            <Text style={s.agnosticTitle}>{item.title}</Text>
+            <Text style={s.riskDetail}>{item.detail}</Text>
+            <Text style={s.riskWhere}>Onde: {item.where}</Text>
+          </View>
+        ))}
+      </Section>
+
+      <Section
         title="O que pedir ao condomínio"
         description="Documentos e dados necessários para abrir a integração de qualquer banco."
       >
@@ -577,6 +616,10 @@ const s = StyleSheet.create({
   riskTitle: { fontSize: 14, fontWeight: '900', color: colors.ink },
   riskDetail: { fontSize: 13, color: colors.ink, lineHeight: 20, marginTop: 6 },
   riskWhere: { fontSize: 12, color: colors.muted, marginTop: 8, fontWeight: '700' },
+  // Mesma anatomia do cartão de risco, com a faixa verde para separar à
+  // primeira vista o que está resolvido do que ainda precisa de trabalho.
+  agnosticCard: { borderWidth: 1, borderColor: colors.border, borderLeftWidth: 4, borderLeftColor: colors.green, borderRadius: 12, padding: 12, marginBottom: 10 },
+  agnosticTitle: { fontSize: 14, fontWeight: '900', color: colors.green },
 
   bulletRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
   bullet: { fontSize: 14, color: colors.primary, fontWeight: '900' },

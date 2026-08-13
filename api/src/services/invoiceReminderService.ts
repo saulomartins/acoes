@@ -28,14 +28,21 @@ export const notifyNewInvoice = async (invoice: { id: string; condominiumId: str
 };
 
 // Boletos que acabaram de virar 'overdue' — a transição de status em si é o
-// marcador de dedupe (um boleto só cruza pending_provider/issued -> overdue
-// uma vez), então não precisa de coluna extra: quem quer que rode essa
-// função primeiro (o job diário ou uma tela abrindo GET /invoices) é quem
-// dispara o aviso; a segunda chamada não encontra mais linhas para atualizar.
+// marcador de dedupe (um boleto só cruza issued -> overdue uma vez), então não
+// precisa de coluna extra: quem quer que rode essa função primeiro (o job
+// diário ou uma tela abrindo GET /invoices) é quem dispara o aviso; a segunda
+// chamada não encontra mais linhas para atualizar.
+//
+// Só 'issued' entra. Um boleto 'pending_provider' é um boleto que o banco ainda
+// não confirmou (EM_PROCESSAMENTO no Inter, ou qualquer situação não mapeada):
+// não existe linha digitável nem Pix, então o morador não teria como pagar
+// mesmo querendo. Marcá-lo como vencido mostrava "Atrasado" na Gestão de
+// cobranças e ainda disparava push de cobrança para quem não recebeu boleto
+// nenhum. Esses ficam no card "Aguardando o banco", que é o lugar deles.
 export const transitionOverdueInvoices = async (): Promise<number> => {
   const result = await query<{ id: string; condominium_id: string; user_id: string; amount_cents: number; due_date: string }>(
     `update invoices set status='overdue'::invoice_status
-     where status in ('pending_provider'::invoice_status,'issued'::invoice_status)
+     where status='issued'::invoice_status
        and due_date < current_date and deleted_at is null
      returning id, condominium_id, user_id, amount_cents, due_date`,
   );
