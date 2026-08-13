@@ -10,6 +10,7 @@ export default function Login({ navigation }: any) {
   const { isDesktop: desktop } = useBreakpoint();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const { signIn, isLoading, authError } = useContext(AuthContext);
   const canSubmit = username.trim().length > 0 && password.length > 0 && !isLoading;
 
@@ -53,7 +54,12 @@ export default function Login({ navigation }: any) {
               <TextInput placeholder="Digite seu usuário, CPF ou e-mail" value={username} onChangeText={setUsername} style={styles.input} autoCapitalize="none" autoCorrect={false} placeholderTextColor="#99a3b5" />
               <Text style={styles.inputHint}>Você pode entrar de três formas: usuário de acesso, CPF (com ou sem pontos) ou e-mail cadastrado.</Text>
               <View style={styles.passwordLabel}><Text style={styles.label}>Senha</Text><Pressable onPress={() => navigation.navigate('ForgotPassword')}><Text style={styles.forgot}>Esqueci minha senha</Text></Pressable></View>
-              <TextInput placeholder="Digite sua senha" value={password} onChangeText={setPassword} secureTextEntry style={styles.input} placeholderTextColor="#99a3b5" onSubmitEditing={canSubmit ? handleSignIn : undefined} />
+              <View style={styles.passwordField}>
+                <TextInput placeholder="Digite sua senha" value={password} onChangeText={setPassword} secureTextEntry={!showPassword} style={[styles.input, styles.passwordInput]} placeholderTextColor="#99a3b5" onSubmitEditing={canSubmit ? handleSignIn : undefined} />
+                <Pressable onPress={() => setShowPassword(v => !v)} style={styles.passwordToggle} hitSlop={8}>
+                  <Text style={styles.passwordToggleText}>{showPassword ? 'Ocultar' : 'Mostrar'}</Text>
+                </Pressable>
+              </View>
 
               {authError ? <View style={styles.errorBox}><Text style={styles.error}>{authError}</Text></View> : null}
               <AppButton title={isLoading ? 'Entrando...' : 'Entrar no sistema'} onPress={handleSignIn} disabled={!canSubmit} />
@@ -76,6 +82,8 @@ const styles = StyleSheet.create({
   loginArea: { alignSelf: 'stretch', minWidth: 0, padding: 16, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }, loginAreaDesktop: { flex: .95, paddingHorizontal: 60, paddingVertical: 50 }, loginCard: { alignSelf: 'stretch', minWidth: 0, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: layout.radius, padding: 20, overflow: 'hidden', ...shadow }, loginCardDesktop: { width: '100%', maxWidth: 430 }, mobileBrand: { display: 'none' }, mobileBrandLogo: { width: 38, height: 38 }, mobileBrandName: { color: colors.navy, fontWeight: '900', fontSize: 17 },
   cardEyebrow: { color: colors.primary, fontSize: 13, fontWeight: '900', letterSpacing: 1.2, marginBottom: 8 }, cardTitle: { color: colors.ink, fontSize: 27, fontWeight: '900' }, cardSubtitle: { color: colors.muted, fontSize: 15, marginTop: 6, marginBottom: 25 }, label: { color: colors.ink, fontSize: 14, fontWeight: '800', marginBottom: 7 }, passwordLabel: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, forgot: { color: colors.primary, fontSize: 13, fontWeight: '800', marginBottom: 7 },
   input: { alignSelf: 'stretch', minWidth: 0, minHeight: 52, borderRadius: layout.controlRadius, borderWidth: 1, borderColor: '#dbe1e7', backgroundColor: '#fff', paddingHorizontal: 13, marginBottom: 15, color: colors.ink, fontSize: 16 },
+  passwordField: { position: 'relative', justifyContent: 'center' }, passwordInput: { paddingRight: 72 },
+  passwordToggle: { position: 'absolute', right: 13, top: 0, bottom: 15, justifyContent: 'center', paddingHorizontal: 4 }, passwordToggleText: { color: colors.primary, fontSize: 13, fontWeight: '800' },
   // O campo acima já traz marginBottom: 15; a dica sobe um pouco para ficar
   // colada no input a que se refere, sem encostar no rótulo seguinte.
   inputHint: { color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: -9, marginBottom: 15 }, errorBox: { backgroundColor: '#fff0f0', borderRadius: 8, padding: 10, marginBottom: 12 }, error: { color: colors.red, fontSize: 14, fontWeight: '700' },
