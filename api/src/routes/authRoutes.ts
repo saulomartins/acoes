@@ -7,7 +7,7 @@ import { FEATURE_KEYS, type FeatureKey } from '../services/featureCatalog';
 
 const router = Router();
 export const CURRENT_TERMS_VERSION = '2026-08-04';
-export const CURRENT_TOUR_VERSION = '2026-08-04-1';
+export const CURRENT_TOUR_VERSION = '2026-08-13-1';
 const attempts = new Map<string, { count: number; resetAt: number }>();
 const limit = (maximum: number, windowMs: number) => (req: Request, res: Response, next: NextFunction) => {
   const key = `${req.ip}:${req.path}`;

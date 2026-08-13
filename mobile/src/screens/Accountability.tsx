@@ -41,10 +41,12 @@ export default function Accountability({navigation}:any){
  const total=useMemo(()=>draft.expenses.reduce((sum,item)=>sum+Number(item.amountCents||0),0),[draft.expenses]);
  const load=useCallback(async()=>{if(!userToken)return;try{setItems((await apiRequest<{reports:Report[]}>('/accountability',userToken)).reports)}catch(e){setError(e instanceof Error?e.message:'Falha ao carregar')}},[userToken]);
  useEffect(()=>{load()},[load]);
- // Captura de tela liberada — ver allowScreenCaptureAsync em App.tsx. Esta tela
- // chamava preventScreenCaptureAsync, que liga o FLAG_SECURE da Activity inteira,
- // e a limpeza no unmount também chamava "prevent" em vez de "allow": bastava
- // abrir Prestação de contas uma vez para o print ficar bloqueado em TODO o app.
+ // Captura de tela é bloqueada globalmente pelo App.tsx (preventScreenCaptureAsync
+ // no boot) — esta tela não precisa (nem deve) chamar nada de expo-screen-capture
+ // por conta própria. Antes chamava preventScreenCaptureAsync aqui e "allow" no
+ // unmount só nesta tela, o que causava efeitos colaterais estranhos; se algum dia
+ // precisar liberar print numa tela específica, usar usePreventScreenCapture(false)
+ // do expo-screen-capture, nunca allow/prevent manual com useEffect solto.
  useEffect(()=>{if(Platform.OS!=='web')return;if(document.getElementById('accountability-print-style'))return;const style=document.createElement('style');style.id='accountability-print-style';style.textContent=`#${PRINT_AREA_ID}{display:none}@media print{body *{visibility:hidden}#${PRINT_AREA_ID}{display:block;position:absolute;left:0;top:0;width:100%}#${PRINT_AREA_ID} *{visibility:visible;-webkit-print-color-adjust:exact;print-color-adjust:exact}}`;document.head.appendChild(style)},[]);
  useEffect(()=>{if(Platform.OS!=='web')return;const stop=(event:KeyboardEvent)=>{if(readingReport)return;if(event.key==='PrintScreen'||(event.ctrlKey&&['p','s'].includes(event.key.toLowerCase()))){event.preventDefault();setError('Captura, impressão e salvamento desta tela não são permitidos.')}};document.addEventListener('keydown',stop);return()=>document.removeEventListener('keydown',stop)},[readingReport]);
  const field=(key:keyof Draft,value:any)=>setDraft(current=>({...current,[key]:value}));

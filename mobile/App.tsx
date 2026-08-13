@@ -1,16 +1,19 @@
 import React, { useEffect } from 'react';
 import { StatusBar, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { allowScreenCaptureAsync } from 'expo-screen-capture';
+import { preventScreenCaptureAsync } from 'expo-screen-capture';
 import AppNavigator from './src/navigation/AppNavigator';
 import { AuthProvider } from './src/context/AuthContext';
 
 export default function App() {
-  // O morador precisa conseguir printar a tela para pedir suporte (foi assim que
-  // o layout quebrado dos cartões de cobrança chegou até nós — por foto de outro
-  // celular, porque o print estava bloqueado). Libera a captura no boot para não
-  // depender de nenhuma tela específica limpar o FLAG_SECURE que ela tenha ligado.
-  useEffect(() => { allowScreenCaptureAsync(); }, []);
+  // Bloqueio de print/gravação de tela para o app inteiro (decisão explícita,
+  // 2026-08-13): já existiu uma versão disso antes que foi removida porque
+  // atrapalhava o morador a mandar print pra pedir suporte, e uma tela chegou
+  // a "vazar" o bloqueio pro app inteiro por chamar a função errada no
+  // unmount. Reativado mesmo assim, ciente do trade-off — se o suporte via
+  // print voltar a ser um problema, considerar liberar por tela (ver
+  // usePreventScreenCapture do expo-screen-capture) em vez de global.
+  useEffect(() => { preventScreenCaptureAsync(); }, []);
 
   return (
     // A partir do Android 15 (Expo SDK 54) o modo edge-to-edge é obrigatório: o app

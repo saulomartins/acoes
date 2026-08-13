@@ -134,12 +134,12 @@ export default function AgreementHistory({ navigation }: any) {
   const negotiatedTotal = agreements.reduce((sum, ag) => sum + ag.negotiated_total_cents, 0);
 
   const handleCancelAll = async () => {
-    if (!selectedAgreement || !cancellationReason.trim()) return;
+    if (!userToken || !selectedAgreement || !cancellationReason.trim()) return;
     setSubmitting(true);
     try {
       await apiRequest(`/agreements/${selectedAgreement.id}/mark-all-canceled`, userToken, {
         method: 'POST',
-        body: { cancellationReason: cancellationReason.trim(), recalculateValue: recalculate },
+        body: JSON.stringify({ cancellationReason: cancellationReason.trim(), recalculateValue: recalculate }),
       });
       setCancellationReason('');
       setRecalculate(false);
