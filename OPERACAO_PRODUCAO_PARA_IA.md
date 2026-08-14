@@ -449,6 +449,17 @@ A correção definitiva é trocar a chamada em `publish-apk.js` para o
 script compilado, do mesmo jeito que a seção 3 já faz com
 `setupDatabase.js`.
 
+**Atualização em 13/08/2026 (release 1.2.9):** desta vez o
+`releases:seed-android` rodou até o fim pelo `ts-node`, sem estourar a
+memória, e o `release:apk:resume` concluiu sozinho — download, validação de
+assinatura e publicação na central. Ou seja, a falha **não** é determinística:
+depende da memória disponível no contêiner no momento, então o mesmo comando
+pode passar numa vez e falhar na seguinte. Não conte com nenhum dos dois
+comportamentos. Se falhar, conclua à mão com o script compilado, como descrito
+acima; se passar, apenas confirme o SHA-256 no volume e o `active=true`. A
+correção definitiva continua valendo, porque trocar `ts-node` pelo script
+compilado elimina a variável em vez de torcer por ela.
+
 ### Ajustes de código desta revisão
 
 - Comunicados: síndico/subsíndico que também é morador passa a receber os
@@ -531,7 +542,17 @@ Banco Inter do período 01/01/2026 a 13/08/2026. Dos 268 boletos do relatório,
 - Smoke test: `POST /auth/login` em produção com usuário inexistente devolveu
   HTTP 401 (não 500) e `access-control-allow-origin: https://gestaolaremdia.com`.
 - Android: versão `1.2.9`, versionCode `21`, build EAS
-  `a85d1f43-fe81-40e0-9fd0-0e41923f2511`, perfil `production-apk`.
+  `a85d1f43-fe81-40e0-9fd0-0e41923f2511`, perfil `production-apk`, concluído.
+  Arquivo `releases/lar-em-dia-1.2.9-build-21-production.apk` (69.495.760
+  bytes). SHA-256:
+  `7252237F36C29CE543984D34FEDF9DE37C10B9138F21F1BF806892987EF48F53`,
+  conferido nos três pontos: artefato do EAS, arquivo local e
+  `/data/mobile-releases/0a6f95ef-9d2d-4b76-8eec-2ba6824c6036.apk` no volume.
+  Assinatura APK Scheme v2 validada, mesmo signer RSA 2048 das versões
+  anteriores (chave pública SHA-256 `2dd2dd1a3b0b3024...`).
+  `GET /mobile-releases/latest` devolve android 1.2.9/21. Na tabela,
+  1.2.9/21 e 1.2.8/20 ficam ambos com `active=true` — esperado, conforme a
+  publicação 1.2.5.
 
 ### O que mudou
 
