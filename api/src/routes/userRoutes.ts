@@ -47,7 +47,7 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 
 router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
-  const { username, password, role, condominiumId, fullName, cpf, email, phone, unitId, isRepresentative, billingExempt, preferredDueDay,
+  const { username, password, role, condominiumId, fullName, cpf, email, phone, unitId, billingExempt, preferredDueDay,
     street, addressNumber, addressComplement, neighborhood, city, state, postalCode } = req.body ?? {};
 
   const isResident = role === 'proprietario' || role === 'inquilino';
@@ -139,8 +139,10 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
   );
 
   if (unitId && (role === 'proprietario' || role === 'inquilino')) {
-    if (isRepresentative) await query(`update unit_occupancies set is_representative=false where unit_id=$1 and ended_at is null`,[unitId]);
-    await query(`insert into unit_occupancies(unit_id,user_id,is_representative) values($1,$2,$3)`,[unitId,(result.rows[0] as any).id,Boolean(isRepresentative)]);
+    // Quem acabou de ser vinculado à unidade vira automaticamente o
+    // representante — não existe mais escolha manual dessa opção.
+    await query(`update unit_occupancies set is_representative=false where unit_id=$1 and ended_at is null`,[unitId]);
+    await query(`insert into unit_occupancies(unit_id,user_id,is_representative) values($1,$2,true)`,[unitId,(result.rows[0] as any).id]);
   }
 
   let emailSent = false;
@@ -158,7 +160,7 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
 }));
 
 router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
-  const { username, password, role, condominiumId, fullName, cpf, email, phone, unitId, isRepresentative, billingExempt, preferredDueDay,
+  const { username, password, role, condominiumId, fullName, cpf, email, phone, unitId, billingExempt, preferredDueDay,
     street, addressNumber, addressComplement, neighborhood, city, state, postalCode } = req.body ?? {};
   const current = await query<{ id: string; role: UserRole; condominium_id: string | null; unit_id:string|null }>(
     `select id, role, condominium_id, unit_id from users where id = $1`, [req.params.id],
@@ -166,15 +168,20 @@ router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), requireF
   const target = current.rows[0];
   if (!target) return res.status(404).json({ message: 'Usuário não encontrado.' });
 
-  if (req.user?.role === 'admin_geral' && target.role !== 'sindico' && target.role !== 'subsindico') {
+  const nextRole = (role || target.role) as UserRole;
+  const isManagerRole = (value: UserRole) => value === 'sindico' || value === 'subsindico';
+  // Admin geral normalmente só edita gestores (síndico/subsíndico) — mas também
+  // precisa conseguir RECUPERAR alguém cujo perfil de gestor foi perdido por
+  // engano (ex.: perfil principal sobrescrito ao editar em "Pessoas"), senão
+  // ninguém mais consegue promover essa pessoa de volta. Por isso o gate
+  // libera quando o perfil atual OU o perfil solicitado é de gestor.
+  if (req.user?.role === 'admin_geral' && !isManagerRole(target.role) && !isManagerRole(nextRole)) {
     return res.status(403).json({ message: 'Administrador geral pode editar somente síndicos e subsíndicos.' });
   }
   if (req.user?.role !== 'admin_geral' && target.condominium_id !== req.user?.condominiumId) {
     return res.status(403).json({ message: 'Usuário não pertence ao seu condomínio.' });
   }
-
-  const nextRole = (role || target.role) as UserRole;
-  if (req.user?.role === 'admin_geral' && nextRole !== 'sindico' && nextRole !== 'subsindico') {
+  if (req.user?.role === 'admin_geral' && !isManagerRole(nextRole)) {
     return res.status(403).json({ message: 'Administrador geral pode manter somente os perfis síndico e subsíndico.' });
   }
   if (req.user?.role !== 'admin_geral' && !managerCreatedRoles.includes(nextRole)) {
@@ -214,10 +221,17 @@ router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), requireF
       neighborhood || null, city || null, state ? String(state).trim().toUpperCase() : null,
       postalCode ? String(postalCode).replace(/\D/g, '') : null, req.params.id],
   );
-  if (target.unit_id && target.unit_id !== unitId) await query(`update unit_occupancies set ended_at=current_date,is_representative=false where unit_id=$1 and user_id=$2 and ended_at is null`,[target.unit_id,req.params.id]);
+  if (target.unit_id && target.unit_id !== unitId) {
+    await query(`update unit_occupancies set ended_at=current_date,is_representative=false where unit_id=$1 and user_id=$2 and ended_at is null`,[target.unit_id,req.params.id]);
+    // Sem essa pessoa, o representante da unidade antiga passa pro morador
+    // restante vinculado mais recentemente (se sobrar algum).
+    await query(`update unit_occupancies set is_representative=true where id=(select id from unit_occupancies where unit_id=$1 and ended_at is null order by started_at desc limit 1)`,[target.unit_id]);
+  }
   if (unitId && (nextRole === 'proprietario' || nextRole === 'inquilino')) {
-    if (isRepresentative) await query(`update unit_occupancies set is_representative=false where unit_id=$1 and ended_at is null`,[unitId]);
-    await query(`insert into unit_occupancies(unit_id,user_id,is_representative) values($1,$2,$3) on conflict (unit_id,user_id) where ended_at is null do update set is_representative=excluded.is_representative`,[unitId,req.params.id,Boolean(isRepresentative)]);
+    // Quem acabou de ser vinculado à unidade vira automaticamente o
+    // representante — não existe mais escolha manual dessa opção.
+    await query(`update unit_occupancies set is_representative=false where unit_id=$1 and ended_at is null`,[unitId]);
+    await query(`insert into unit_occupancies(unit_id,user_id,is_representative) values($1,$2,true) on conflict (unit_id,user_id) where ended_at is null do update set is_representative=true`,[unitId,req.params.id]);
   }
   await logAudit(req, 'pessoas', 'updated', `Editou ${result.rows[0].full_name || result.rows[0].username}`, { entityId: req.params.id });
   return res.json({ user: result.rows[0] });

@@ -38,7 +38,7 @@ export type FeatureKey =
   | 'pessoas' | 'tipologias' | 'blocos_unidades' | 'prestacao_contas'
   | 'gestao_cobrancas' | 'gestao_debitos' | 'historico_acordos'
   | 'config_enviar_cobrancas' | 'cobrancas_adicionais'
-  | 'painel' | 'indicadores_boletos' | 'nada_consta'
+  | 'painel' | 'painel_usuarios' | 'indicadores_boletos' | 'nada_consta'
   | 'avisos_comunicacao' | 'relatos_solicitacoes' | 'enquetes' | 'reserva_espacos' | 'regimento_ocorrencias'
   | 'consumo_individualizado';
 

@@ -74,7 +74,7 @@ export default function Invoices({navigation}:any){
   const [search,setSearch]=useState('');
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState<string|null>(null);
-  const [dialog,setDialog]=useState<{title:string;message:string;tone:'info'|'success'|'error';confirmLabel?:string;cancelLabel?:string;onConfirm?:()=>void}|null>(null);
+  const [dialog,setDialog]=useState<{title:string;message:string;tone:'info'|'success'|'error';confirmLabel?:string;cancelLabel?:string;onConfirm?:()=>void;scrollable?:boolean}|null>(null);
   const [people,setPeople]=useState<Person[]>([]);const [selectedPersonId,setSelectedPersonId]=useState('');const [personSearch,setPersonSearch]=useState('');
   const [beneficiaryName,setBeneficiaryName]=useState('');const [beneficiaryDocument,setBeneficiaryDocument]=useState('');
   const [description,setDescription]=useState('Taxa condominial');const [emissionMonth,setEmissionMonth]=useState(currentBrazilianMonth());const [manualAmount,setManualAmount]=useState('');
@@ -82,7 +82,7 @@ export default function Invoices({navigation}:any){
   const {scrollRef,tourOpen,registerSection,scrollToSection,openTour,closeTour,isActive}=useSectionTour();
   const [reasonEditingId,setReasonEditingId]=useState('');const [reasonDraft,setReasonDraft]=useState('');const [reasonSettled,setReasonSettled]=useState(false);const [reasonSaving,setReasonSaving]=useState(false);
   const [downloadingZip,setDownloadingZip]=useState(false);
-  const [debtEditingId,setDebtEditingId]=useState('');const [debtReasonDraft,setDebtReasonDraft]=useState('');const [debtSaving,setDebtSaving]=useState(false);
+  const [debtEditingId,setDebtEditingId]=useState('');const [debtReasonDraft,setDebtReasonDraft]=useState('');const [debtSaving,setDebtSaving]=useState(false);const [debtSettledViaPix,setDebtSettledViaPix]=useState(false);
   const [unmatched,setUnmatched]=useState<UnmatchedBankCharge[]>([]);
 
   const load=useCallback(async()=>{
@@ -109,14 +109,14 @@ export default function Invoices({navigation}:any){
   const selectedPerson=people.find(person=>person.id===selectedPersonId);
   const filteredPeople=useMemo(()=>{const term=personSearch.trim().toLocaleLowerCase('pt-BR');if(term.length<2)return[];return people.filter(person=>(person.full_name||person.username).toLocaleLowerCase('pt-BR').includes(term)).slice(0,8)},[people,personSearch]);
 
-  const syncAll=async()=>{if(!userToken)return;setLoading(true);setError(null);try{const result=await apiRequest<{message:string;failed:number;unmatched?:unknown[];conflicts?:unknown[]}>('/invoices/sync-all',userToken,{method:'POST'});setReferenceFilter('all');setStatusFilter('all');const hasPendencies=Boolean(result.failed||result.unmatched?.length||result.conflicts?.length);setDialog({title:hasPendencies?'Atualização concluída com pendências':'Cobranças atualizadas',message:result.message,tone:hasPendencies?'error':'success'});await load()}catch(e){setDialog({title:'Não foi possível atualizar',message:e instanceof Error?e.message:'Falha ao consultar o Banco Inter.',tone:'error'})}finally{setLoading(false)}};
+  const syncAll=async()=>{if(!userToken)return;setLoading(true);setError(null);try{const result=await apiRequest<{message:string;failed:number;unmatched?:unknown[];conflicts?:unknown[]}>('/invoices/sync-all',userToken,{method:'POST'});setReferenceFilter('all');setStatusFilter('all');const hasPendencies=Boolean(result.failed||result.unmatched?.length||result.conflicts?.length);setDialog({title:hasPendencies?'Atualização concluída com pendências':'Cobranças atualizadas',message:result.message,tone:hasPendencies?'error':'success',scrollable:true});await load()}catch(e){setDialog({title:'Não foi possível atualizar',message:e instanceof Error?e.message:'Falha ao consultar o Banco Inter.',tone:'error'})}finally{setLoading(false)}};
   const openPdf=async(id:string)=>{if(!userToken)return;try{await openAuthenticatedPdf(`/invoices/${id}/pdf`,userToken)}catch(e){setDialog({title:'Não foi possível abrir o PDF',message:e instanceof Error?e.message:'Falha ao buscar o boleto no Banco Inter.',tone:'error'})}};
   const downloadPdfsZip=async()=>{if(!userToken||referenceFilter==='all')return;setDownloadingZip(true);try{await downloadAuthenticated(`/invoices/export-pdfs?referenceMonth=${referenceFilter}`,userToken,`boletos-${referenceFilter}.zip`,{awaitCompletion:true})}catch(e){setDialog({title:'Não foi possível baixar os boletos',message:e instanceof Error?e.message:'Falha ao gerar o arquivo com os boletos desta referência.',tone:'error'})}finally{setDownloadingZip(false)}};
   const startReasonEdit=(item:Invoice)=>{setReasonEditingId(item.id);setReasonDraft(item.cancellation_reason||'');setReasonSettled(Boolean(item.paid_at))};
   const cancelReasonEdit=()=>{setReasonEditingId('');setReasonDraft('');setReasonSettled(false)};
   const saveCancellationReason=async(id:string)=>{if(!userToken||!reasonDraft.trim())return;setReasonSaving(true);try{const response=await apiRequest<{cancellationReason:string|null;paidAmountCents:number|null;paidAt:string|null}>(`/invoices/${id}/cancellation-reason`,userToken,{method:'PATCH',body:JSON.stringify({reason:reasonDraft.trim(),settledExternally:reasonSettled})});setItems(current=>current.map(item=>item.id===id?{...item,cancellation_reason:response.cancellationReason,paid_amount_cents:response.paidAmountCents,paid_at:response.paidAt}:item));setReasonEditingId('');setReasonDraft('');setReasonSettled(false)}catch(e){setDialog({title:'Não foi possível salvar',message:e instanceof Error?e.message:'Falha ao registrar o motivo do cancelamento.',tone:'error'})}finally{setReasonSaving(false)}};
-  const startDebtEdit=(item:Invoice)=>{setDebtEditingId(item.id);setDebtReasonDraft('')};
-  const cancelDebtEdit=()=>{setDebtEditingId('');setDebtReasonDraft('')};
+  const startDebtEdit=(item:Invoice)=>{setDebtEditingId(item.id);setDebtReasonDraft('');setDebtSettledViaPix(false)};
+  const cancelDebtEdit=()=>{setDebtEditingId('');setDebtReasonDraft('');setDebtSettledViaPix(false)};
   // Retirar da dívida não apaga nem cancela o boleto: ele continua na tela, com
   // a justificativa registrada, e apenas deixa de contar em Gestão de débitos,
   // no painel e nos indicadores. Reversível pelo mesmo endpoint.
@@ -124,10 +124,10 @@ export default function Invoices({navigation}:any){
     if(!userToken)return;if(excluded&&!debtReasonDraft.trim())return;
     setDebtSaving(true);
     try{
-      const response=await apiRequest<{debtExcludedAt:string|null;debtExclusionReason:string|null}>(`/invoices/${id}/debt-exclusion`,userToken,{method:'PATCH',body:JSON.stringify(excluded?{excluded:true,reason:debtReasonDraft.trim()}:{excluded:false})});
-      setItems(current=>current.map(item=>item.id===id?{...item,debt_excluded_at:response.debtExcludedAt,debt_exclusion_reason:response.debtExclusionReason,debt_excluded_by_name:excluded?(user?.fullName||user?.username||null):null}:item));
+      const response=await apiRequest<{debtExcludedAt:string|null;debtExclusionReason:string|null;paidAmountCents:number|null;paidAt:string|null}>(`/invoices/${id}/debt-exclusion`,userToken,{method:'PATCH',body:JSON.stringify(excluded?{excluded:true,reason:debtReasonDraft.trim(),paidViaPix:debtSettledViaPix}:{excluded:false})});
+      setItems(current=>current.map(item=>item.id===id?{...item,debt_excluded_at:response.debtExcludedAt,debt_exclusion_reason:response.debtExclusionReason,debt_excluded_by_name:excluded?(user?.fullName||user?.username||null):null,paid_amount_cents:response.paidAmountCents,paid_at:response.paidAt}:item));
       cancelDebtEdit();
-      setDialog({title:excluded?'Boleto retirado da dívida':'Boleto devolvido à dívida',message:excluded?'Este boleto deixou de contar em Gestão de débitos, no painel e nos indicadores. A justificativa ficou registrada no histórico.':'Este boleto voltou a contar como valor a receber.',tone:'success'});
+      setDialog({title:excluded?'Boleto retirado da dívida':'Boleto devolvido à dívida',message:excluded?`Este boleto deixou de contar em Gestão de débitos, no painel e nos indicadores. A justificativa ficou registrada no histórico.${debtSettledViaPix?' O valor foi somado ao total recebido do mês.':''}`:'Este boleto voltou a contar como valor a receber.',tone:'success'});
     }catch(e){setDialog({title:'Não foi possível concluir',message:e instanceof Error?e.message:'Falha ao atualizar a dívida deste boleto.',tone:'error'})}
     finally{setDebtSaving(false)}
   };
@@ -265,6 +265,7 @@ export default function Invoices({navigation}:any){
           </View>:canManage&&countsAsDebt(item)?(debtEditingId===item.id?<View style={s.reasonForm}>
             <Text style={s.label}>Por que este boleto não deve contar como dívida?</Text>
             <TextInput value={debtReasonDraft} onChangeText={setDebtReasonDraft} placeholder="Ex.: dívida consolidada e quitada no boleto 07-2026, pago via Pix em 23/07" style={[s.input,s.reasonInput]} multiline/>
+            {isExpiredAtBank(item)?<Pressable onPress={()=>setDebtSettledViaPix(current=>!current)} style={s.settledRow}><View style={[s.checkbox,debtSettledViaPix&&s.checkboxChecked]}>{debtSettledViaPix?<Text style={s.checkmark}>✓</Text>:null}</View><Text style={s.settledLabel}>Recebido via Pix, fora do boleto? Marque para contar no total recebido do mês.</Text></Pressable>:null}
             <View style={s.reasonActions}><View style={s.paymentButton}><AppButton title={debtSaving?'Salvando...':'Retirar da dívida'} onPress={()=>setDebtExclusion(item.id,true)} disabled={debtSaving||!debtReasonDraft.trim()}/></View><Pressable onPress={cancelDebtEdit} style={s.changePerson}><Text style={s.changePersonText}>Cancelar</Text></Pressable></View>
           </View>:<Pressable onPress={()=>startDebtEdit(item)} style={s.reasonButton}><Text style={s.reasonButtonText}>Retirar da dívida (com justificativa)</Text></Pressable>):null}
           <Text style={s.line}>Banco: {item.provider}</Text>{item.paid_at?<Text style={s.paidLine}>Pagamento identificado em {formatBrazilianDate(item.paid_at)} · {money(Number(item.paid_amount_cents||item.amount_cents))}</Text>:null}
@@ -280,7 +281,7 @@ export default function Invoices({navigation}:any){
       </CardGrid>
     </View>)}
     </View>
-    <AppDialog visible={Boolean(dialog)} title={dialog?.title||''} message={dialog?.message||''} tone={dialog?.tone} confirmLabel={dialog?.confirmLabel} cancelLabel={dialog?.cancelLabel} onConfirm={dialog?.onConfirm} onClose={()=>setDialog(null)}/>
+    <AppDialog visible={Boolean(dialog)} title={dialog?.title||''} message={dialog?.message||''} tone={dialog?.tone} confirmLabel={dialog?.confirmLabel} cancelLabel={dialog?.cancelLabel} onConfirm={dialog?.onConfirm} onClose={()=>setDialog(null)} scrollable={dialog?.scrollable}/>
   </ScrollView>
   <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step=>scrollToSection(step.key)}/>
   </>;

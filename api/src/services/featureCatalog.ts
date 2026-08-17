@@ -21,7 +21,8 @@ export type FeatureKey =
   | 'enquetes'
   | 'reserva_espacos'
   | 'regimento_ocorrencias'
-  | 'consumo_individualizado';
+  | 'consumo_individualizado'
+  | 'painel_usuarios';
 
 export const FEATURE_CATALOG: Record<FeatureKey, { label: string; dependsOn: FeatureKey[] }> = {
   pessoas: { label: 'Pessoas', dependsOn: [] },
@@ -40,6 +41,7 @@ export const FEATURE_CATALOG: Record<FeatureKey, { label: string; dependsOn: Fea
   // Painéis de leitura: só somam os boletos já existentes, então não fazem
   // sentido sem Gestão de cobranças ligada.
   painel: { label: 'Painel financeiro', dependsOn: ['gestao_cobrancas'] },
+  painel_usuarios: { label: 'Painel de usuários', dependsOn: ['pessoas'] },
   indicadores_boletos: { label: 'Indicadores de boletos', dependsOn: ['gestao_cobrancas'] },
   // Depende da cobrança porque a declaração afirma quitação de débitos —
   // sem boletos no sistema não há o que declarar.
@@ -71,6 +73,7 @@ export const NEW_CONDOMINIUM_FEATURE_DEFAULTS: Record<FeatureKey, boolean> = {
   gestao_cobrancas: true,
   config_enviar_cobrancas: true,
   painel: true,
+  painel_usuarios: true,
   indicadores_boletos: true,
   nada_consta: true,
   gestao_debitos: false,

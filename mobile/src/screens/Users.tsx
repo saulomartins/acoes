@@ -125,7 +125,6 @@ export default function Users({ navigation }: any) {
   const [phone, setPhone] = useState('');
   const [unit, setUnit] = useState('');
   const [unitId, setUnitId] = useState('');
-  const [isRepresentative, setIsRepresentative] = useState(false);
   const [billingExempt, setBillingExempt] = useState(false);
   const [preferredDueDay, setPreferredDueDay] = useState<10 | 20>(10);
   const [street, setStreet] = useState('');
@@ -314,7 +313,6 @@ export default function Users({ navigation }: any) {
           email: email.trim() || null,
           phone: onlyDigits(phone) || null,
           unitId: role === 'proprietario' || role === 'inquilino' ? unitId : undefined,
-          isRepresentative,
           billingExempt,
           preferredDueDay,
           street: street.trim() || null, addressNumber: addressNumber.trim() || null,
@@ -334,7 +332,6 @@ export default function Users({ navigation }: any) {
       setPhone('');
       setUnit('');
       setUnitId('');
-      setIsRepresentative(false);
       setBillingExempt(false);
       setPreferredDueDay(10);
       setUnitTypeId('');
@@ -438,7 +435,6 @@ export default function Users({ navigation }: any) {
     setPhone(item.phone ? formatPhone(item.phone) : '');
     setUnit(item.unit || '');
     setUnitId(item.unit_id || '');
-    setIsRepresentative(Boolean(item.is_unit_representative));
     setBillingExempt(Boolean(item.billing_exempt));
     setPreferredDueDay(item.preferred_due_day === 20 ? 20 : 10);
     setRole(item.role);
@@ -450,17 +446,34 @@ export default function Users({ navigation }: any) {
   };
 
   const cancelEditing = () => {
-    setEditingId(null); setUsername(''); setPassword(''); setFullName(''); setCpf(''); setEmail(''); setPhone(''); setUnit(''); setUnitId(''); setIsRepresentative(false); setBillingExempt(false); setPreferredDueDay(10); setCondominiumId(''); setUnitTypeId('');
+    setEditingId(null); setUsername(''); setPassword(''); setFullName(''); setCpf(''); setEmail(''); setPhone(''); setUnit(''); setUnitId(''); setBillingExempt(false); setPreferredDueDay(10); setCondominiumId(''); setUnitTypeId('');
     setPersonProfiles([]); setNewProfileRole(''); setNewProfileUnitId(''); setProfilesError(null);
     setStreet(''); setAddressNumber(''); setAddressComplement(''); setNeighborhood(''); setCity(''); setAddressState(''); setPostalCode('');
     setRole('');
   };
 
   const selectRole = (nextRole: UserRole) => {
+    const editingItem = editingId ? items.find((entry) => entry.id === editingId) : null;
+    const proprietarioWarning = nextRole === 'proprietario' ? ' O perfil Proprietário poderá visualizar o saldo bancário mensal do condomínio.' : '';
+    // Este picker SOBRESCREVE o perfil principal (users.role) — diferente do
+    // "Conceder novo perfil" acima, que é aditivo. Trocar aqui durante uma
+    // edição remove o acesso do perfil atual (ex.: síndico perde o acesso de
+    // síndico ao "virar" proprietário), então avisamos antes de aplicar.
+    if (editingItem && editingItem.role !== nextRole) {
+      setDialog({
+        title: 'Substituir o perfil principal?',
+        message: `${editingItem.full_name || editingItem.username} está cadastrado(a) como ${roleLabel(editingItem.role)}. Selecionar "${roleLabel(nextRole)}" aqui SUBSTITUI o perfil principal e remove o acesso como ${roleLabel(editingItem.role)}.${proprietarioWarning} Se a pessoa deve manter os dois perfis, cancele e use "Conceder novo perfil" na seção acima em vez de mudar aqui.`,
+        tone: 'error',
+        confirmLabel: 'Sim, substituir perfil',
+        cancelLabel: 'Cancelar',
+        onConfirm: () => { setDialog(null); setRole(nextRole); },
+      });
+      return;
+    }
     if (nextRole !== 'proprietario') { setRole(nextRole); return; }
     setDialog({
       title: 'Confirmar perfil Proprietário',
-      message: 'Você tem certeza? O perfil Proprietário poderá visualizar o saldo bancário mensal do condomínio.',
+      message: `Você tem certeza?${proprietarioWarning}`,
       tone: 'info',
       confirmLabel: 'Sim, selecionar',
       cancelLabel: 'Cancelar',
@@ -768,6 +781,7 @@ export default function Users({ navigation }: any) {
           </FormFieldFull>
         ) : null}
         <Text style={styles.label}>Perfil *</Text>
+        {editingId ? <Text style={styles.fieldHint}>Trocar o perfil aqui substitui o perfil principal desta pessoa. Para adicionar um perfil extra sem remover o atual, use "Conceder novo perfil" na seção acima.</Text> : null}
         <FormFieldFull>
           <View style={styles.roleGrid}>
             {roles.filter((item) => user?.role === 'admin_geral' ? item.value === 'sindico' || item.value === 'subsindico' : item.value === 'subsindico' || item.value === 'proprietario' || item.value === 'inquilino').map((item) => (
@@ -806,7 +820,7 @@ export default function Users({ navigation }: any) {
                   emptyText="Nenhuma unidade encontrada para esta busca."
                 />
               )}
-              {unitId ? <Pressable onPress={() => setIsRepresentative((value) => !value)} style={[styles.representativeOption, isRepresentative && styles.representativeOptionActive]}><Text style={[styles.roleText, isRepresentative && styles.roleTextActive]}>{isRepresentative ? '✓ ' : ''}Morador representante desta unidade</Text></Pressable> : null}
+              {unitId ? <Text style={styles.fieldHint}>Esta pessoa vai virar automaticamente a representante da unidade.</Text> : null}
             </View>
           </FormFieldFull>
         ) : null}
@@ -1111,7 +1125,6 @@ const styles = StyleSheet.create({
   roleText: { color: colors.muted, fontWeight: '800' },
   roleTextActive: { color: '#fff' },
   representativeOption: { minHeight: 42, borderRadius: 8, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff', marginTop: 4 },
-  representativeOptionActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   exemptOptionActive: { backgroundColor: colors.amber, borderColor: colors.amber },
   exemptBadge: { alignSelf: 'flex-start', color: colors.amber, backgroundColor: '#fff8e8', borderRadius: 8, overflow: 'hidden', paddingHorizontal: 8, paddingVertical: 4, marginTop: 6, fontSize: 14, fontWeight: '900' },
   error: { color: colors.red, marginBottom: 10 },

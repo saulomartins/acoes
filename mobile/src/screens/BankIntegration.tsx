@@ -13,11 +13,15 @@ import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
 
 type Provider = { id:string; code:string; name:string; adapterKey:string|null; active:boolean; operational:boolean; requiredFields:string[] };
-type Condominium = { id:string; name:string; cnpj:string|null; bank_configuration_id:string|null; bank_configuration_name:string|null; bank_provider:string|null; boleto_sync_mode:'all'|'from_period'|null; boleto_sync_start_period:string|null };
+type Purpose = 'boleto'|'extrato';
+type Condominium = {
+  id:string; name:string; cnpj:string|null; bank_configuration_id:string|null; bank_configuration_name:string|null; bank_provider:string|null; boleto_sync_mode:'all'|'from_period'|null; boleto_sync_start_period:string|null;
+  bank_extrato_configuration_id:string|null; bank_extrato_configuration_name:string|null; bank_extrato_enabled:boolean;
+};
 type BankConfiguration = {
   id:string; name:string; provider:string; bank_id:string; bank_name:string; adapter_key:string|null; client_id:string|null; cert_path:string|null; key_path:string|null;
   base_url:string|null; token_path:string|null; scopes:string|null; extra_config:Record<string,unknown>;
-  enabled:boolean; condominiums:Array<{id:string;name:string}>;
+  enabled:boolean; condominiums:Array<{id:string;name:string;purpose:Purpose}>;
 };
 
 const defaults:Record<string,{baseUrl:string;tokenPath:string;scopes:string}> = {
@@ -43,6 +47,7 @@ export default function BankIntegration({ navigation, route }:any) {
   const [scopes,setScopes]=useState(defaults.inter.scopes); const [enabled,setEnabled]=useState(true);
   const [selectedCondominiumId,setSelectedCondominiumId]=useState('');
   const [selectedConfigurationId,setSelectedConfigurationId]=useState('');
+  const [linkPurposes,setLinkPurposes]=useState<Set<Purpose>>(()=>new Set(['boleto','extrato']));
   const [syncMode,setSyncMode]=useState<'all'|'from_period'>('all');
   const [syncStartPeriod,setSyncStartPeriod]=useState('');
   const [loading,setLoading]=useState(false); const [error,setError]=useState(''); const [notice,setNotice]=useState('');
@@ -63,12 +68,23 @@ export default function BankIntegration({ navigation, route }:any) {
   // Opções dos comboboxes. A segunda linha (description) repete o que os
   // cartões antigos mostravam, para não perder informação ao fechar a lista.
   const bankOptions=providers.filter(item=>item.active).map(item=>({value:item.id,label:item.name,description:item.operational?'Operacional':'Adaptador pendente'}));
-  const condominiumOptions=condominiums.map(item=>({value:item.id,label:item.name,description:`Vínculo atual: ${item.bank_configuration_name||'nenhuma configuração'} · Busca: ${item.boleto_sync_mode==='from_period'&&item.boleto_sync_start_period?`a partir de ${formatBrazilianMonth(item.boleto_sync_start_period)}`:'todos'}`}));
-  const configurationOptions=configurations.map(item=>({value:item.id,label:item.name,description:`${item.bank_name||item.provider} · ${item.enabled?'ativa':'desabilitada'} · Vínculos: ${item.condominiums.map(c=>c.name).join(', ')||'nenhum'}`}));
+  const condominiumOptions=condominiums.map(item=>({value:item.id,label:item.name,description:`Boleto: ${item.bank_configuration_name||'nenhuma configuração'} · Extrato: ${item.bank_extrato_configuration_name||'nenhuma configuração'}`}));
+  const configurationOptions=configurations.map(item=>({value:item.id,label:item.name,description:`${item.bank_name||item.provider} · ${item.enabled?'ativa':'desabilitada'} · Vínculos: ${item.condominiums.map(c=>c.purpose==='extrato'?`${c.name} (extrato)`:c.name).join(', ')||'nenhum'}`}));
 
-  // Escolher o condomínio também carrega o vínculo e o modo de busca atuais —
-  // era o que o onPress do cartão fazia antes de virar combobox.
-  const chooseCondominium=(id:string)=>{const item=condominiums.find(x=>x.id===id);if(!item)return;setSelectedCondominiumId(id);setSelectedConfigurationId(item.bank_configuration_id||'');setSyncMode(item.boleto_sync_mode==='from_period'?'from_period':'all');setSyncStartPeriod(formatBrazilianMonth(item.boleto_sync_start_period))};
+  // Escolher o condomínio também carrega o vínculo e o modo de busca atuais
+  // para pré-preencher o formulário — como o vínculo agora pode cobrir as
+  // duas finalidades de uma vez, a pré-carga prioriza os dados de boleto
+  // (mais comum) e cai para os de extrato só se boleto não estiver marcado.
+  const applyLinkDefaults=(item:Condominium,purposes:Set<Purpose>)=>{
+    const primary=purposes.has('boleto')?'boleto':'extrato';
+    setSelectedConfigurationId((primary==='extrato'?item.bank_extrato_configuration_id:item.bank_configuration_id)||'');
+    setSyncMode(item.boleto_sync_mode==='from_period'?'from_period':'all');
+    setSyncStartPeriod(formatBrazilianMonth(item.boleto_sync_start_period));
+  };
+  const chooseCondominium=(id:string)=>{const item=condominiums.find(x=>x.id===id);if(!item)return;setSelectedCondominiumId(id);applyLinkDefaults(item,linkPurposes)};
+  // Mantém sempre ao menos uma finalidade marcada — o vínculo precisa servir
+  // para algo.
+  const togglePurpose=(purpose:Purpose)=>{setLinkPurposes(current=>{const next=new Set(current);if(next.has(purpose)){if(next.size>1)next.delete(purpose)}else{next.add(purpose)}return next})};
   const chooseProvider=(id:string)=>{const bank=providers.find(x=>x.id===id);if(!bank)return;setBankId(id);const adapter=bank.adapterKey||'outro';setProvider(adapter);const value=defaults[adapter]||defaults.outro;setBaseUrl(value.baseUrl);setTokenPath(value.tokenPath);setScopes(value.scopes);if(adapter!=='inter'){setCertPath('');setKeyPath('')}};
   const edit=(item:BankConfiguration)=>{setEditingId(item.id);setName(item.name);setBankId(item.bank_id);setProvider(item.adapter_key||item.provider);setClientId(item.client_id||'');setClientSecret('');setCertPath(item.cert_path||'');setKeyPath(item.key_path||'');setBaseUrl(item.base_url||'');setTokenPath(item.token_path||'');setScopes(item.scopes||'');setEnabled(item.enabled);setNotice('');setError('')};
   const save=async()=>{if(!userToken||!name.trim())return;setLoading(true);setError('');setNotice('');try{
@@ -76,9 +92,9 @@ export default function BankIntegration({ navigation, route }:any) {
     await apiRequest(path,userToken,{method:editingId?'PUT':'POST',body:JSON.stringify({name:name.trim(),bankId,clientId:clientId.trim()||null,clientSecret:clientSecret.trim()||undefined,certPath:certPath.trim()||null,keyPath:keyPath.trim()||null,baseUrl:baseUrl.trim()||null,tokenPath:tokenPath.trim()||null,scopes:scopes.trim()||null,enabled,extraConfig:{}})});
     setNotice('Configuração bancária salva.');reset();await load();
   }catch(e){setError(e instanceof Error?e.message:'Falha ao salvar configuração.')}finally{setLoading(false)}};
-  const syncPeriodIso=syncMode==='from_period'?brazilianMonthToIso(syncStartPeriod):null;
-  const link=async()=>{if(!userToken||!selectedCondominiumId||!selectedConfigurationId)return;if(syncMode==='from_period'&&!syncPeriodIso)return;setLoading(true);setError('');try{
-    const response=await apiRequest<{ok:boolean;deleted:number;preserved:number}>(`/bank-configurations/condominiums/${selectedCondominiumId}/link`,userToken,{method:'PUT',body:JSON.stringify({configurationId:selectedConfigurationId,syncMode,syncStartPeriod:syncPeriodIso?`${syncPeriodIso}-01`:null})});
+  const syncPeriodIso=linkPurposes.has('boleto')&&syncMode==='from_period'?brazilianMonthToIso(syncStartPeriod):null;
+  const link=async()=>{if(!userToken||!selectedCondominiumId||!selectedConfigurationId||linkPurposes.size===0)return;if(linkPurposes.has('boleto')&&syncMode==='from_period'&&!syncPeriodIso)return;setLoading(true);setError('');try{
+    const response=await apiRequest<{ok:boolean;deleted:number;preserved:number}>(`/bank-configurations/condominiums/${selectedCondominiumId}/link`,userToken,{method:'PUT',body:JSON.stringify({configurationId:selectedConfigurationId,purposes:Array.from(linkPurposes),syncMode,syncStartPeriod:syncPeriodIso?`${syncPeriodIso}-01`:null})});
     const deletionNote=response.deleted?` ${response.deleted} boleto(s) anterior(es) ao período foram excluídos permanentemente do sistema${response.preserved?` (${response.preserved} preservado(s) por estarem vinculados a um acordo de débito)`:''}.`:'';
     setNotice(`Banco vinculado ao condomínio. As operações do síndico usarão esta configuração.${deletionNote}`);await load();
   }catch(e){setError(e instanceof Error?e.message:'Falha ao vincular banco.')}finally{setLoading(false)}};
@@ -97,7 +113,7 @@ export default function BankIntegration({ navigation, route }:any) {
     { key: 'configList', title: 'Configurações cadastradas', description: 'Cada card mostra o banco, se a configuração está ativa e quais condomínios já estão vinculados a ela. "Editar" carrega os dados no formulário acima (o Client Secret nunca é reexibido, só substituído). "Testar conexão" só fica disponível pra configurações do Banco Inter que estejam ativas — ele tenta obter um token OAuth de verdade junto à API do banco.' },
   ];
   const linkTourSteps: TourStep[] = [
-    { key: 'link', title: 'Vincular banco ao condomínio', description: '1) Escolha o condomínio. 2) Escolha a configuração bancária cadastrada que ele vai usar — é essa configuração que o síndico do condomínio passa a usar pra emitir e sincronizar boletos. 3) Defina o período de busca: "Buscar todos os boletos" traz todo o histórico disponível no banco; "Buscar a partir de um período" ignora o que veio antes do mês informado e, ao salvar, apaga permanentemente do sistema qualquer boleto já importado com vencimento anterior a esse mês (inclusive os já pagos) — exceto os que estão vinculados a um acordo de débito em andamento, que são preservados.' },
+    { key: 'link', title: 'Vincular banco ao condomínio', description: '1) Finalidade: cobrança e extrato vêm marcados por padrão, porque a grande maioria dos condomínios usa o mesmo vínculo pras duas coisas — um clique já resolve. Só desmarque uma se esse condomínio precisar de configurações bancárias diferentes por finalidade. 2) Escolha o condomínio. 3) Escolha a configuração bancária cadastrada que ele vai usar — é essa configuração que o síndico do condomínio passa a usar pra emitir/sincronizar boletos e/ou importar extrato, conforme a finalidade marcada. 4) Se "Cobrança" estiver marcada, defina o período de busca de boletos: "Buscar todos os boletos" traz todo o histórico disponível no banco; "Buscar a partir de um período" ignora o que veio antes do mês informado e, ao salvar, apaga permanentemente do sistema qualquer boleto já importado com vencimento anterior a esse mês (inclusive os já pagos) — exceto os que estão vinculados a um acordo de débito em andamento, que são preservados.' },
   ];
   const tourSteps = section === 'banks' ? banksTourSteps : section === 'link' ? linkTourSteps : configurationsTourSteps;
 
@@ -131,22 +147,30 @@ export default function BankIntegration({ navigation, route }:any) {
       <View style={s.actions}><AppButton title={enabled?'Ativa — desabilitar':'Desabilitada — ativar'} onPress={()=>setEnabled(v=>!v)} variant="secondary"/><AppButton title={editingId?'Salvar alterações':'Cadastrar configuração'} onPress={save} disabled={loading||!name.trim()||!bankId}/>{editingId?<AppButton title="Cancelar" onPress={reset} variant="secondary"/>:null}</View>
     </Panel></View>
 
-    <View ref={registerSection('configList')} style={[isActive('configList')&&s.tourHighlight]}><Text style={s.section}>Configurações cadastradas</Text>{configurations.length?<CardGrid columns={{mobile:1,tablet:2,desktop:3}}>{configurations.map(item=><View key={item.id} style={s.card}><Text style={s.cardTitle}>{item.name}</Text><Text style={s.meta}>{item.bank_name||item.provider} · {item.enabled?'Ativa':'Desabilitada'}</Text><Text style={s.meta}>Vínculos: {item.condominiums.map(c=>c.name).join(', ')||'nenhum condomínio'}</Text><View style={s.actions}><AppButton title="Editar" onPress={()=>edit(item)} variant="secondary"/><AppButton title={testingId===item.id?'Testando conexão...':'Testar conexão'} onPress={()=>test(item.id)} disabled={Boolean(testingId)||item.provider!=='inter'||!item.enabled}/></View>{testResults[item.id]?<Text style={testResults[item.id].ok?s.testSuccess:s.testError}>{testResults[item.id].message}</Text>:null}{item.provider!=='inter'?<Text style={s.warning}>Teste indisponível: o adaptador deste banco ainda não foi implementado.</Text>:null}</View>)}</CardGrid>:<EmptyState title="Nenhum banco configurado" description="Cadastre a primeira conexão bancária acima."/>}</View></>:null}
+    <View ref={registerSection('configList')} style={[isActive('configList')&&s.tourHighlight]}><Text style={s.section}>Configurações cadastradas</Text>{configurations.length?<CardGrid columns={{mobile:1,tablet:2,desktop:3}}>{configurations.map(item=><View key={item.id} style={s.card}><Text style={s.cardTitle}>{item.name}</Text><Text style={s.meta}>{item.bank_name||item.provider} · {item.enabled?'Ativa':'Desabilitada'}</Text><Text style={s.meta}>Vínculos: {item.condominiums.map(c=>c.purpose==='extrato'?`${c.name} (extrato)`:c.name).join(', ')||'nenhum condomínio'}</Text><View style={s.actions}><AppButton title="Editar" onPress={()=>edit(item)} variant="secondary"/><AppButton title={testingId===item.id?'Testando conexão...':'Testar conexão'} onPress={()=>test(item.id)} disabled={Boolean(testingId)||item.provider!=='inter'||!item.enabled}/></View>{testResults[item.id]?<Text style={testResults[item.id].ok?s.testSuccess:s.testError}>{testResults[item.id].message}</Text>:null}{item.provider!=='inter'?<Text style={s.warning}>Teste indisponível: o adaptador deste banco ainda não foi implementado.</Text>:null}</View>)}</CardGrid>:<EmptyState title="Nenhum banco configurado" description="Cadastre a primeira conexão bancária acima."/>}</View></>:null}
 
-    {section==='link'?<View ref={registerSection('link')} style={[isActive('link')&&s.tourHighlight]}><Text style={s.section}>Vincular banco ao condomínio</Text><Panel><Text style={s.meta}>As opções abaixo vêm das configurações criadas em “Nova configuração bancária”.</Text><Field label="1. Condomínio" required>
+    {section==='link'?<View ref={registerSection('link')} style={[isActive('link')&&s.tourHighlight]}><Text style={s.section}>Vincular banco ao condomínio</Text><Panel><Text style={s.meta}>As opções abaixo vêm das configurações criadas em “Nova configuração bancária”.</Text>
+      <Text style={s.label}>1. Finalidade</Text>
+      <Text style={s.meta}>As duas vêm marcadas por padrão — é o caso mais comum: a mesma configuração bancária serve tanto para cobrança quanto para extrato. Desmarque uma delas só se o condomínio precisar de configurações bancárias diferentes por finalidade (alguns bancos exigem uma aplicação separada para cada uma).</Text>
+      <CardGrid columns={{mobile:1,tablet:2,desktop:2}}>
+        <Pressable onPress={()=>togglePurpose('boleto')} style={[s.option,linkPurposes.has('boleto')&&s.optionActive]}><Text style={linkPurposes.has('boleto')?s.optionTextActive:s.optionText}>{linkPurposes.has('boleto')?'☑':'☐'} Cobrança (boletos)</Text><Text style={s.small}>Usada pelo síndico para emitir e sincronizar boletos.</Text></Pressable>
+        <Pressable onPress={()=>togglePurpose('extrato')} style={[s.option,linkPurposes.has('extrato')&&s.optionActive]}><Text style={linkPurposes.has('extrato')?s.optionTextActive:s.optionText}>{linkPurposes.has('extrato')?'☑':'☐'} Extrato bancário</Text><Text style={s.small}>Usada para importar saldo e movimentações na prestação de contas.</Text></Pressable>
+      </CardGrid>
+      <Field label="2. Condomínio" required>
         <ComboBox options={condominiumOptions} value={selectedCondominiumId} onChange={chooseCondominium} placeholder="Selecione o condomínio" title="Condomínio" searchPlaceholder="Buscar condomínio" emptyText="Nenhum condomínio encontrado."/>
       </Field>
-      {configurations.length===0?<EmptyState title="Nenhuma configuração bancária" description="Acesse Configurações bancárias e cadastre uma configuração antes de realizar o vínculo."/>:<Field label="2. Configuração bancária cadastrada" required>
+      {configurations.length===0?<EmptyState title="Nenhuma configuração bancária" description="Acesse Configurações bancárias e cadastre uma configuração antes de realizar o vínculo."/>:<Field label="3. Configuração bancária cadastrada" required>
         <ComboBox options={configurationOptions} value={selectedConfigurationId} onChange={setSelectedConfigurationId} placeholder="Selecione a configuração" title="Configuração bancária" searchPlaceholder="Buscar configuração ou banco" emptyText="Nenhuma configuração encontrada."/>
       </Field>}
-      <Text style={s.label}>3. Período de busca de boletos</Text>
+      {linkPurposes.has('boleto')?<>
+      <Text style={s.label}>4. Período de busca de boletos</Text>
       <Text style={s.meta}>Define quanto do histórico do banco entra no sistema quando o síndico clicar em "Atualizar todos os boletos". Boletos arquivados no banco nunca são importados, em nenhum dos dois modos.</Text>
       <CardGrid columns={{mobile:1,tablet:2,desktop:2}}>
         <Pressable onPress={()=>setSyncMode('all')} style={[s.option,syncMode==='all'&&s.optionActive]}><Text style={syncMode==='all'?s.optionTextActive:s.optionText}>Buscar todos os boletos</Text><Text style={s.small}>Traz todo o histórico disponível no banco.</Text></Pressable>
         <Pressable onPress={()=>setSyncMode('from_period')} style={[s.option,syncMode==='from_period'&&s.optionActive]}><Text style={syncMode==='from_period'?s.optionTextActive:s.optionText}>Buscar a partir de um período</Text><Text style={s.small}>Ignora boletos anteriores ao mês informado.</Text></Pressable>
-      </CardGrid>
-      {syncMode==='from_period'?<View><TextField label="Mês inicial da busca" value={syncStartPeriod} onChangeText={v=>setSyncStartPeriod(maskBrazilianMonth(v))} placeholder="MM/AAAA" keyboardType="number-pad"/><Text style={s.small}>A partir deste mês, os boletos emitidos no banco entram no sistema. Histórico anterior a esse mês não é buscado.</Text><Text style={s.warning}>Atenção: ao salvar, todo boleto já importado com vencimento anterior a este mês é excluído permanentemente do sistema (inclusive os já pagos), exceto boletos vinculados a um acordo de débito em andamento.</Text></View>:null}
-      <AppButton title="Salvar vínculo" onPress={link} disabled={loading||!selectedCondominiumId||!selectedConfigurationId||(syncMode==='from_period'&&!syncPeriodIso)}/></Panel></View>:null}
+      </CardGrid></>:null}
+      {linkPurposes.has('boleto')&&syncMode==='from_period'?<View><TextField label="Mês inicial da busca" value={syncStartPeriod} onChangeText={v=>setSyncStartPeriod(maskBrazilianMonth(v))} placeholder="MM/AAAA" keyboardType="number-pad"/><Text style={s.small}>A partir deste mês, os boletos emitidos no banco entram no sistema. Histórico anterior a esse mês não é buscado.</Text><Text style={s.warning}>Atenção: ao salvar, todo boleto já importado com vencimento anterior a este mês é excluído permanentemente do sistema (inclusive os já pagos), exceto boletos vinculados a um acordo de débito em andamento.</Text></View>:null}
+      <AppButton title="Salvar vínculo" onPress={link} disabled={loading||!selectedCondominiumId||!selectedConfigurationId||linkPurposes.size===0||(syncMode==='from_period'&&!syncPeriodIso)}/></Panel></View>:null}
   </ScrollView>
   <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step=>scrollToSection(step.key)}/>
   </>;

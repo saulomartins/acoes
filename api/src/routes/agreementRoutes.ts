@@ -238,6 +238,7 @@ router.get('/history', asyncHandler(async (req, res) => {
     select a.*,
       coalesce(u.full_name, u.username) debtor_name,
       coalesce(nullif(concat_ws(' - ', b.name, un.number), ''), u.unit, 'Sem apartamento') apartment,
+      (a.unit_id = any($4::uuid[]) and a.debtor_user_id <> $3) owned_elsewhere,
       to_char(a.created_at, 'DD/MM/YYYY') agreement_date,
       to_char(a.accepted_at, 'DD/MM/YYYY') accepted_date,
       to_char(a.settled_at, 'DD/MM/YYYY') settled_date,

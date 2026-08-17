@@ -517,7 +517,7 @@ export default function Debts({ navigation }: any) {
 
         {!manager && ownedElsewhereUnits.length ? <View ref={registerSection('ownedElsewhere')} style={[styles.ownedElsewhereSection,isActive('ownedElsewhere')&&styles.tourHighlight]}>
           <Text style={styles.sectionTitle}>Apartamentos que você acompanha</Text>
-          <Text style={styles.sectionHint}>Você é proprietário adicional dessas unidades — só visualização, o morador é quem responde pela cobrança.</Text>
+          <Text style={styles.sectionHint}>Você é proprietário dessas unidades — só visualização, o morador/inquilino é quem responde pela cobrança.</Text>
           <View style={styles.unitsList}>{visibleOwnedElsewhereUnits.map(group => renderUnitGroup(group))}</View>
         </View> : null}
       </> : null}
@@ -547,7 +547,7 @@ export default function Debts({ navigation }: any) {
                     {manager ? <Text style={[styles.headerCell, styles.actionsCell]}>Ações</Text> : null}
                   </View>
                   {detailsPerson.rows.map(row => (
-                    <View key={row.id} style={[styles.tableRow, row.daysLate > 0 && row.open && styles.lateRow, !row.open && styles.paidRow]}>
+                    <View key={row.id} style={[styles.tableRow, row.status === 'paid' ? styles.paidRow : row.daysLate > 0 ? styles.lateRow : styles.openRow]}>
                       <View style={styles.referenceCellWrap}>
                         <Text style={[styles.cellText, styles.reference]}>{formatBrazilianMonth(row.referenceMonth)}</Text>
                         {row.invoiceType === 'legacy' ? (
@@ -567,7 +567,7 @@ export default function Debts({ navigation }: any) {
                       <Text style={[styles.cell, styles.alignRight]}>{money(row.fineCents)}</Text>
                       <Text style={[styles.cell, styles.alignRight]}>{money(row.interestCents)}</Text>
                       <Text style={[styles.cell, styles.amount, styles.alignRight]}>{money(row.updatedTotalCents)}</Text>
-                      <Text style={[styles.cell, styles.status, row.daysLate > 0 && row.open && styles.statusLate, !row.open && styles.statusPaid]}>
+                      <Text style={[styles.cell, styles.status, row.status === 'paid' ? styles.statusPaid : row.daysLate > 0 ? styles.statusLate : styles.statusOpen]}>
                         {row.frozenByAgreement ? 'Em acordo' : situation(row)}
                       </Text>
                       {manager ? (
@@ -920,7 +920,7 @@ const styles = StyleSheet.create({
   debtChevron: { color: colors.primary, fontWeight: '800', fontSize: 13 },
   legacyTag: { color: '#7a4d00', backgroundColor: '#fff3d6', alignSelf: 'flex-start', fontSize: 10, fontWeight: '900', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden', marginTop: 4 },
   legacyTagJudicial: { color: '#fff', backgroundColor: colors.lilac },
-  lateRow: { backgroundColor: '#fff4f4' }, paidRow: { backgroundColor: '#f3faf5' }, statusLate: { color: colors.red }, statusPaid: { color: colors.green },
+  lateRow: { backgroundColor: '#fff4f4' }, paidRow: { backgroundColor: '#f3faf5' }, openRow: { backgroundColor: '#fff9e6' }, statusLate: { color: colors.red }, statusPaid: { color: colors.green }, statusOpen: { color: colors.amber },
   tableScroll: { flexGrow: 1, justifyContent: 'center' },
   table: { minWidth: 1480 }, tableRow: { flexDirection: 'row', minHeight: 54, alignItems: 'center', borderTopWidth: 1, borderTopColor: colors.border },
   tableHeader: { minHeight: 46, backgroundColor: '#f5f7fa' }, headerCell: { width: 148, paddingHorizontal: 10, color: colors.muted, fontSize: 12, fontWeight: '900' },

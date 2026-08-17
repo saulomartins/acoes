@@ -83,19 +83,20 @@ type DialogProps = {
   scrollable?: boolean;
 };
 
+// A altura do card e a rolagem da mensagem são sempre ativas (não só quando
+// scrollable=true) — uma mensagem longa (ex.: lista de nomes concatenada por
+// um endpoint) não pode empurrar os botões de ação pra fora da tela, pois aí
+// não sobra como fechar o diálogo. `scrollable` agora só controla o
+// alinhamento do texto (esquerda para listas, centro para mensagens curtas).
 export const AppDialog = ({ visible, title, message, tone = 'info', confirmLabel = 'Entendi', cancelLabel, onConfirm, onClose, scrollable = false }: DialogProps) => (
   <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
     <View style={styles.dialogBackdrop}>
-      <View style={[styles.dialogCard, scrollable && styles.dialogCardScrollable]}>
+      <View style={[styles.dialogCard, styles.dialogCardScrollable]}>
         <View style={[styles.dialogIcon, tone === 'success' && styles.dialogIconSuccess, tone === 'error' && styles.dialogIconError]}>
           <Text style={styles.dialogIconText}>{tone === 'success' ? '✓' : tone === 'error' ? '!' : 'i'}</Text>
         </View>
         <Text style={styles.dialogTitle}>{title}</Text>
-        {scrollable ? (
-          <ScrollView style={styles.dialogMessageScroll}><Text style={[styles.dialogMessage, styles.dialogMessageLeft]}>{message}</Text></ScrollView>
-        ) : (
-          <Text style={styles.dialogMessage}>{message}</Text>
-        )}
+        <ScrollView style={styles.dialogMessageScroll}><Text style={[styles.dialogMessage, scrollable && styles.dialogMessageLeft]}>{message}</Text></ScrollView>
         <View style={styles.dialogActions}>
           {cancelLabel ? <Pressable onPress={onClose} style={styles.dialogCancel}><Text style={styles.dialogCancelText}>{cancelLabel}</Text></Pressable> : null}
           <Pressable onPress={onConfirm || onClose} style={[styles.dialogConfirm, tone === 'error' && styles.dialogConfirmError]}><Text style={styles.dialogConfirmText}>{confirmLabel}</Text></Pressable>

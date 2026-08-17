@@ -13,7 +13,7 @@ const run = async () => {
             coalesce(b.enabled, false) as enabled,
             b.updated_at
      from condominiums c
-     left join condominium_bank_configurations cb on cb.condominium_id = c.id
+     left join condominium_bank_configurations cb on cb.condominium_id = c.id and cb.purpose = 'boleto'
      left join bank_configurations b on b.id = cb.bank_configuration_id
      order by c.name`,
   );

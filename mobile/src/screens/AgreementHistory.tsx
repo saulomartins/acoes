@@ -27,6 +27,7 @@ type Agreement = {
   cancellation_reason: string | null;
   recalculated_total_cents: number | null;
   notes: string | null;
+  owned_elsewhere: boolean;
   installments: Array<{ number: number; amountCents: number; dueDate: string; status: string | null; cancellationReason: string | null }>;
 };
 
@@ -115,7 +116,7 @@ export default function AgreementHistory({ navigation }: any) {
 
   const grouped = useMemo<ApartmentGroup[]>(() => {
     if (!manager) {
-      return [{ apartment: 'Meus Acordos', debtorName: user?.username || '', agreements: visibleAgreements }];
+      return [{ apartment: 'Meus Acordos', debtorName: user?.username || '', agreements: visibleAgreements.filter(ag => !ag.owned_elsewhere) }];
     }
     const map = new Map<string, Agreement[]>();
     visibleAgreements.forEach(ag => {
@@ -128,6 +129,19 @@ export default function AgreementHistory({ navigation }: any) {
       agreements: ags.sort((a, b) => new Date(b.agreement_date).getTime() - new Date(a.agreement_date).getTime()),
     }));
   }, [visibleAgreements, manager, user?.username]);
+
+  // Acordos de unidades que a pessoa só acompanha como proprietária (posse
+  // sem moradia, unit_ownerships) — mesmo conceito e mesmo texto já usados em
+  // "Apartamentos que você acompanha" na tela de Gestão de débitos. Só faz
+  // sentido para proprietário: inquilino nunca tem unit_ownerships de outra
+  // unidade. Ao contrário do agrupamento normal, essa seção aparece mesmo
+  // vazia — o síndico/subsíndico já enxerga tudo no agrupamento por
+  // apartamento acima, então não precisa de uma seção equivalente.
+  const ownedElsewhereAgreements = useMemo(
+    () => visibleAgreements.filter(ag => ag.owned_elsewhere).sort((a, b) => new Date(b.agreement_date).getTime() - new Date(a.agreement_date).getTime()),
+    [visibleAgreements],
+  );
+  const showOwnedElsewhere = !manager && user?.role === 'proprietario';
 
   const settledCount = agreements.filter(ag => ag.status === 'settled').length;
   const breachedCount = agreements.filter(ag => ag.status === 'breached').length;
@@ -164,6 +178,7 @@ export default function AgreementHistory({ navigation }: any) {
     {key:'summary',title:'Resumo geral',description:'Quantos acordos você já fez no total, quantos já foram quitados, quantos foram rompidos e o valor total que você negociou — já com o desconto obtido em relação à dívida original.'},
     {key:'filters',title:'Filtrar por situação',description:'Filtre seus acordos por situação: aguardando seu aceite, ativo, sob risco de rompimento, quitado, rompido, recusado, expirado ou cancelado.'},
     {key:'agreements',title:'Seus acordos',description:'Toque em "Ver detalhes" pra ver a dívida original, o valor negociado, todas as parcelas com data de vencimento e situação (paga, vencida, cancelada), além de observações e o motivo de um eventual cancelamento.'},
+    {key:'ownedElsewhere',title:'Apartamentos que você acompanha',description:'Se você é proprietário de outra unidade além da que mora, os acordos de débito dela aparecem aqui só pra consulta — quem responde pela cobrança é o morador/inquilino daquele apartamento, então não há nenhuma ação por aqui.'},
   ];
   const tourSteps=manager?managerTourSteps:residentTourSteps;
 
@@ -239,6 +254,35 @@ export default function AgreementHistory({ navigation }: any) {
         <EmptyState title="Nenhum acordo encontrado" description={manager ? 'Altere os filtros ou aguarde novos acordos encerrados, quitados ou rompidos.' : 'Você não possui acordos finalizados.'} />
       )}
       </View>
+
+      {showOwnedElsewhere ? (
+        <View ref={registerSection('ownedElsewhere')} style={[styles.group, isActive('ownedElsewhere')&&styles.tourHighlight]}>
+          <Text style={styles.sectionTitle}>Apartamentos que você acompanha</Text>
+          <Text style={styles.sectionHint}>Você é proprietário dessas unidades — só visualização, o morador/inquilino é quem responde pela cobrança.</Text>
+          {ownedElsewhereAgreements.length ? (
+            <View style={styles.agreementList}>
+              {ownedElsewhereAgreements.map(ag => (
+                <View key={ag.id} style={styles.agreementRow}>
+                  <View style={styles.agreementInfo}>
+                    <Text style={styles.agreementCode}>ACORDO {ag.id.slice(0, 8).toUpperCase()}</Text>
+                    <Text style={styles.agreementDate}>
+                      {ag.apartment} · {formatBrazilianDate(ag.agreement_date)}{referenceRange(ag) ? ` · Referência: ${referenceRange(ag)}` : ''}
+                    </Text>
+                  </View>
+                  <Text style={[styles.badge, { color: '#fff', backgroundColor: statusColor[ag.status] || colors.muted }]}>
+                    {agreementStatusLabel[ag.status] || ag.status}
+                  </Text>
+                  <Pressable style={styles.detailsButton} onPress={() => setDetailsAgreement(ag)}>
+                    <Text style={styles.detailsButtonText}>Ver detalhes</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <EmptyState title="Nenhum acordo encontrado" description="Nenhum acordo encontrado para os apartamentos que você acompanha." />
+          )}
+        </View>
+      ) : null}
 
       <Modal visible={!!detailsAgreement} transparent animationType="fade" onRequestClose={() => setDetailsAgreement(null)}>
         <View style={styles.modalOverlay}>
@@ -429,6 +473,8 @@ const styles = StyleSheet.create({
   chipTextOn: { color: '#fff' },
 
   group: { gap: 10 },
+  sectionTitle: { color: colors.ink, fontSize: 20, fontWeight: '900' },
+  sectionHint: { color: colors.muted, lineHeight: 20, marginBottom: 3 },
   groupHeader: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: colors.softBlue, borderRadius: 10, paddingVertical: 14, paddingHorizontal: 18, marginTop: 4 },
   groupIdentity: { flex: 1, minWidth: 220 },
   groupTitle: { fontSize: 22, fontWeight: '900', color: colors.primaryDark },

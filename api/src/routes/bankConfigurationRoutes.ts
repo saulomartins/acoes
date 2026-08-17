@@ -37,7 +37,7 @@ router.get('/', asyncHandler(async (_req, res) => {
             b.client_id, b.cert_path, b.key_path,
             b.base_url, b.token_path, b.scopes, b.extra_config, b.enabled,
             b.created_at, b.updated_at,
-            coalesce(json_agg(json_build_object('id', c.id, 'name', c.name))
+            coalesce(json_agg(json_build_object('id', c.id, 'name', c.name, 'purpose', cb.purpose))
               filter (where c.id is not null), '[]'::json) as condominiums
      from bank_configurations b
      left join banks bk on bk.id=b.bank_id
@@ -120,9 +120,16 @@ router.post('/:id/test', asyncHandler(async (req, res) => {
 
 router.put('/condominiums/:condominiumId/link', asyncHandler(async (req, res) => {
   const configurationId = String(req.body?.configurationId || '');
+  const rawPurposes: unknown = Array.isArray(req.body?.purposes) ? req.body.purposes : [req.body?.purpose];
+  const purposes = Array.from(new Set(
+    (rawPurposes as unknown[]).map(p => (p === 'extrato' ? 'extrato' : 'boleto')),
+  ));
+  if (purposes.length === 0) {
+    return res.status(400).json({ message: 'Selecione ao menos uma finalidade (cobrança ou extrato).' });
+  }
   const syncMode = req.body?.syncMode === 'from_period' ? 'from_period' : 'all';
   const syncStartPeriod = String(req.body?.syncStartPeriod || '');
-  if (syncMode === 'from_period' && !/^\d{4}-\d{2}-01$/.test(syncStartPeriod)) {
+  if (purposes.includes('boleto') && syncMode === 'from_period' && !/^\d{4}-\d{2}-01$/.test(syncStartPeriod)) {
     return res.status(400).json({ message: 'Informe um período inicial válido (mês/ano) para a busca de boletos.' });
   }
   const [condominium, configuration] = await Promise.all([
@@ -137,37 +144,49 @@ router.put('/condominiums/:condominiumId/link', asyncHandler(async (req, res) =>
   // importado antes desse mês, inclusive boletos pagos. Boletos vinculados a
   // um acordo de débito negociado (debt_agreement_items, ON DELETE RESTRICT)
   // são preservados — apagá-los quebraria o parcelamento em andamento.
+  // Essa limpeza só faz sentido para o vínculo de boleto: um vínculo de
+  // extrato não importa boletos, então não há nada para apagar.
+  // As finalidades marcadas são gravadas na mesma transação: se uma falhar,
+  // nenhuma fica vinculada (evita o condomínio ficar com cobrança linkada e
+  // extrato não, ou vice-versa, por uma falha no meio do caminho).
   const result = await withTransaction(async client => {
-    await client.query(
-      `insert into condominium_bank_configurations(condominium_id,bank_configuration_id,linked_by,linked_at,boleto_sync_mode,boleto_sync_start_period)
-       values($1,$2,$3,now(),$4,$5) on conflict(condominium_id) do update set
-         bank_configuration_id=excluded.bank_configuration_id,linked_by=excluded.linked_by,linked_at=now(),
-         boleto_sync_mode=excluded.boleto_sync_mode,boleto_sync_start_period=excluded.boleto_sync_start_period`,
-      [req.params.condominiumId, configurationId, req.user?.id, syncMode, syncMode === 'from_period' ? syncStartPeriod : null],
-    );
-    if (syncMode !== 'from_period') return { deleted: 0, preserved: 0 };
+    let deleted = 0;
+    let preserved = 0;
+    for (const purpose of purposes) {
+      await client.query(
+        `insert into condominium_bank_configurations(condominium_id,purpose,bank_configuration_id,linked_by,linked_at,boleto_sync_mode,boleto_sync_start_period)
+         values($1,$2,$3,$4,now(),$5,$6) on conflict(condominium_id,purpose) do update set
+           bank_configuration_id=excluded.bank_configuration_id,linked_by=excluded.linked_by,linked_at=now(),
+           boleto_sync_mode=excluded.boleto_sync_mode,boleto_sync_start_period=excluded.boleto_sync_start_period`,
+        [req.params.condominiumId, purpose, configurationId, req.user?.id, syncMode, syncMode === 'from_period' ? syncStartPeriod : null],
+      );
+      if (purpose !== 'boleto' || syncMode !== 'from_period') continue;
 
-    const preserved = await client.query<{ count: number }>(
-      `select count(*)::int as count from invoices i
-       where i.condominium_id=$1 and i.due_date < $2
-         and exists (select 1 from debt_agreement_items dai where dai.invoice_id = i.id)`,
-      [req.params.condominiumId, syncStartPeriod],
-    );
-    const deleted = await client.query(
-      `delete from invoices
-       where condominium_id=$1 and due_date < $2
-         and not exists (select 1 from debt_agreement_items dai where dai.invoice_id = invoices.id)
-       returning id`,
-      [req.params.condominiumId, syncStartPeriod],
-    );
-    return { deleted: deleted.rows.length, preserved: preserved.rows[0]?.count || 0 };
+      const preservedResult = await client.query<{ count: number }>(
+        `select count(*)::int as count from invoices i
+         where i.condominium_id=$1 and i.due_date < $2
+           and exists (select 1 from debt_agreement_items dai where dai.invoice_id = i.id)`,
+        [req.params.condominiumId, syncStartPeriod],
+      );
+      const deletedResult = await client.query(
+        `delete from invoices
+         where condominium_id=$1 and due_date < $2
+           and not exists (select 1 from debt_agreement_items dai where dai.invoice_id = invoices.id)
+         returning id`,
+        [req.params.condominiumId, syncStartPeriod],
+      );
+      deleted += deletedResult.rows.length;
+      preserved += preservedResult.rows[0]?.count || 0;
+    }
+    return { deleted, preserved };
   });
 
   return res.json({ ok: true, deleted: result.deleted, preserved: result.preserved });
 }));
 
 router.delete('/condominiums/:condominiumId/link', asyncHandler(async (req, res) => {
-  await query(`delete from condominium_bank_configurations where condominium_id=$1`, [req.params.condominiumId]);
+  const purpose = req.query.purpose === 'extrato' ? 'extrato' : 'boleto';
+  await query(`delete from condominium_bank_configurations where condominium_id=$1 and purpose=$2`, [req.params.condominiumId, purpose]);
   return res.status(204).send();
 }));
 

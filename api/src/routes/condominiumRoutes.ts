@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
+import { requireFeature } from '../middleware/requireFeature';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { query, withTransaction } from '../db';
 import { getInterAccessToken, type InterIntegrationConfig } from '../services/interService';
@@ -39,6 +40,119 @@ const mapInterIntegration = (row: InterIntegrationRow): InterIntegrationConfig =
   enabled: row.enabled,
 });
 
+// Cadastrados: deleted_at is null (mesmo critério da aba "Ativos" de Pessoas).
+// Ativos/Inativos: cadastrado com/sem login_enabled (mesmo critério de
+// active_user_metric 'login_enabled' em platformPlanService.ts).
+// Papel efetivo (EFFECTIVE_ROLE): síndico/subsíndico têm prioridade sobre
+// proprietário/inquilino — alguém com papel principal "proprietario" mas com
+// perfil adicional (user_profiles, ver POST /users/:id/profiles) de síndico
+// ou subsíndico é contado como síndico/subsíndico, não como proprietário. É
+// uma partição sem sobreposição (cada pessoa cai em exatamente um papel
+// efetivo), por isso Proprietários+Inquilinos+Síndico+Subsíndico soma
+// exatamente registeredUsers — ver checksum exibido na tela.
+// "Monitora outra unidade": proprietário (papel efetivo) com um vínculo ATIVO
+// em unit_ownerships (tabela dedicada para posse sem moradia — ver comentário
+// em schema.sql perto de "create table unit_ownerships") para uma unidade
+// diferente da sua própria (users.unit_id) — mecanismo real usado quando um
+// proprietário acompanha uma unidade alugada a um inquilino. NÃO é exclusivo
+// com morar na própria unidade — a mesma pessoa pode morar na sua unidade E
+// monitorar outra, então esse número nunca é subtraído de registeredOwners.
+const EFFECTIVE_ROLE = `(case
+  when u.role='sindico' or exists(select 1 from user_profiles up where up.user_id=u.id and up.role='sindico' and up.condominium_id=u.condominium_id) then 'sindico'
+  when u.role='subsindico' or exists(select 1 from user_profiles up where up.user_id=u.id and up.role='subsindico' and up.condominium_id=u.condominium_id) then 'subsindico'
+  else u.role
+end)`;
+const MONITORS_ELSEWHERE = `exists (select 1 from unit_ownerships oo where oo.owner_user_id=u.id and oo.ended_at is null and oo.unit_id is distinct from u.unit_id)`;
+
+router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('painel_usuarios'), asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.role === 'admin_geral' ? (String(req.query.condominiumId || '') || null) : req.user?.condominiumId;
+  const result = await query<{
+    condominium_id: string; name: string; registered_users: number; active_users: number;
+    registered_owners: number; registered_tenants: number;
+    monitor_only_owners: number; sindico: Array<{ id: string; fullName: string }>; subsindico: Array<{ id: string; fullName: string }>;
+    total_units: number; units_with_resident: number;
+  }>(
+    `select c.id as condominium_id, c.name,
+       count(*) filter (where u.deleted_at is null)::int as registered_users,
+       count(*) filter (where u.deleted_at is null and u.login_enabled)::int as active_users,
+       count(*) filter (where u.deleted_at is null and ${EFFECTIVE_ROLE}='proprietario')::int as registered_owners,
+       count(*) filter (where u.deleted_at is null and ${EFFECTIVE_ROLE}='inquilino')::int as registered_tenants,
+       count(*) filter (where u.deleted_at is null and ${EFFECTIVE_ROLE}='proprietario' and ${MONITORS_ELSEWHERE})::int as monitor_only_owners,
+       coalesce(jsonb_agg(distinct jsonb_build_object('id',u.id,'fullName',coalesce(u.full_name,u.username))) filter (where u.deleted_at is null and ${EFFECTIVE_ROLE}='sindico'), '[]'::jsonb) as sindico,
+       coalesce(jsonb_agg(distinct jsonb_build_object('id',u.id,'fullName',coalesce(u.full_name,u.username))) filter (where u.deleted_at is null and ${EFFECTIVE_ROLE}='subsindico'), '[]'::jsonb) as subsindico,
+       (select count(*) from units un where un.condominium_id = c.id)::int as total_units,
+       (select count(*) from units un where un.condominium_id = c.id
+          and exists(select 1 from unit_occupancies oc where oc.unit_id = un.id and oc.ended_at is null))::int as units_with_resident
+     from condominiums c
+     left join users u on u.condominium_id = c.id
+     where ($1::uuid is null or c.id = $1)
+     group by c.id, c.name
+     order by c.name`,
+    [condominiumId],
+  );
+  return res.json({
+    condominiums: result.rows.map(row => ({
+      condominiumId: row.condominium_id,
+      name: row.name,
+      registeredUsers: row.registered_users,
+      activeUsers: row.active_users,
+      inactiveUsers: row.registered_users - row.active_users,
+      registeredOwners: row.registered_owners,
+      registeredTenants: row.registered_tenants,
+      ownersMonitoringElsewhere: row.monitor_only_owners,
+      sindico: row.sindico,
+      subsindico: row.subsindico,
+      totalUnits: row.total_units,
+      unitsWithResident: row.units_with_resident,
+      unitsWithoutResident: row.total_units - row.units_with_resident,
+    })),
+  });
+}));
+
+type UserStatsBucket = 'registered' | 'active' | 'inactive' | 'registered_owners' | 'registered_tenants' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
+const USER_STATS_BUCKET_WHERE: Record<UserStatsBucket, string> = {
+  registered: `u.deleted_at is null`,
+  active: `u.deleted_at is null and u.login_enabled`,
+  inactive: `u.deleted_at is null and not u.login_enabled`,
+  registered_owners: `u.deleted_at is null and ${EFFECTIVE_ROLE}='proprietario'`,
+  registered_tenants: `u.deleted_at is null and ${EFFECTIVE_ROLE}='inquilino'`,
+  owners_monitoring_elsewhere: `u.deleted_at is null and ${EFFECTIVE_ROLE}='proprietario' and ${MONITORS_ELSEWHERE}`,
+  sindico: `u.deleted_at is null and ${EFFECTIVE_ROLE}='sindico'`,
+  subsindico: `u.deleted_at is null and ${EFFECTIVE_ROLE}='subsindico'`,
+};
+
+// Lista nominal (nome + apartamento) de quem compõe um dos números do painel
+// de usuários — mesma lógica de bucket usada na agregação acima, sem duplicar
+// a definição de cada critério. isExtra indica que a pessoa está nesse bucket
+// pelo perfil adicional (user_profiles), não pelo papel principal.
+router.get('/user-stats/members', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('painel_usuarios'), asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.role === 'admin_geral' ? String(req.query.condominiumId || '') : req.user?.condominiumId;
+  if (!condominiumId) return res.status(400).json({ message: 'Selecione o condomínio.' });
+  const bucket = String(req.query.bucket || '') as UserStatsBucket;
+  const bucketWhere = USER_STATS_BUCKET_WHERE[bucket];
+  if (!bucketWhere) return res.status(400).json({ message: 'Categoria inválida.' });
+
+  const result = await query<{ id: string; full_name: string | null; username: string; role: string; effective_role: string; unit: string | null }>(
+    `select u.id, u.full_name, u.username, u.role, ${EFFECTIVE_ROLE} as effective_role,
+            coalesce(nullif(concat_ws(' - ', nullif(b.name,''), nullif(un.number,'')), ''), nullif(u.unit,''), 'Sem apartamento') as unit
+     from users u
+     left join units un on un.id = u.unit_id
+     left join blocks b on b.id = un.block_id
+     where u.condominium_id = $1 and ${bucketWhere}
+     order by coalesce(u.full_name, u.username)`,
+    [condominiumId],
+  );
+  return res.json({
+    members: result.rows.map(row => ({
+      id: row.id,
+      fullName: row.full_name || row.username,
+      role: row.effective_role,
+      isExtra: row.role !== row.effective_role,
+      unit: row.unit,
+    })),
+  });
+}));
+
 router.get('/', authorize('admin_geral'), asyncHandler(async (_req, res) => {
   const result = await query(
     `select c.id, c.name, c.cnpj, c.address, c.phone, c.email, c.created_at, c.google_drive_folder_id,
@@ -49,10 +163,16 @@ router.get('/', authorize('admin_geral'), asyncHandler(async (_req, res) => {
             b.name as bank_configuration_name,
             b.provider as bank_provider,
             cb.boleto_sync_mode,
-            cb.boleto_sync_start_period
+            cb.boleto_sync_start_period,
+            (be.id is not null) as bank_extrato_configured,
+            coalesce(be.enabled, false) as bank_extrato_enabled,
+            be.id as bank_extrato_configuration_id,
+            be.name as bank_extrato_configuration_name
      from condominiums c
-     left join condominium_bank_configurations cb on cb.condominium_id = c.id
+     left join condominium_bank_configurations cb on cb.condominium_id = c.id and cb.purpose = 'boleto'
      left join bank_configurations b on b.id = cb.bank_configuration_id
+     left join condominium_bank_configurations cbe on cbe.condominium_id = c.id and cbe.purpose = 'extrato'
+     left join bank_configurations be on be.id = cbe.bank_configuration_id
      order by c.created_at desc`,
   );
 

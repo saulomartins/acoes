@@ -753,6 +753,23 @@ alter table condominium_bank_configurations add column if not exists
 alter table condominium_bank_configurations add column if not exists
   boleto_sync_start_period date;
 
+-- Um condomínio pode ter mais de uma integração Inter simultânea, uma por
+-- finalidade (ex.: aplicação de boleto e aplicação separada só de extrato,
+-- já que nem toda aplicação cadastrada no banco tem o mesmo conjunto de
+-- escopos liberado). Toda linha existente vira 'boleto' pelo default, sem
+-- mudar o vínculo já configurado.
+alter table condominium_bank_configurations add column if not exists
+  purpose text not null default 'boleto' check (purpose in ('boleto','extrato'));
+do $$ begin
+  if not exists (
+    select 1 from information_schema.key_column_usage
+    where table_name='condominium_bank_configurations' and constraint_name='condominium_bank_configurations_pkey' and column_name='purpose'
+  ) then
+    alter table condominium_bank_configurations drop constraint condominium_bank_configurations_pkey;
+    alter table condominium_bank_configurations add primary key (condominium_id, purpose);
+  end if;
+end $$;
+
 -- Preserva automaticamente as integrações Banco Inter já existentes, inclusive
 -- a configuração do Templum, sem copiar ou expor segredos para o frontend.
 insert into bank_configurations (
@@ -766,9 +783,9 @@ from inter_integrations i
 join condominiums c on c.id = i.condominium_id
 on conflict (id) do nothing;
 
-insert into condominium_bank_configurations (condominium_id, bank_configuration_id, linked_at)
-select condominium_id, id, updated_at from inter_integrations
-on conflict (condominium_id) do nothing;
+insert into condominium_bank_configurations (condominium_id, purpose, bank_configuration_id, linked_at)
+select condominium_id, 'boleto', id, updated_at from inter_integrations
+on conflict (condominium_id, purpose) do nothing;
 
 update bank_configurations bc set bank_id=b.id
 from banks b where bc.bank_id is null and b.code=bc.provider;
@@ -1296,6 +1313,7 @@ alter table condominium_features add column if not exists nada_consta boolean no
 -- nesta tabela, que resolvem features ausentes como "ativo" — aqui o default
 -- da coluna evita isso).
 alter table condominium_features add column if not exists consumo_individualizado boolean not null default false;
+alter table condominium_features add column if not exists painel_usuarios boolean not null default true;
 
 -- Nada consta / Declaração de quitação condominial.
 --

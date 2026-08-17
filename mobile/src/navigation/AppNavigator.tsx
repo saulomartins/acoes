@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ResponsiveShell from '../ui/ResponsiveShell';
 import Home from '../screens/Home';
 import Dashboard from '../screens/Dashboard';
+import UserStats from '../screens/UserStats';
 import BillingAnalytics from '../screens/BillingAnalytics';
 import Clearances from '../screens/Clearances';
 import ClearanceVerify from '../screens/ClearanceVerify';
@@ -59,6 +60,7 @@ type RootStackParamList = {
   SelectProfile: undefined;
   Home: undefined;
   Dashboard: undefined;
+  UserStats: undefined;
   BillingAnalytics: undefined;
   Clearances: undefined;
   ClearanceVerify: { code?: string } | undefined;
@@ -165,6 +167,7 @@ const withSafeArea = (Component: React.ComponentType<any>) => {
 // função entre renders.
 const HomeScreen = withResponsiveShell(Home, 'Home');
 const DashboardScreen = withResponsiveShell(Dashboard, 'Dashboard');
+const UserStatsScreen = withResponsiveShell(UserStats, 'UserStats');
 const BillingAnalyticsScreen = withResponsiveShell(BillingAnalytics, 'BillingAnalytics');
 const ClearancesScreen = withResponsiveShell(Clearances, 'Clearances');
 const CondominiumsScreen = withResponsiveShell(Condominiums, 'Condominiums');
@@ -291,6 +294,7 @@ export default function AppNavigator() {
             <>
               <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="UserStats" component={UserStatsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="BillingAnalytics" component={BillingAnalyticsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Clearances" component={ClearancesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="ClearanceVerify" component={ClearanceVerifyStandaloneScreen} options={{ headerShown: false }} />

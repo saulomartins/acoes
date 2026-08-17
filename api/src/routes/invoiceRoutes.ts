@@ -31,31 +31,48 @@ type InterIntegrationRow = {
   enabled: boolean;
 };
 
+const mapInterIntegrationRow = (row: InterIntegrationRow): InterIntegrationConfig => ({
+  id: row.id,
+  clientId: row.client_id,
+  clientSecret: row.client_secret,
+  certPath: row.cert_path,
+  keyPath: row.key_path,
+  certPassphrase: row.cert_passphrase,
+  baseUrl: row.base_url,
+  tokenPath: row.token_path,
+  scopes: row.scopes,
+  enabled: row.enabled,
+});
+
 export const getInterIntegration = async (condominiumId: string): Promise<InterIntegrationConfig | null> => {
   const result = await query<InterIntegrationRow>(
     `select b.id, b.client_id, b.client_secret, b.cert_path, b.key_path, b.cert_passphrase,
             b.base_url, b.token_path, b.scopes, b.enabled
      from condominium_bank_configurations cb
      join bank_configurations b on b.id = cb.bank_configuration_id
-     where cb.condominium_id = $1 and b.provider = 'inter'`,
+     where cb.condominium_id = $1 and cb.purpose = 'boleto' and b.provider = 'inter'`,
     [condominiumId],
   );
 
   const row = result.rows[0];
-  if (!row) return null;
+  return row ? mapInterIntegrationRow(row) : null;
+};
 
-  return {
-    id: row.id,
-    clientId: row.client_id,
-    clientSecret: row.client_secret,
-    certPath: row.cert_path,
-    keyPath: row.key_path,
-    certPassphrase: row.cert_passphrase,
-    baseUrl: row.base_url,
-    tokenPath: row.token_path,
-    scopes: row.scopes,
-    enabled: row.enabled,
-  };
+// Integração separada da de boleto — algumas contas Inter têm uma aplicação
+// dedicada só para extrato/saldo, com escopos diferentes (e às vezes
+// certificado diferente) da aplicação usada para emissão/consulta de boletos.
+export const getInterExtratoIntegration = async (condominiumId: string): Promise<InterIntegrationConfig | null> => {
+  const result = await query<InterIntegrationRow>(
+    `select b.id, b.client_id, b.client_secret, b.cert_path, b.key_path, b.cert_passphrase,
+            b.base_url, b.token_path, b.scopes, b.enabled
+     from condominium_bank_configurations cb
+     join bank_configurations b on b.id = cb.bank_configuration_id
+     where cb.condominium_id = $1 and cb.purpose = 'extrato' and b.provider = 'inter'`,
+    [condominiumId],
+  );
+
+  const row = result.rows[0];
+  return row ? mapInterIntegrationRow(row) : null;
 };
 
 export const syncInterInvoice = async (invoice: { id:string; condominium_id:string; external_id:string }) => {
@@ -202,9 +219,13 @@ const importCharges = async (
 const openInterChargesWindow = async (condominiumId: string) => {
   const year = new Date().getUTCFullYear();
   const fallback = { start: `${year - 10}-01-01`, end: `${year + 10}-12-31` };
+  // purpose='boleto' é obrigatório aqui: um condomínio pode ter também uma
+  // linha purpose='extrato' (config separada, sem relação com boleto_sync_*)
+  // — sem esse filtro, a query podia pegar a linha errada e ignorar o
+  // período configurado para boleto.
   const config = await query<{ boleto_sync_mode: string; boleto_sync_start_period: string | null }>(
     `select boleto_sync_mode, to_char(boleto_sync_start_period, 'YYYY-MM-DD') as boleto_sync_start_period
-     from condominium_bank_configurations where condominium_id=$1`,
+     from condominium_bank_configurations where condominium_id=$1 and purpose='boleto'`,
     [condominiumId],
   );
   const row = config.rows[0];
@@ -1067,8 +1088,10 @@ router.patch('/unmatched-bank-charges/:id/dismiss', authorize('sindico', 'subsin
 router.patch('/:id/debt-exclusion', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
   const excluded = req.body?.excluded !== false;
   const reason = String(req.body?.reason || '').trim();
+  const paidViaPix = Boolean(req.body?.paidViaPix);
   if (excluded && !reason) return res.status(400).json({ message: 'Informe a justificativa para retirar este boleto da dívida.' });
   if (reason.length > 500) return res.status(400).json({ message: 'A justificativa deve ter no máximo 500 caracteres.' });
+  if (paidViaPix && !excluded) return res.status(400).json({ message: 'Recebido via Pix só se aplica ao retirar o boleto da dívida.' });
 
   const result = await query<{ id: string; status: string; amount_cents: number; debt_excluded_at: string | null }>(
     `select id, status, amount_cents, debt_excluded_at from invoices
@@ -1087,13 +1110,21 @@ router.patch('/:id/debt-exclusion', authorize('sindico', 'subsindico'), asyncHan
     return res.status(409).json({ message: 'Este boleto já conta na dívida.' });
   }
 
-  const updated = await query<{ debt_excluded_at: string | null; debt_exclusion_reason: string | null }>(
+  // paidViaPix reaproveita o mesmo mecanismo de "recebido por fora" já usado em
+  // PATCH /:id/cancellation-reason (settledExternally): grava paid_amount_cents/
+  // paid_at sem tocar em status, que continua refletindo a situação real no banco
+  // (ex.: expirado). GET /dashboard/summary já soma qualquer linha com paid_at
+  // preenchido e status<>'canceled' em bank_paid_cents, então o valor entra
+  // automaticamente no total recebido sem precisar mudar aquela query.
+  const updated = await query<{ debt_excluded_at: string | null; debt_exclusion_reason: string | null; paid_amount_cents: number | null; paid_at: string | null }>(
     `update invoices set
        debt_excluded_at = case when $1 then now() else null end,
        debt_excluded_by = case when $1 then $2::uuid else null end,
-       debt_exclusion_reason = case when $1 then $3 else null end
-     where id=$4 returning debt_excluded_at, debt_exclusion_reason`,
-    [excluded, req.user?.id, reason || null, req.params.id],
+       debt_exclusion_reason = case when $1 then $3 else null end,
+       paid_amount_cents = case when $1 and $5 then coalesce(paid_amount_cents, amount_cents) else paid_amount_cents end,
+       paid_at = case when $1 and $5 then coalesce(paid_at, now()) else paid_at end
+     where id=$4 returning debt_excluded_at, debt_exclusion_reason, paid_amount_cents, paid_at`,
+    [excluded, req.user?.id, reason || null, req.params.id, paidViaPix],
   );
 
   // Mesma trilha usada pelas edições manuais de débito em Gestão de débitos,
@@ -1117,6 +1148,8 @@ router.patch('/:id/debt-exclusion', authorize('sindico', 'subsindico'), asyncHan
   return res.json({
     debtExcludedAt: updated.rows[0].debt_excluded_at,
     debtExclusionReason: updated.rows[0].debt_exclusion_reason,
+    paidAmountCents: updated.rows[0].paid_amount_cents,
+    paidAt: updated.rows[0].paid_at,
   });
 }));
 

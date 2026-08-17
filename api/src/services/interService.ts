@@ -148,7 +148,22 @@ const interRequest = <T>(
         response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
         response.on('end', () => {
           const responseText = Buffer.concat(chunks).toString('utf8');
-          const data = responseText ? JSON.parse(responseText) : null;
+          let data: unknown = null;
+          if (responseText) {
+            try {
+              data = JSON.parse(responseText);
+            } catch {
+              // O Inter às vezes responde com corpo não-JSON (HTML de gateway,
+              // texto puro) em erros inesperados (ex.: rota/permissão indisponível).
+              // Sem o try/catch, esse JSON.parse jogava uma exceção dentro do
+              // callback de socket — fora da cadeia da Promise — o que derrubava
+              // o processo Node inteiro em vez de só rejeitar esta chamada.
+              const parseError = new Error(responseText.slice(0, 200) || 'O Banco Inter retornou uma resposta inesperada.');
+              (parseError as any).statusCode = response.statusCode;
+              (parseError as any).provider = 'inter';
+              return reject(parseError);
+            }
+          }
 
           if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
             const violations = Array.isArray((data as any)?.violacoes)
@@ -347,10 +362,14 @@ const listInterBoletosWindow = async (
   let page = 0;
   let lastPage = false;
   while (!lastPage) {
+    // filtrarDataPor:'EMISSAO' — o período configurado em "Vincular banco ao
+    // condomínio" (boleto_sync_start_period) filtra por quando o boleto foi
+    // EMITIDO, não por quando vence (um boleto de dezembro pode vencer em
+    // janeiro; filtrar por vencimento traria boletos emitidos antes do corte).
     const params = new URLSearchParams({
-      dataInicial: startDate, dataFinal: endDate, filtrarDataPor: 'VENCIMENTO',
+      dataInicial: startDate, dataFinal: endDate, filtrarDataPor: 'EMISSAO',
       'paginacao.itensPorPagina': '1000',
-      'paginacao.paginaAtual': String(page), ordenarPor: 'DATA_VENCIMENTO', tipoOrdenacao: 'DESC',
+      'paginacao.paginaAtual': String(page), ordenarPor: 'DATA_EMISSAO', tipoOrdenacao: 'DESC',
     });
     if (document) params.set('cpfCnpjPessoaPagadora', document);
     const response = await interRequest<{ totalPaginas?: number; ultimaPagina?: boolean; cobrancas?: InterListedBoleto[] }>(
@@ -390,15 +409,102 @@ export const listInterBoletosByPayer = async (
   return charges;
 };
 
-export const getInterBoletoPdf = async (codigoSolicitacao: string, integration: InterIntegrationConfig) => {
-  const accessToken=await getInterAccessToken(integration);
-  if(!accessToken)throw new Error('Integração Banco Inter desabilitada ou incompleta.');
-  return new Promise<Buffer>((resolve,reject)=>{
-    const request=https.request(new URL(`/cobranca/v3/cobrancas/${codigoSolicitacao}/pdf`,integration.baseUrl),{
+export type InterExtratoTransacao = {
+  dataEntrada: string;
+  tipoOperacao: 'C' | 'D';
+  tipoTransacao?: string;
+  valor: number | string;
+  titulo?: string;
+  descricao?: string;
+};
+
+const listInterExtratoWindow = async (
+  startDate: string,
+  endDate: string,
+  integration: InterIntegrationConfig,
+) => {
+  const accessToken = await getInterAccessToken(integration);
+  if (!accessToken) throw new Error('Integração Banco Inter desabilitada ou incompleta.');
+  // dataInicio/dataFim usam YYYY-MM-DD, igual ao resto da API do Inter — a
+  // doc de banking (developers.inter.co/references/banking) confirma esse
+  // formato para GET /banking/v2/extrato, não DD-MM-YYYY.
+  const params = new URLSearchParams({
+    dataInicio: startDate,
+    dataFim: endDate,
+  });
+  const response = await interRequest<{ transacoes?: InterExtratoTransacao[] }>(
+    integration, `/banking/v2/extrato?${params.toString()}`,
+    { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  return response.transacoes || [];
+};
+
+// Fatia [startDate, endDate] em janelas de até 90 dias, pois a API de
+// extrato do Inter limita o período aceito por chamada (diferente da API de
+// cobrança, que aceita janelas maiores). Esse endpoint não pagina.
+export const listInterExtrato = async (
+  startDate: string,
+  endDate: string,
+  integration: InterIntegrationConfig,
+) => {
+  const windowDays = 90;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  const transactions: InterExtratoTransacao[] = [];
+  for (let windowStart = start; windowStart <= end; windowStart = new Date(windowStart.getTime() + windowDays * dayMs)) {
+    const windowEndCandidate = new Date(windowStart.getTime() + (windowDays - 1) * dayMs);
+    const windowEnd = windowEndCandidate < end ? windowEndCandidate : end;
+    const iso = (date: Date) => date.toISOString().slice(0, 10);
+    transactions.push(...await listInterExtratoWindow(iso(windowStart), iso(windowEnd), integration));
+  }
+  return transactions;
+};
+
+// Compartilhado entre PDF de boleto e PDF de extrato — o Inter às vezes
+// devolve o PDF puro e às vezes um JSON com o conteúdo em base64
+// (chave "pdf", "arquivo" ou "data" dependendo do endpoint), então essa
+// função cobre os dois formatos de resposta possíveis.
+const fetchInterPdf = async (path: string, integration: InterIntegrationConfig, notFoundMessage: string): Promise<Buffer> => {
+  const accessToken = await getInterAccessToken(integration);
+  if (!accessToken) throw new Error('Integração Banco Inter desabilitada ou incompleta.');
+  return new Promise<Buffer>((resolve, reject) => {
+    const request=https.request(new URL(path,integration.baseUrl),{
       method:'GET',agent:getHttpsAgent(integration),headers:{Accept:'application/pdf, application/json',Authorization:`Bearer ${accessToken}`},
-    },response=>{const chunks:Buffer[]=[];response.on('data',chunk=>chunks.push(Buffer.from(chunk)));response.on('end',()=>{const buffer=Buffer.concat(chunks);const text=buffer.toString('utf8');if(!response.statusCode||response.statusCode<200||response.statusCode>=300){let message=text;try{const parsed=JSON.parse(text);message=parsed?.violacoes?.map((item:any)=>item.razao).join(' ')||parsed?.detail||text}catch{}return reject(new Error(message||'O Banco Inter não disponibilizou o PDF deste boleto.'))}
+    },response=>{const chunks:Buffer[]=[];response.on('data',chunk=>chunks.push(Buffer.from(chunk)));response.on('end',()=>{const buffer=Buffer.concat(chunks);const text=buffer.toString('utf8');if(!response.statusCode||response.statusCode<200||response.statusCode>=300){let message=text;try{const parsed=JSON.parse(text);message=parsed?.violacoes?.map((item:any)=>item.razao).join(' ')||parsed?.detail||text}catch{}return reject(new Error(message||notFoundMessage))}
       if(buffer.subarray(0,4).toString()==='%PDF')return resolve(buffer);
-      try{const parsed=JSON.parse(text);const encoded=typeof parsed==='string'?parsed:parsed?.pdf||parsed?.arquivo||parsed?.data;if(typeof encoded!=='string')throw new Error('Resposta do Banco Inter sem o conteúdo do PDF.');const pdf=Buffer.from(encoded.replace(/^data:application\/pdf;base64,/,''),'base64');if(pdf.subarray(0,4).toString()!=='%PDF')throw new Error('O arquivo devolvido pelo Banco Inter não é um PDF válido.');resolve(pdf)}catch{reject(new Error('O Banco Inter retornou uma resposta inválida para o PDF do boleto.'))}})});
+      try{const parsed=JSON.parse(text);const encoded=typeof parsed==='string'?parsed:parsed?.pdf||parsed?.arquivo||parsed?.data;if(typeof encoded!=='string')throw new Error('Resposta do Banco Inter sem o conteúdo do PDF.');const pdf=Buffer.from(encoded.replace(/^data:application\/pdf;base64,/,''),'base64');if(pdf.subarray(0,4).toString()!=='%PDF')throw new Error('O arquivo devolvido pelo Banco Inter não é um PDF válido.');resolve(pdf)}catch{reject(new Error('O Banco Inter retornou uma resposta inválida para o PDF.'))}})});
     request.on('error',(error:any)=>reject(new Error(error?.message||error?.errors?.[0]?.message||'Falha ao baixar o PDF no Banco Inter.')));request.end();
+  });
+};
+
+export const getInterBoletoPdf = (codigoSolicitacao: string, integration: InterIntegrationConfig) =>
+  fetchInterPdf(`/cobranca/v3/cobrancas/${codigoSolicitacao}/pdf`, integration, 'O Banco Inter não disponibilizou o PDF deste boleto.');
+
+// GET /banking/v2/extrato/exportar — mesmas janelas de 90 dias do extrato
+// normal (dataInicio/dataFim em YYYY-MM-DD), requer o mesmo escopo
+// extrato.read.
+export const getInterExtratoPdf = (startDate: string, endDate: string, integration: InterIntegrationConfig) => {
+  const params = new URLSearchParams({ dataInicio: startDate, dataFim: endDate });
+  return fetchInterPdf(`/banking/v2/extrato/exportar?${params.toString()}`, integration, 'O Banco Inter não disponibilizou o PDF do extrato.');
+};
+
+export type InterSaldo = {
+  disponivel: number;
+  bloqueadoCheque?: number;
+  bloqueadoJudicialmente?: number;
+  bloqueadoAdministrativo?: number;
+  limite?: number;
+  dataReferencia?: string;
+};
+
+// GET /banking/v2/saldo — sem dataSaldo retorna o saldo/bloqueios até agora;
+// com dataSaldo retorna só "disponivel" naquele dia específico.
+export const getInterSaldo = async (date: string, integration: InterIntegrationConfig): Promise<InterSaldo> => {
+  const accessToken = await getInterAccessToken(integration);
+  if (!accessToken) throw new Error('Integração Banco Inter desabilitada ou incompleta.');
+  const params = new URLSearchParams({ dataSaldo: date });
+  return interRequest<InterSaldo>(integration, `/banking/v2/saldo?${params.toString()}`, {
+    method: 'GET', headers: { Authorization: `Bearer ${accessToken}` },
   });
 };

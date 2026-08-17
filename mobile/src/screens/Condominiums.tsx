@@ -52,6 +52,7 @@ const FEATURE_CATALOG: Record<FeatureKey, { label: string; dependsOn: FeatureKey
   historico_acordos: { label: 'Histórico de acordos', dependsOn: ['gestao_debitos'] },
   cobrancas_adicionais: { label: 'Cobranças adicionais', dependsOn: ['config_enviar_cobrancas'] },
   painel: { label: 'Painel financeiro', dependsOn: ['gestao_cobrancas'] },
+  painel_usuarios: { label: 'Painel de usuários', dependsOn: ['pessoas'] },
   indicadores_boletos: { label: 'Indicadores de boletos', dependsOn: ['gestao_cobrancas'] },
   nada_consta: { label: 'Nada consta (quitação)', dependsOn: ['gestao_cobrancas'] },
   consumo_individualizado: { label: 'Cobrança por consumo (água/gás/energia)', dependsOn: ['config_enviar_cobrancas'] },

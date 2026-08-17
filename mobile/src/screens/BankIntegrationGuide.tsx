@@ -15,6 +15,12 @@ import { useBreakpoint } from '../ui/responsive';
 
 type Difficulty = 'facil' | 'medio' | 'dificil';
 
+// 'combinado': confirmado que cobrança e extrato saem da mesma aplicação/
+// credencial no portal do banco. 'a_confirmar': ainda não testamos esse banco
+// nesta plataforma — o portal precisa ser conferido durante o onboarding,
+// não presumido a partir dos outros.
+type ExtratoScope = 'combinado' | 'a_confirmar';
+
 type Bank = {
   position: number;
   name: string;
@@ -27,6 +33,8 @@ type Bank = {
   returnFlow: string;
   returnRealtime: boolean;
   notes: string;
+  extratoScope: ExtratoScope;
+  extratoNotes: string;
 };
 
 // Ordem = recomendação de ataque. O critério combina duas coisas que pesam
@@ -46,6 +54,8 @@ const banks: Bank[] = [
     returnFlow: 'Webhook completo de boleto e Pix, já em produção',
     returnRealtime: true,
     notes: 'É a referência da nossa arquitetura. Nada aqui deve ser alterado — os adaptadores novos se encaixam ao lado, sem tocar no que já funciona.',
+    extratoScope: 'combinado',
+    extratoNotes: 'Confirmado em produção: dá para pedir cobrança, Pix e extrato (conta corrente) juntos numa única aplicação no portal do Inter, desde que os três escopos sejam marcados já na criação. Um condomínio que teve a aplicação criada só com escopo de cobrança precisou de uma aplicação nova para ganhar extrato — não deu para adicionar o escopo depois na mesma aplicação.',
   },
   {
     position: 1,
@@ -58,6 +68,8 @@ const banks: Bank[] = [
     returnFlow: 'Webhook na API V3: Pix em tempo real e liquidação acelerada de código de barras',
     returnRealtime: true,
     notes: 'Melhor relação custo/esforço do levantamento. Ativação self-service pelo Sicoobnet e o único da lista com Pix sem tarifa. Exige usar a API V3 — o webhook não funciona nas versões anteriores.',
+    extratoScope: 'a_confirmar',
+    extratoNotes: 'Não integramos extrato no Sicoob ainda. O portal de desenvolvedor separa produtos por API (Cobrança, Pix, Conta Corrente) — confirmar no cadastro da aplicação se dá para marcar os três de uma vez ou se extrato exige uma aplicação à parte.',
   },
   {
     position: 2,
@@ -70,6 +82,8 @@ const banks: Bank[] = [
     returnFlow: 'Webhook apenas para Pix. Boleto pago em código de barras exige consulta agendada',
     returnRealtime: false,
     notes: 'Portal Developers self-service com o sandbox mais acessível do mercado — é o melhor banco para validar a arquitetura de ponta a ponta. Atenção: o "nosso número" do BB é numérico e sequencial, não UUID (ver riscos técnicos).',
+    extratoScope: 'a_confirmar',
+    extratoNotes: 'Não integramos extrato no BB ainda. O Developers BB também lista "Extratos" como API própria, separada de "Cobranças" — confirmar no cadastro da aplicação se as duas entram na mesma credencial.',
   },
   {
     position: 3,
@@ -82,6 +96,8 @@ const banks: Bank[] = [
     returnFlow: 'Webhook disponível',
     returnRealtime: true,
     notes: 'Console de desenvolvedor self-service. Autenticação por JWT em vez de certificado em disco, o que simplifica a operação do servidor.',
+    extratoScope: 'a_confirmar',
+    extratoNotes: 'Não integramos extrato no BTG ainda — confirmar no console de desenvolvedor se o escopo de conta corrente/extrato pode ser marcado junto com o de cobrança na mesma aplicação.',
   },
   {
     position: 4,
@@ -94,6 +110,8 @@ const banks: Bank[] = [
     returnFlow: 'Webhook de Pix padronizado',
     returnRealtime: true,
     notes: 'Sem custo de certificado, mas o token de produção só sai via abertura de chamado no suporte — o que adiciona espera ao onboarding.',
+    extratoScope: 'a_confirmar',
+    extratoNotes: 'Não integramos extrato no Sicredi ainda — como o token de produção depende de chamado no suporte, vale já pedir cobrança e conta corrente/extrato juntos no mesmo chamado, para não precisar reabrir depois.',
   },
   {
     position: 5,
@@ -106,6 +124,8 @@ const banks: Bank[] = [
     returnFlow: 'Webhook de Pix padronizado; boleto com retorno limitado, recomenda-se consulta agendada',
     returnRealtime: false,
     notes: 'Primeiro banco da lista que gera custo anual de certificado por condomínio. Só vale abrir mediante demanda concreta de cliente.',
+    extratoScope: 'a_confirmar',
+    extratoNotes: 'Não integramos extrato no Bradesco ainda — confirmar no onboarding se o escopo de conta corrente entra na mesma aplicação da cobrança ou se precisa de credencial separada.',
   },
   {
     position: 6,
@@ -118,6 +138,8 @@ const banks: Bank[] = [
     returnFlow: 'Retorna status de boleto e pagamento; webhook de Pix padronizado',
     returnRealtime: true,
     notes: 'Sandbox parcial e onboarding depende de gerente de relacionamento. Custo de certificado recorrente.',
+    extratoScope: 'a_confirmar',
+    extratoNotes: 'Não integramos extrato no Santander ainda — como o onboarding passa por gerente, vale já registrar o pedido de cobrança e extrato juntos para não reabrir o processo depois.',
   },
   {
     position: 7,
@@ -130,6 +152,8 @@ const banks: Bank[] = [
     returnFlow: 'Webhook de Pix padronizado; sem webhook de boleto documentado publicamente',
     returnRealtime: false,
     notes: 'Credenciais de produção não são self-service: saem por e-mail via gerente ou API Owner. O token de acesso expira em 300 segundos, o que exige cache com renovação mais agressiva que a do Inter. Sandbox não usa OAuth2 nem mTLS, então não valida o fluxo real.',
+    extratoScope: 'a_confirmar',
+    extratoNotes: 'Não integramos extrato no Itaú ainda — como a credencial de produção também depende de gerente/API Owner, vale pedir cobrança e extrato no mesmo pedido.',
   },
   {
     position: 8,
@@ -142,6 +166,8 @@ const banks: Bank[] = [
     returnFlow: 'Sem webhook de boleto — retorno por consulta ou arquivo CNAB',
     returnRealtime: false,
     notes: 'Integração SOAP/XML legada, sem API REST moderna, com o processo mais burocrático do levantamento. Deixar por último, e só se houver contrato que obrigue.',
+    extratoScope: 'a_confirmar',
+    extratoNotes: 'Não integramos extrato na Caixa ainda — dado o processo burocrático deste banco, mais razão para levantar cobrança e extrato juntos logo na abertura do processo.',
   },
 ];
 
@@ -178,7 +204,7 @@ const phases: Phase[] = [
     title: 'Fase 1 — Primeiro banco novo',
     goal: 'Provar a arquitetura contra um banco real antes de escalar. A recomendação é Sicoob pelo custo, ou Banco do Brasil pela facilidade de sandbox.',
     steps: [
-      'Criar a conta no portal de desenvolvedor do banco escolhido e gerar as credenciais de homologação.',
+      'Criar a conta no portal de desenvolvedor do banco escolhido e gerar as credenciais de homologação, solicitando de saída os escopos de cobrança e de extrato/conta corrente juntos — mesmo que o extrato não vá ser usado de imediato, evita ter que recriar a aplicação depois (ver seção "Cobrança e extrato: uma aplicação só, ou duas?").',
       'Implementar o adaptador do banco seguindo a interface da Fase 0, com o mapa de status próprio dele — cada banco usa um vocabulário diferente do A_RECEBER e RECEBIDO do Inter.',
       'Emitir uma cobrança de teste em sandbox e conferir o retorno de consulta.',
       'Cadastrar o banco na tela de Cadastro de bancos e a credencial em Configurações bancárias, e rodar o botão de testar conexão.',
@@ -280,6 +306,67 @@ const providerAgnostic: Risk[] = [
   },
 ];
 
+type RolloutStep = { title: string; detail: string; where: string };
+
+// Sequência real de implantação, levantada direto do código (não é um
+// checklist teórico): cada item aqui corresponde a uma tela e uma rota que já
+// existem hoje. Serve pra não esquecer passo nenhum ao colocar um condomínio
+// novo pra rodar, e também deixa claro que os passos de vínculo bancário
+// (7 e 8) hoje só emitem boleto de verdade pelo Banco Inter — os demais bancos
+// do ranking acima dependem da Fase 0 do "Caminho das pedras" para funcionar.
+const rolloutSteps: RolloutStep[] = [
+  {
+    title: '1. Cadastrar o condomínio',
+    detail: 'Nome, CNPJ, endereço e contato. Ao salvar, o sistema já cria as features padrão automaticamente — não precisa de um passo separado para isso.',
+    where: 'Condomínios → Cadastrar condomínio',
+  },
+  {
+    title: '2. Revisar as features habilitadas',
+    detail: 'Pessoas, tipologias, blocos/unidades, prestação de contas, avisos, gestão de cobranças, painel de usuários e indicadores de boletos já vêm ligados. Reserva de espaços, gestão de débitos, histórico de acordos, cobranças adicionais, enquetes, relatos/solicitações, regimento/ocorrências e consumo individualizado vêm desligados — ligar só o que esse condomínio específico vai usar.',
+    where: 'Condomínios → painel de features do condomínio',
+  },
+  {
+    title: '3. Vincular o plano da plataforma (se a mensalidade for cobrada pelo sistema)',
+    detail: 'Só necessário se a cobrança da plataforma para esse condomínio passa por aqui. Não bloqueia nenhuma outra funcionalidade se for deixado para depois.',
+    where: 'Planos da plataforma',
+  },
+  {
+    title: '4. Cadastrar as tipologias das unidades',
+    detail: 'Pré-requisito técnico: uma unidade só pode ser criada depois que a tipologia dela já existe, seja no cadastro manual seja na importação por planilha.',
+    where: 'Tipologias',
+  },
+  {
+    title: '5. Cadastrar o síndico (ou subsíndico)',
+    detail: 'CPF é obrigatório — a senha inicial é gerada a partir dele, e a pessoa é obrigada a trocá-la no primeiro acesso. Cadastrar o e-mail já dispara o aviso de boas-vindas automaticamente.',
+    where: 'Pessoas → Cadastrar usuário',
+  },
+  {
+    title: '6. Cadastrar blocos e unidades',
+    detail: 'Um a um, ou em lote por importação de planilha (.xlsx com colunas Bloco/Unidade/Tipologia) — mais rápido para condomínios grandes.',
+    where: 'Unidades',
+  },
+  {
+    title: '7. Cadastrar moradores e proprietários',
+    detail: 'Vincular um proprietário ou inquilino a uma unidade no cadastro de usuário já cria a moradia automaticamente. Para o caso de proprietário que só acompanha a unidade sem morar nela (ex.: imóvel alugado), o vínculo certo é "Proprietário adicional" na tela de unidades, não um cadastro de morador.',
+    where: 'Pessoas / Unidades → Proprietários adicionais',
+  },
+  {
+    title: '8. Configurar a integração bancária',
+    detail: 'Cadastro de bancos (se o banco do condomínio ainda não existir na lista) → Configurações bancárias (credenciais) → Vincular banco ao condomínio, marcando cobrança e/ou extrato — os dois já vêm marcados por padrão — e definindo o período de busca de boletos. Hoje só o Banco Inter emite e sincroniza de verdade; os demais bancos podem ser cadastrados, mas ficam com emissão bloqueada até a Fase 0 do "Caminho das pedras" abaixo estar pronta.',
+    where: 'Gestão de bancos',
+  },
+  {
+    title: '9. Testar a conexão e rodar a primeira sincronização',
+    detail: '"Testar conexão" na configuração bancária confirma que as credenciais estão corretas antes de expor isso ao síndico. Depois, "Atualizar todos os boletos" traz o histórico (ou o período configurado) pela primeira vez.',
+    where: 'Configurações bancárias / Gestão de cobranças',
+  },
+  {
+    title: '10. Apresentar o tour de cada tela ao síndico',
+    detail: 'Não existe uma tela única de checklist de implantação dentro do app — cada tela tem seu próprio "? Tour desta tela". Vale abrir esses tours junto com o síndico na primeira reunião, começando pelas telas das features que foram ligadas no passo 2.',
+    where: 'Botão "? Tour desta tela", em cada tela',
+  },
+];
+
 const documents = [
   'CNPJ e razão social do condomínio',
   'Dados da conta de recebimento: agência, conta e dígito',
@@ -343,6 +430,27 @@ export default function BankIntegrationGuide() {
       </Section>
 
       <Section
+        title="Como implantar a plataforma num condomínio novo"
+        description="Checklist operacional — a sequência real de telas e passos, hoje, para colocar um condomínio novo para rodar. Não confundir com o roteiro de banco novo abaixo: aqui o condomínio usa um banco já suportado (Inter)."
+      >
+        {rolloutSteps.map((step) => (
+          <View key={step.title} style={s.rolloutCard}>
+            <Text style={s.rolloutTitle}>{step.title}</Text>
+            <Text style={s.riskDetail}>{step.detail}</Text>
+            <Text style={s.riskWhere}>Onde: {step.where}</Text>
+          </View>
+        ))}
+        <View style={s.callout}>
+          <Text style={s.calloutTitle}>Sobre o "Caminho das pedras" logo abaixo</Text>
+          <Text style={s.calloutText}>
+            Aquela seção é o roteiro de engenharia para dar suporte a um banco novo no código — não é sobre implantar
+            um condomínio. Ela só entra em jogo se o condomínio novo tiver a conta em um banco que ainda não está na
+            lista de bancos operacionais (hoje só o Inter). Neste checklist, o passo 8 já avisa quando esse é o caso.
+          </Text>
+        </View>
+      </Section>
+
+      <Section
         title="Ranking dos bancos"
         description="Ordenado por facilidade de integração combinada com o custo que será repassado ao condomínio. Toque em um banco para ver os detalhes."
       >
@@ -390,8 +498,16 @@ export default function BankIntegrationGuide() {
                       <Text style={s.detailLabel}>Como chega o retorno</Text>
                       <Text style={s.detailValue}>{bank.returnFlow}</Text>
                     </View>
+                    <View style={s.detailItem}>
+                      <Text style={s.detailLabel}>Cobrança + extrato na mesma aplicação?</Text>
+                      <Chip
+                        label={bank.extratoScope === 'combinado' ? 'Confirmado' : 'A confirmar no onboarding'}
+                        tone={bank.extratoScope === 'combinado' ? colors.green : colors.muted}
+                      />
+                    </View>
                   </View>
                   <Text style={s.bankNotes}>{bank.notes}</Text>
+                  <Text style={s.bankNotes}>{bank.extratoNotes}</Text>
                 </View>
               ) : null}
             </View>
@@ -472,6 +588,38 @@ export default function BankIntegrationGuide() {
         <Text style={s.paragraph}>
           A plataforma já tem essas três peças funcionando para o Inter, junto com o agendador recorrente. O trabalho não
           é inventar um desenho novo, e sim generalizar o que já existe para funcionar por adaptador.
+        </Text>
+      </Section>
+
+      <Section
+        title="Cobrança e extrato: uma aplicação só, ou duas?"
+        description="Cada condomínio pode vincular cobrança e extrato à mesma configuração bancária num só passo, ou a configurações diferentes quando o banco exigir. A pergunta certa é feita na hora de abrir a integração no banco, não depois."
+      >
+        <View style={s.callout}>
+          <Text style={s.calloutTitle}>O que aconteceu com o Inter e por que isso importa</Text>
+          <Text style={s.calloutText}>
+            Um condomínio já integrado só para cobrança precisou de extrato depois. A aplicação original tinha sido
+            criada só com o escopo de cobrança no portal do Inter, e não foi possível simplesmente adicionar o escopo de
+            extrato a ela — foi preciso criar uma aplicação nova, com credenciais novas, e revincular o condomínio.
+            Nenhum dado se perdeu, mas o retrabalho era evitável.
+          </Text>
+          <Text style={s.calloutText}>
+            A tela de vínculo já reflete isso: "Cobrança (boletos)" e "Extrato bancário" vêm marcados por padrão, porque
+            o caso comum é vincular os dois de uma vez. Desmarcar um deles continua disponível para quando o banco
+            realmente obrigar credenciais separadas por finalidade.
+          </Text>
+        </View>
+        <Text style={s.paragraph}>
+          Ao abrir a conta de desenvolvedor de um banco novo, mesmo que o condomínio só peça cobrança no primeiro
+          momento, vale já solicitar o escopo de extrato/conta corrente junto — evita descobrir a limitação só quando um
+          síndico pedir prestação de contas com extrato importado.
+        </Text>
+        <Text style={s.paragraph}>
+          Confirmação real só existe para o Inter até agora, registrada nos cartões do ranking acima ("Cobrança + extrato
+          na mesma aplicação?"). Para os demais bancos da lista, os portais de desenvolvedor costumam listar cobrança,
+          Pix e extrato/conta corrente como produtos de API separados — o que sugere que a mesma pergunta vale a pena,
+          mas isso ainda não foi testado nesta plataforma e precisa ser conferido caso a caso durante o onboarding, não
+          presumido a partir do que vale para o Inter.
         </Text>
       </Section>
 
@@ -612,6 +760,8 @@ const s = StyleSheet.create({
   phaseGoal: { fontSize: 12, color: colors.muted, lineHeight: 18 },
   phaseBody: { borderTopWidth: 1, borderTopColor: colors.border, padding: 12, paddingTop: 2 },
 
+  rolloutCard: { borderWidth: 1, borderColor: colors.border, borderLeftWidth: 4, borderLeftColor: colors.primary, borderRadius: 12, padding: 12, marginBottom: 10 },
+  rolloutTitle: { fontSize: 14, fontWeight: '900', color: colors.primaryDark },
   riskCard: { borderWidth: 1, borderColor: colors.border, borderLeftWidth: 4, borderLeftColor: colors.amber, borderRadius: 12, padding: 12, marginBottom: 10 },
   riskTitle: { fontSize: 14, fontWeight: '900', color: colors.ink },
   riskDetail: { fontSize: 13, color: colors.ink, lineHeight: 20, marginTop: 6 },
