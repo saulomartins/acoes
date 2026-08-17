@@ -657,5 +657,33 @@ mas com o código de antes do trial expirar, sem as mudanças pendentes).
   fazem parte do app): `api/_fixIntegration.js`, `api/create_user.js`,
   `api/migrate.js`. `.wrangler/` (cache local do Wrangler) também ficou de
   fora, sem relação com o deploy.
-- Pendente: publicação de APK Android (EAS) para esta revisão — não feita
-  ainda, aguardando autorização específica do usuário.
+- Android: autorizado pelo usuário e publicado depois do deploy web. Versão
+  do app elevada de `1.2.9` para `1.3.0` em `app.json` (release com
+  funcionalidades novas, não só correção). `versionCode` `22`
+  auto-incrementado pelo EAS (`appVersionSource: remote`). Build EAS
+  `df3630eb-6ff8-4903-902c-fa4756f9440f`, perfil `production-apk`, enviado
+  com `npm run release:apk:start` e concluído com `npm run
+  release:apk:resume` rodando desacoplado em segundo plano (ficou
+  `IN_QUEUE` por ~10 min e `IN_PROGRESS` por mais uns 15 antes de
+  `FINISHED` — sem precisar de intervenção manual). Desta vez o
+  `releases:seed-android` **não** estourou memória — confirma de novo que a
+  falha documentada na publicação 1.2.4 não é determinística.
+  Arquivo `releases/lar-em-dia-1.3.0-build-22-production.apk`
+  (69.536.656 bytes). SHA-256:
+  `7E08C9A0E4E208C14A94CF5C77FE39DB68581C58809ACF49D263DCAD9709C9F5`,
+  conferido em três pontos: artefato validado pelo `apksigner` logo após o
+  download, arquivo local e `/data/mobile-releases/2d05d58e-174e-4712-bad9-fa77ff6f7efc.apk`
+  no volume Railway. Assinatura APK Scheme v2 validada; mesmo signer RSA
+  2048 bits das versões anteriores (chave pública SHA-256
+  `2dd2dd1a3b0b3024...`). `GET /mobile-releases/latest` não foi conferido
+  por aqui (rota autenticada, sem sessão disponível neste ambiente) — o
+  comprovante `releases/latest-android-release.json` confirma
+  `published: true`.
+  Conferido dentro do `.apk` (extraído e grepado o bundle Hermes
+  `assets/index.android.bundle`, o mesmo tipo de checagem feita no bundle
+  web): contém `acoes-production.up.railway.app`, nenhuma ocorrência de
+  `localhost:3000`, e o texto novo do representante automático presente.
+- **Pendente de verificação manual** (não feito nesta sessão, requer
+  aparelho/emulador Android): instalação do APK, abertura sem crash, login
+  e uma chamada autenticada, e conferência visual de versão/ícone. Validar
+  antes de divulgar amplamente a nova versão aos moradores.
