@@ -609,3 +609,53 @@ registrado na tela do admin geral:
 carregamento da tela. Alguns boletos já acumulavam mais de 120 eventos de
 sync. É uma chamada à API do banco por boleto por abertura de tela; não foi
 tratado aqui e merece tarefa própria.
+
+## Publicação de 17/08/2026 — incidente: trial do Railway expirado
+
+Ao iniciar a validação de deploy, `railway status` mostrava o serviço
+`acoes` como `Failed` e o Postgres como `Offline`. `/health` respondia
+HTTP 404 `{"message":"Application not found"}` — erro do proxy do Railway
+quando não há deployment ativo. Os logs mostravam a API rodando
+normalmente até `2026-08-13 23:49:41 -03:00` (mesmo horário do último
+deploy `SUCCESS` registrado, `c5fa59e1`, da publicação 1.2.9), recebendo
+`SIGTERM` e parando, sem nenhum log novo depois disso — ou seja, a API
+ficou fora do ar por **cerca de 4 dias** sem relação com código.
+
+Causa raiz, confirmada ao rodar `railway up`: `Your trial has expired.
+Please select a plan to continue using Railway.` Resolvido pelo usuário
+selecionando um plano pago no painel do Railway (ação que exige forma de
+pagamento — só o usuário podia fazer). Depois disso, o Railway reativou
+sozinho o **último container antigo** (deployment `9e008dce`, `SUCCESS`,
+mas com o código de antes do trial expirar, sem as mudanças pendentes).
+
+- Commit publicado: `06d1488` — integração Inter por finalidade
+  (boleto/extrato) em `condominium_bank_configurations` (nova coluna
+  `purpose`, chave primária composta `(condominium_id, purpose)`, migração
+  guardada por `do $$ ... end $$` e idempotente), painel de usuários com
+  total de unidades/apartamentos e quantas estão com/sem morador, e
+  representante da unidade definido automaticamente ao vincular alguém em
+  Pessoas (mantendo a opção manual de trocar/remover em Blocos e
+  apartamentos).
+- API: `railway up --service acoes --environment production` publicou o
+  deployment `f4bcab52-0d4c-452f-ae14-2194fe1779ca`, status `SUCCESS`;
+  logs de inicialização limpos, sem erros.
+- Banco: schema copiado e aplicado dentro do container com
+  `dist/scripts/setupDatabase.js` (script compilado, não `ts-node`, como
+  manda a seção 3). Resultado `Schema applied successfully`. A troca de
+  chave primária de `condominium_bank_configurations` rodou sem erro e é
+  idempotente — não precisa rodar de novo em deploys futuros sem mudança
+  de schema.
+- Web: deployment Cloudflare `28aed3d4.lar-em-dia.pages.dev`; domínio
+  `gestaolaremdia.com` HTTP 200 servindo o bundle
+  `AppEntry-a76e994a31e1597bd4dcb613f1d5e2f0.js`, o mesmo gerado no build
+  local (conferido antes: contém `acoes-production.up.railway.app`,
+  nenhuma ocorrência de `localhost:3000`).
+- Smoke test: `POST /auth/login` em produção com usuário inexistente
+  devolveu HTTP 401 (não 500) e
+  `access-control-allow-origin: https://gestaolaremdia.com`.
+- Não commitados de propósito (scripts avulsos de desenvolvimento, não
+  fazem parte do app): `api/_fixIntegration.js`, `api/create_user.js`,
+  `api/migrate.js`. `.wrangler/` (cache local do Wrangler) também ficou de
+  fora, sem relação com o deploy.
+- Pendente: publicação de APK Android (EAS) para esta revisão — não feita
+  ainda, aguardando autorização específica do usuário.
