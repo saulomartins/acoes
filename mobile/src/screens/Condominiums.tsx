@@ -41,6 +41,7 @@ const FEATURE_CATALOG: Record<FeatureKey, { label: string; dependsOn: FeatureKey
   tipologias: { label: 'Tipologias', dependsOn: [] },
   blocos_unidades: { label: 'Blocos e unidades', dependsOn: [] },
   prestacao_contas: { label: 'Prestação de contas', dependsOn: [] },
+  conselho_fiscal: { label: 'Conselho Fiscal', dependsOn: ['prestacao_contas'] },
   avisos_comunicacao: { label: 'Avisos e comunicação', dependsOn: [] },
   relatos_solicitacoes: { label: 'Relatos e solicitações', dependsOn: [] },
   enquetes: { label: 'Enquetes', dependsOn: ['pessoas', 'blocos_unidades'] },

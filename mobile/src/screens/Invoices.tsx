@@ -78,6 +78,7 @@ export default function Invoices({navigation}:any){
   const [people,setPeople]=useState<Person[]>([]);const [selectedPersonId,setSelectedPersonId]=useState('');const [personSearch,setPersonSearch]=useState('');
   const [beneficiaryName,setBeneficiaryName]=useState('');const [beneficiaryDocument,setBeneficiaryDocument]=useState('');
   const [description,setDescription]=useState('Taxa condominial');const [emissionMonth,setEmissionMonth]=useState(currentBrazilianMonth());const [manualAmount,setManualAmount]=useState('');
+  const [nextInvoicePreview,setNextInvoicePreview]=useState<any>(null);const [previewLoading,setPreviewLoading]=useState(false);
   const canManage=user?.role==='sindico'||user?.role==='subsindico';
   const {scrollRef,tourOpen,registerSection,scrollToSection,openTour,closeTour,isActive}=useSectionTour();
   const [reasonEditingId,setReasonEditingId]=useState('');const [reasonDraft,setReasonDraft]=useState('');const [reasonSettled,setReasonSettled]=useState(false);const [reasonSaving,setReasonSaving]=useState(false);
@@ -92,6 +93,26 @@ export default function Invoices({navigation}:any){
     finally{setLoading(false)}
   },[canManage,userToken]);
   useEffect(()=>{load()},[load]);
+
+  // Prévia da composição do próximo boleto da pessoa selecionada (tipologia +
+  // cobranças adicionais + consumo pendentes na unidade), pra quem emite ver o
+  // que vai entrar no boleto antes de confirmar — mesmo cálculo que o backend
+  // usa em /billing/batches/preview, só que consultado com antecedência.
+  useEffect(()=>{
+    const referenceMonth=brazilianMonthToIso(emissionMonth);
+    if(!userToken||!selectedPersonId||!referenceMonth){setNextInvoicePreview(null);return}
+    let active=true;
+    const manualAmountCents=currencyToCents(manualAmount);
+    const amountOverrides=manualAmountCents>0?{[selectedPersonId]:manualAmountCents}:undefined;
+    setPreviewLoading(true);
+    const timer=setTimeout(()=>{
+      apiRequest<any>('/billing/batches/preview',userToken,{method:'POST',body:JSON.stringify({referenceMonth,userIds:[selectedPersonId],amountOverrides})})
+        .then(response=>{if(active)setNextInvoicePreview(response.items?.[0]||null)})
+        .catch(()=>{if(active)setNextInvoicePreview(null)})
+        .finally(()=>{if(active)setPreviewLoading(false)});
+    },400);
+    return()=>{active=false;clearTimeout(timer)};
+  },[userToken,selectedPersonId,emissionMonth,manualAmount]);
 
   const references=useMemo(()=>Array.from(new Set([currentMonth(),...items.map(monthKey)])).sort().reverse(),[items]);
   const referenceItems=useMemo(()=>items.filter(item=>referenceFilter==='all'||monthKey(item)===referenceFilter),[items,referenceFilter]);
@@ -153,19 +174,21 @@ export default function Invoices({navigation}:any){
       const preview=await apiRequest<any>('/billing/batches/preview',userToken,{method:'POST',body:JSON.stringify({referenceMonth,userIds:[selectedPersonId],amountOverrides})});
       const candidate=preview.items[0];
       if(!candidate?.valid){setDialog({title:'Não é possível emitir',message:candidate?.issues?.join(' · ')||'A pessoa selecionada não está apta para emissão.',tone:'error'});return}
+      const extraItems=(candidate.extraChargeItems||[]) as Array<{description:string;amountCents:number}>;
+      const extraNote=!manualAmountCents&&extraItems.length?` Este boleto incluirá cobrança(s) adicional(is) da unidade: ${extraItems.map(item=>`${item.description} ${money(item.amountCents)}`).join(', ')}.`:'';
       if(candidate.existingAmountCents){
         const existingLabel=statusLabel[candidate.existingStatus as InvoiceStatus]||candidate.existingStatus;
-        setDialog({title:'Já existe boleto nesta referência',message:`${personLabel} já tem uma cobrança de ${money(Number(candidate.existingAmountCents))} (${existingLabel}) na referência ${emissionMonth}. Confirma a emissão de mais um boleto${amountLabel} para essa mesma referência?`,tone:'error',confirmLabel:'Sim, emitir mais um boleto',cancelLabel:'Cancelar',onConfirm:executeIndividualEmission});
+        setDialog({title:'Já existe boleto nesta referência',message:`${personLabel} já tem uma cobrança de ${money(Number(candidate.existingAmountCents))} (${existingLabel}) na referência ${emissionMonth}. Confirma a emissão de mais um boleto${amountLabel} para essa mesma referência?${extraNote}`,tone:'error',confirmLabel:'Sim, emitir mais um boleto',cancelLabel:'Cancelar',onConfirm:executeIndividualEmission});
         return;
       }
-      setDialog({title:'Confirmar emissão individual?',message:`O boleto de ${personLabel}${amountLabel} será enviado ao Banco Inter para a referência ${emissionMonth}.`,tone:'info',confirmLabel:'Sim, emitir boleto',cancelLabel:'Revisar dados',onConfirm:executeIndividualEmission});
+      setDialog({title:'Confirmar emissão individual?',message:`O boleto de ${personLabel}${amountLabel} será enviado ao Banco Inter para a referência ${emissionMonth}.${extraNote}`,tone:'info',confirmLabel:'Sim, emitir boleto',cancelLabel:'Revisar dados',onConfirm:executeIndividualEmission});
     }catch(e){setDialog({title:'Não foi possível validar',message:e instanceof Error?e.message:'Falha ao consultar a pessoa selecionada.',tone:'error'})}
     finally{setLoading(false)}
   };
 
   const managerTourSteps:TourStep[]=[
     {key:'summary',title:'Resumo e atualização automática',description:'O botão "Atualizar todos os boletos" consulta o Banco Inter e atualiza a situação (pago, vencido) de todos os boletos existentes — vale rodar com frequência, já que o sistema não recebe aviso automático do banco quando um boleto é pago. Os quatro números logo abaixo resumem só a referência selecionada no filtro: recebido, em aberto, vencidos e total de boletos.'},
-    {key:'emission',title:'Emitir boleto individual',description:'Pesquise pelo nome (mínimo 2 letras) e selecione a pessoa. Nome do beneficiário e CNPJ vêm automaticamente do cadastro do condomínio e não são editáveis aqui. Se você preencher "Valor manual do boleto", esse valor substitui o valor da tipologia (e de cobranças adicionais) e é o que efetivamente vai pro Banco Inter. Antes de emitir, o sistema valida se a pessoa está apta e avisa se já existe boleto na mesma referência, pedindo confirmação extra pra evitar duplicidade.'},
+    {key:'emission',title:'Emitir boleto individual',description:'Pesquise pelo nome (mínimo 2 letras) e selecione a pessoa. Nome do beneficiário e CNPJ vêm automaticamente do cadastro do condomínio e não são editáveis aqui. Assim que a pessoa é selecionada, aparece "Composição do próximo boleto" com o valor da tipologia, cada cobrança adicional pendente da unidade e o consumo, já somados — dá pra conferir tudo antes de emitir. Se você preencher "Valor manual do boleto", esse valor substitui o valor da tipologia (e de cobranças adicionais) e é o que efetivamente vai pro Banco Inter. Antes de emitir, o sistema valida se a pessoa está apta e avisa se já existe boleto na mesma referência, pedindo confirmação extra pra evitar duplicidade.'},
     {key:'filters',title:'Filtros e boletos em lote',description:'Filtre por mês de referência, nome do morador ou situação (aguardando Inter, em aberto, pago, vencido, cancelado). Com um mês específico selecionado — não "Todo o histórico" — aparece o botão pra baixar todos os boletos daquela referência em um único arquivo .zip.'},
     {key:'invoices',title:'Lista de cobranças',description:'Cada card é um boleto, agrupado por mês de referência. Quando o boleto vem da tipologia, o card mostra "Composição da cobrança": Valor condomínio (com Taxa de condomínio/Taxa de melhoria, se configuradas em Config. e Enviar cobranças), cobranças adicionais e consumo de água/gás/energia, cada um com seu valor. Boletos vencidos ganham destaque em vermelho, e parcelas de acordo de renegociação mostram a etiqueta "PARCELA DE ACORDO". Num boleto cancelado, você pode registrar o motivo do cancelamento e marcar se o valor foi recebido por fora do sistema (ex.: Pix direto na chave) — isso passa a contar no total recebido da referência.'},
   ];
@@ -218,6 +241,16 @@ export default function Invoices({navigation}:any){
           <Text style={s.panelText}>Se preenchido, este valor substitui o valor da tipologia (e de cobranças adicionais) e é o que será enviado ao banco.</Text>
         </View>
       </FormGrid>
+      {selectedPerson?<View style={s.breakdownBox}>
+        <Text style={s.breakdownTitle}>Composição do próximo boleto{previewLoading?' (atualizando...)':''}</Text>
+        {nextInvoicePreview?.manualOverride?<View style={s.breakdownRow}><Text style={s.breakdownLabel}>Valor manual informado</Text><Text style={s.breakdownValue}>{money(Number(nextInvoicePreview.fee_cents||0))}</Text></View>:<>
+          <View style={s.breakdownRow}><Text style={s.breakdownLabel}>Valor condomínio (tipologia)</Text><Text style={s.breakdownValue}>{selectedPerson.condominium_fee_cents?money(selectedPerson.condominium_fee_cents):'Sem valor'}</Text></View>
+          {((nextInvoicePreview?.extraChargeItems||[]) as Array<{description:string;amountCents:number}>).map((extraItem,index)=><View key={`nextextra-${index}`} style={s.breakdownRow}><Text style={s.breakdownLabel}>{extraItem.description}</Text><Text style={s.breakdownValue}>{money(extraItem.amountCents)}</Text></View>)}
+          {((nextInvoicePreview?.consumptionItems||[]) as Array<{utilityType:string;amountCents:number}>).map((item,index)=><View key={`nextconsumption-${index}`} style={s.breakdownRow}><Text style={s.breakdownLabel}>{utilityLabel[item.utilityType]||item.utilityType}</Text><Text style={s.breakdownValue}>{money(item.amountCents)}</Text></View>)}
+          {nextInvoicePreview?<View style={[s.breakdownRow,s.breakdownTotalRow]}><Text style={s.breakdownTotalLabel}>Valor total</Text><Text style={s.breakdownTotalValue}>{money(Number(nextInvoicePreview.fee_cents||0))}</Text></View>:null}
+        </>}
+        {nextInvoicePreview&&!nextInvoicePreview.manualOverride&&!nextInvoicePreview.extraChargeItems?.length?<Text style={s.panelText}>Nenhuma cobrança adicional pendente para {selectedPerson.unit||'esta unidade'} na referência {emissionMonth}.</Text>:null}
+      </View>:null}
       <AppButton title="Emitir boleto para a pessoa selecionada" onPress={confirmIndividualEmission} disabled={loading}/>
     </Panel></View>:null}
 

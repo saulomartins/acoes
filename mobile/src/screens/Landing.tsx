@@ -196,6 +196,7 @@ const PAIN_POINTS = [
   'Reservas e ocorrências administradas manualmente',
   'Documentos difíceis de localizar',
   'Inadimplência sem acompanhamento eficiente',
+  'Prestação de contas sem aprovação formal do conselho fiscal',
 ];
 
 type Feature = { title: string; icon: string; description: string; highlight?: string };
@@ -208,6 +209,7 @@ const FEATURES: Feature[] = [
   { title: 'Cobrança por Pix e boleto', icon: '▤', description: 'Boleto e Pix emitidos direto pelo Banco Inter, com multa, juros e detalhamento de taxas configurados uma vez.' },
   { title: 'Consumo de água, gás e energia', icon: '💧', description: 'Tarifa por condomínio e lançamento mensal de consumo por unidade, somado ao boleto da taxa condominial.', highlight: 'Transparência no consumo' },
   { title: 'Prestação de contas', icon: '◍', description: 'Relatório mensal com comprovantes anexados, claro e disponível para todos os moradores.', highlight: 'Transparência financeira' },
+  { title: 'Conselho Fiscal e homologação', icon: '⚖', description: 'Síndico, subsíndico e os dois conselheiros fiscais homologam a prestação de contas, com registro de quem aprovou e as considerações de cada um — inclusive no PDF impresso.', highlight: 'Governança e transparência' },
   { title: 'Gestão de débitos', icon: '↓', description: 'Acordo, parcelamento e edição de débitos antigos para reduzir a inadimplência.', highlight: 'Redução da inadimplência' },
   { title: 'Avisos e comunicação', icon: '◉', description: 'Avisos com confirmação de leitura — sem se perder no grupo de WhatsApp.', highlight: 'Comunicação centralizada' },
   { title: 'Relatos e solicitações', icon: '!', description: 'Morador abre um relato, acompanha e conversa com a administração até resolver.' },
@@ -223,7 +225,7 @@ const FEATURES: Feature[] = [
 ];
 
 const FEATURE_GROUPS = [
-  { title: 'Financeiro e cobranças', description: 'Controle, arrecadação e transparência financeira.', items: ['Gestão financeira','Cobrança por Pix e boleto','Consumo de água, gás e energia','Prestação de contas','Gestão de débitos','Cobranças adicionais','Histórico de acordos'] },
+  { title: 'Financeiro e cobranças', description: 'Controle, arrecadação e transparência financeira.', items: ['Gestão financeira','Cobrança por Pix e boleto','Consumo de água, gás e energia','Prestação de contas','Conselho Fiscal e homologação','Gestão de débitos','Cobranças adicionais','Histórico de acordos'] },
   { title: 'Comunicação e participação', description: 'Moradores informados e participando das decisões.', items: ['Avisos e comunicação','Relatos e solicitações','Enquetes','Regimento e ocorrências','Notificações de infração'] },
   { title: 'Operação e experiência', description: 'Rotina administrativa organizada para gestão e moradores.', items: ['Unidades e moradores','Reserva de espaços','APP do Morador','Painel com indicadores'] },
 ];
@@ -231,7 +233,7 @@ const FEATURE_GROUPS = [
 const BENEFITS = [
   { title: 'Menos tarefas manuais. Mais tempo para administrar.', description: 'Cobrança, comunicados e relatórios no automático, liberando sua agenda.', icon: '⏱' },
   { title: 'Todas as informações do condomínio em um só lugar.', description: 'Financeiro, documentos, ocorrências e comunicação, sem sistemas espalhados.', icon: '🗂' },
-  { title: 'Mais transparência para o síndico e mais confiança para os moradores.', description: 'Prestação de contas sempre visível, sem precisar pedir satisfação.', icon: '◎' },
+  { title: 'Mais transparência para o síndico e mais confiança para os moradores.', description: 'Prestação de contas sempre visível e homologada por síndico, subsíndico e conselho fiscal — sem precisar pedir satisfação.', icon: '◎' },
   { title: 'Decisões mais rápidas com dados atualizados.', description: 'Indicadores em tempo real, sem esperar o fechamento do mês.', icon: '⚡' },
   { title: 'Uma gestão acessível de qualquer lugar.', description: 'Painel completo no computador e no aplicativo, onde você estiver.', icon: '🌐' },
 ];
@@ -241,13 +243,13 @@ const BENEFITS = [
 // ao condomínio) — nada de "administradora", "conselheiro" ou "portaria",
 // que não existem como papel no sistema.
 const PROFILES = [
-  { key: 'sindicos', label: 'Síndicos e subsíndicos', icon: '🏢', bullets: ['Painel único com financeiro, comunicação e relatos dos moradores', 'Prestação de contas pronta todo mês, sem planilha', 'Edite, negocie ou quite débitos antigos direto pelo sistema'] },
+  { key: 'sindicos', label: 'Síndicos e subsíndicos', icon: '🏢', bullets: ['Painel único com financeiro, comunicação e relatos dos moradores', 'Prestação de contas pronta todo mês, sem planilha, homologada por você, o subsíndico e o conselho fiscal', 'Edite, negocie ou quite débitos antigos direto pelo sistema'] },
   { key: 'moradores', label: 'Moradores', icon: '🏠', bullets: ['Acompanham os próprios boletos e o histórico de pagamentos', 'Recebem avisos com confirmação de leitura, sem grupo lotado', 'Abrem relatos e acompanham a resposta da administração'] },
 ];
 
 const DEMO_TABS = [
   { key: 'painel', label: 'Painel administrativo', device: 'desktop' as const, kpis: [{ label: 'saldo do mês', value: 'R$ 42.380' }, { label: 'inadimplência', value: '6%' }], rows: [{ label: 'Boletos emitidos', value: '48' }, { label: 'Pagos', value: '42' }, { label: 'Em aberto', value: '6' }], note: 'Visão geral financeira e operacional em um único painel.' },
-  { key: 'prestacao', label: 'Prestação de contas', device: 'desktop' as const, kpis: [{ label: 'receitas', value: 'R$ 51.200' }, { label: 'despesas', value: 'R$ 38.900' }], rows: [{ label: 'Água e luz', value: 'R$ 6.400' }, { label: 'Manutenção', value: 'R$ 4.100' }, { label: 'Folha de pagamento', value: 'R$ 12.300' }], note: 'Relatório mensal pronto, com comprovante anexado por categoria.' },
+  { key: 'prestacao', label: 'Prestação de contas', device: 'desktop' as const, kpis: [{ label: 'receitas', value: 'R$ 51.200' }, { label: 'despesas', value: 'R$ 38.900' }], rows: [{ label: 'Água e luz', value: 'R$ 6.400' }, { label: 'Manutenção', value: 'R$ 4.100' }, { label: 'Homologação', value: '3 de 4 já aprovaram' }], note: 'Relatório mensal pronto, com comprovante anexado por categoria e homologação de síndico, subsíndico e conselho fiscal.' },
   { key: 'debitos', label: 'Gestão de débitos', device: 'desktop' as const, kpis: [{ label: 'em negociação', value: '5' }, { label: 'inadimplência', value: '6%' }], rows: [{ label: 'Acordo apto 302', value: '3/6 parcelas pagas' }, { label: 'Débito antigo apto 108', value: 'Pagamento parcial' }, { label: 'Apto 415', value: 'Quitado' }], note: 'Acorde, edite ou registre pagamento parcial de um débito antigo.' },
   { key: 'comunicacao', label: 'Comunicação', device: 'desktop' as const, kpis: [{ label: 'avisos enviados', value: '14' }, { label: 'confirmação de leitura', value: '92%' }], rows: [{ label: 'Manutenção do elevador', value: 'Lido por 118' }, { label: 'Assembleia geral', value: 'Lido por 132' }, { label: 'Dedetização', value: 'Lido por 96' }], note: 'Avisos organizados, com confirmação de leitura por morador.' },
   { key: 'relatos', label: 'Relatos e solicitações', device: 'desktop' as const, kpis: [{ label: 'relatos abertos', value: '9' }, { label: 'resolvidos no mês', value: '34' }], rows: [{ label: 'Vazamento garagem', value: 'Em andamento' }, { label: 'Portão da entrada', value: 'Resolvido' }, { label: 'Luz do corredor', value: 'Resolvido' }], note: 'Relato aberto pelo morador, com conversa e status até resolver.' },
@@ -530,7 +532,7 @@ export default function Landing({ navigation }: any) {
             </SoftCard>
             <SoftCard style={[styles.compareCard, styles.compareCardNew]}>
               <Text style={styles.compareTitle}>Com o Lar em Dia</Text>
-              {['Painel único, sempre atualizado', 'Boleto e Pix automáticos', 'Avisos com confirmação de leitura', 'Prestação de contas pronta todo mês'].map((item) => <View key={item} style={styles.compareItem}><Text style={styles.compareBulletNew}>✓</Text><Text style={styles.compareText}>{item}</Text></View>)}
+              {['Painel único, sempre atualizado', 'Boleto e Pix automáticos', 'Avisos com confirmação de leitura', 'Prestação de contas pronta todo mês', 'Homologação pelo conselho fiscal, com registro de quem aprovou'].map((item) => <View key={item} style={styles.compareItem}><Text style={styles.compareBulletNew}>✓</Text><Text style={styles.compareText}>{item}</Text></View>)}
             </SoftCard>
           </View>
         </View>

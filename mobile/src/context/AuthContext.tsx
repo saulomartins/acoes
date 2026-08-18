@@ -40,7 +40,7 @@ export type FeatureKey =
   | 'config_enviar_cobrancas' | 'cobrancas_adicionais'
   | 'painel' | 'painel_usuarios' | 'indicadores_boletos' | 'nada_consta'
   | 'avisos_comunicacao' | 'relatos_solicitacoes' | 'enquetes' | 'reserva_espacos' | 'regimento_ocorrencias'
-  | 'consumo_individualizado';
+  | 'consumo_individualizado' | 'conselho_fiscal';
 
 type AuthContextType = {
   user: AuthUser | null;
@@ -74,7 +74,7 @@ type AuthResponse = {
   user: AuthUser;
 };
 
-const storage = {
+export const storage = {
   get: async (key: string) => {
     if (Platform.OS === 'web') return window.localStorage.getItem(key);
     return SecureStore.getItemAsync(key);

@@ -111,7 +111,6 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
   const [participationOpen, setParticipationOpen] = useState(participationActive);
   const [platformOpen, setPlatformOpen] = useState(platformActive);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
   const initials = (user?.username || 'U').slice(0, 2).toUpperCase();
   const activeLabel = items.find((item) => item.route === activeRoute)?.label || 'Lar em Dia';
   const totalAttention = unreadNotices + unreadReports;
@@ -522,54 +521,42 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                 </View>
 
                 <ScrollView style={styles.mobileMenuContent}>
-                  {visible.map((item) => (
-                    <View key={item.route}>
-                      <Pressable 
-                        style={styles.mobileMenuItemParent}
-                        onPress={() => {
-                          if (item.label === 'Boletos' || item.label === 'Avisos') {
-                            setExpandedMenus(prev => ({...prev, [item.label]: !prev[item.label]}));
-                          } else if (item.route) {
-                            navigation.navigate(item.route);
-                            setMobileMenuOpen(false);
-                          }
-                        }}
-                      >
-                        <Text style={styles.mobileMenuItemIcon}>{item.symbol}</Text>
-                        <Text style={[styles.mobileMenuItemText, styles.grow]}>{item.label}</Text>
-                        {(item.label === 'Boletos' || item.label === 'Avisos') && (
-                          <Text style={styles.mobileMenuChevron}>{expandedMenus[item.label] ? '⌃' : '⌄'}</Text>
-                        )}
-                      </Pressable>
-                      
-                      {item.label === 'Boletos' && expandedMenus['Boletos'] && (
-                        <View style={styles.mobileMenuSubmenu}>
-                          {billingItems.map((subitem) => (
-                            <Pressable 
-                              key={subitem.route}
-                              style={styles.mobileMenuItemChild}
-                              onPress={() => {
-                                navigation.navigate(subitem.route);
-                                setMobileMenuOpen(false);
-                              }}
-                            >
-                              <View style={styles.mobileMenuSubmenuDot} />
-                              <Text style={styles.mobileMenuItemChildText}>{subitem.label}</Text>
-                            </Pressable>
-                          ))}
-                        </View>
+                  {mainItems.map((item) => (
+                    <Pressable
+                      key={item.route}
+                      style={styles.mobileMenuItemParent}
+                      onPress={() => { navigation.navigate(item.route); setMobileMenuOpen(false); }}
+                    >
+                      <Text style={styles.mobileMenuItemIcon}>{item.symbol}</Text>
+                      <Text style={[styles.mobileMenuItemText, styles.grow]}>{item.label}</Text>
+                      {totalAttention > 0 && (item.route === 'Communications' || item.route === 'Reports') && (
+                        <Text style={styles.unreadBadge}>{totalAttention}</Text>
                       )}
-                      
-                      {item.label === 'Avisos' && expandedMenus['Avisos'] && (
+                    </Pressable>
+                  ))}
+
+                  {[
+                    { key: 'bank', label: 'Gestão bancária', symbol: '⚙', items: bankItems, open: bankOpen, setOpen: setBankOpen, badge: false },
+                    { key: 'billing', label: 'Gestão de cobranças', symbol: '▤', items: billingItems, open: billingOpen, setOpen: setBillingOpen, badge: false },
+                    { key: 'notice', label: 'Avisos e comunicação', symbol: '●', items: noticeItems, open: noticeOpen, setOpen: setNoticeOpen, badge: true },
+                    { key: 'regulation', label: 'Regimento e Ocorrências', symbol: '📖', items: regulationItems, open: regulationOpen, setOpen: setRegulationOpen, badge: false },
+                    { key: 'participation', label: 'Participação', symbol: '✓', items: participationItems, open: participationOpen, setOpen: setParticipationOpen, badge: false },
+                    { key: 'platform', label: 'Plataforma', symbol: '▦', items: platformItems, open: platformOpen, setOpen: setPlatformOpen, badge: false },
+                  ].map((group) => group.items.length === 0 ? null : (
+                    <View key={group.key}>
+                      <Pressable style={styles.mobileMenuItemParent} onPress={() => group.setOpen(!group.open)}>
+                        <Text style={styles.mobileMenuItemIcon}>{group.symbol}</Text>
+                        <Text style={[styles.mobileMenuItemText, styles.grow]}>{group.label}</Text>
+                        {group.badge && totalAttention > 0 && <Text style={styles.unreadBadge}>{totalAttention}</Text>}
+                        <Text style={styles.mobileMenuChevron}>{group.open ? '⌃' : '⌄'}</Text>
+                      </Pressable>
+                      {group.open && (
                         <View style={styles.mobileMenuSubmenu}>
-                          {noticeItems.map((subitem) => (
-                            <Pressable 
+                          {group.items.map((subitem) => (
+                            <Pressable
                               key={subitem.route}
                               style={styles.mobileMenuItemChild}
-                              onPress={() => {
-                                navigation.navigate(subitem.route);
-                                setMobileMenuOpen(false);
-                              }}
+                              onPress={() => { navigation.navigate(subitem.route); setMobileMenuOpen(false); }}
                             >
                               <View style={styles.mobileMenuSubmenuDot} />
                               <Text style={styles.mobileMenuItemChildText}>{subitem.route === 'Communications' ? 'Comunicação' : subitem.label}</Text>

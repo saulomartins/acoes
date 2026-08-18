@@ -15,6 +15,131 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 router.use(authenticate);
 router.use(requireFeature('prestacao_contas'));
 router.use((req,res,next)=>{if(req.user?.role!=='inquilino')return next();const send=res.json.bind(res);res.json=((body:any)=>{const hide=(item:any)=>{if(item&&typeof item==='object')delete item.bank_balance_cents};if(Array.isArray(body?.reports))body.reports.forEach(hide);hide(body?.report);return send(body)}) as typeof res.json;return next()});
+
+// Conselho Fiscal (opcional, feature `conselho_fiscal`): quem ocupa os dois
+// assentos, pra exibir nome/considerações e resolver quem pode homologar.
+const hydrateCouncil=async(condo:string)=>{
+  const result=await query<{id1:string|null;name1:string|null;id2:string|null;name2:string|null}>(
+    `select u1.id id1,u1.full_name name1,u2.id id2,u2.full_name name2
+     from condominiums c
+     left join users u1 on u1.id=c.fiscal_council_1_user_id
+     left join users u2 on u2.id=c.fiscal_council_2_user_id
+     where c.id=$1`,[condo]);
+  const row=result.rows[0];
+  return{
+    fiscalCouncil1:row?.id1?{id:row.id1,fullName:row.name1}:null,
+    fiscalCouncil2:row?.id2?{id:row.id2,fullName:row.name2}:null,
+  };
+};
+router.get('/council',authorize('sindico','subsindico'),requireFeature('conselho_fiscal'),asyncHandler(async(req,res)=>{
+  const condo=req.user?.condominiumId;if(!condo)return res.status(400).json({message:'Usuário sem condomínio.'});
+  return res.json(await hydrateCouncil(condo));
+}));
+router.put('/council',authorize('sindico','subsindico'),requireFeature('conselho_fiscal'),asyncHandler(async(req,res)=>{
+  const condo=req.user?.condominiumId;if(!condo)return res.status(400).json({message:'Usuário sem condomínio.'});
+  const id1=req.body?.fiscalCouncil1UserId?String(req.body.fiscalCouncil1UserId):null;
+  const id2=req.body?.fiscalCouncil2UserId?String(req.body.fiscalCouncil2UserId):null;
+  if(id1&&id2&&id1===id2)return res.status(400).json({message:'Escolha duas pessoas diferentes para o Conselho Fiscal 1 e 2.'});
+  for(const id of [id1,id2].filter((value):value is string=>Boolean(value))){
+    const person=await query(`select id from users where id=$1 and condominium_id=$2 and role in ('proprietario','inquilino') and deleted_at is null`,[id,condo]);
+    if(!person.rows[0])return res.status(400).json({message:'Selecione moradores (proprietário ou inquilino) cadastrados neste condomínio.'});
+  }
+  await query(`update condominiums set fiscal_council_1_user_id=$1,fiscal_council_2_user_id=$2 where id=$3`,[id1,id2,condo]);
+  await logAudit(req,'prestacao_contas','updated','Atualizou os membros do Conselho Fiscal');
+  return res.json(await hydrateCouncil(condo));
+}));
+
+// Homologação: cada assento (síndico, subsíndico e, se o Conselho Fiscal
+// estiver ligado, conselho_fiscal_1/2) pode homologar e/ou deixar uma
+// consideração sobre um relatório específico — sem bloquear nada, é só um
+// registro ao lado do relatório (que continua sempre visível a todos).
+// Fica registrada por `seat`, não só por `user_id`: se a pessoa que ocupa o
+// assento mudar de um mês pro outro, cada relatório mantém quem homologou
+// de fato naquele momento.
+// Aberto a qualquer papel (não só síndico/subsíndico) porque um conselheiro
+// fiscal pode ser proprietário/inquilino — por isso estas duas rotas ficam
+// antes do filtro "só gestor" logo abaixo, que bloquearia o PUT de um
+// conselheiro morador.
+const noteText=(value:unknown)=>{const raw=String(value??'').trim();return raw.slice(0,1000)};
+// Quem exerce este papel no condomínio "de fato": ou é o role padrão da
+// conta (users.role), ou tem um perfil extra com esse role (user_profiles) —
+// alguém cujo cadastro principal é proprietário/inquilino também pode ser
+// síndico/subsíndico por um perfil adicional (mesmo padrão de EFFECTIVE_ROLE
+// em condominiumRoutes.ts). Sem checar user_profiles aqui, quem só tem o
+// papel por perfil extra aparecia como "não definido" na homologação, mesmo
+// já sendo o síndico/subsíndico de fato.
+const findRoleHolder=async(condo:string,role:'sindico'|'subsindico')=>{
+  const result=await query<{id:string;full_name:string|null}>(
+    `select u.id,u.full_name from users u
+     where u.condominium_id=$1 and u.deleted_at is null
+       and (u.role=$2 or exists(select 1 from user_profiles up where up.user_id=u.id and up.role=$2 and up.condominium_id=$1))
+     order by (u.role=$2) desc, u.created_at limit 1`,
+    [condo,role],
+  );
+  return result.rows[0]||null;
+};
+const resolveApprovalSeat=async(req:any):Promise<string|null>=>{
+  if(req.user?.role==='sindico')return'sindico';
+  if(req.user?.role==='subsindico')return'subsindico';
+  const condo=req.user?.condominiumId;if(!condo)return null;
+  const featureRow=await query<{enabled:boolean}>(`select conselho_fiscal as enabled from condominium_features where condominium_id=$1`,[condo]);
+  if(!(featureRow.rows[0]?featureRow.rows[0].enabled:false))return null;
+  const condoRow=await query<{fiscal_council_1_user_id:string|null;fiscal_council_2_user_id:string|null}>(`select fiscal_council_1_user_id,fiscal_council_2_user_id from condominiums where id=$1`,[condo]);
+  if(condoRow.rows[0]?.fiscal_council_1_user_id===req.user?.id)return'conselho_fiscal_1';
+  if(condoRow.rows[0]?.fiscal_council_2_user_id===req.user?.id)return'conselho_fiscal_2';
+  return null;
+};
+router.get('/:id/approvals',asyncHandler(async(req,res)=>{
+  const condo=req.user?.condominiumId;if(!condo)return res.status(400).json({message:'Usuário sem condomínio.'});
+  const report=await query(`select id from accountability_reports where id=$1 and condominium_id=$2`,[req.params.id,condo]);
+  if(!report.rows[0])return res.status(404).json({message:'Prestação de contas não encontrada.'});
+  const [sindicoHolder,subsindicoHolder,featureRow,council,approvalsRow]=await Promise.all([
+    findRoleHolder(condo,'sindico'),
+    findRoleHolder(condo,'subsindico'),
+    query<{enabled:boolean}>(`select conselho_fiscal as enabled from condominium_features where condominium_id=$1`,[condo]),
+    hydrateCouncil(condo),
+    query<{seat:string;user_id:string|null;approved:boolean;note:string|null;updated_at:string}>(`select seat,user_id,approved,note,updated_at from accountability_report_approvals where report_id=$1`,[req.params.id]),
+  ]);
+  const councilEnabled=featureRow.rows[0]?featureRow.rows[0].enabled:false;
+  const seats=[
+    {seat:'sindico',label:'Síndico',holderId:sindicoHolder?.id||null,holderName:sindicoHolder?.full_name||null},
+    {seat:'subsindico',label:'Subsíndico',holderId:subsindicoHolder?.id||null,holderName:subsindicoHolder?.full_name||null},
+    ...(councilEnabled?[
+      {seat:'conselho_fiscal_1',label:'Conselho Fiscal 1',holderId:council.fiscalCouncil1?.id||null,holderName:council.fiscalCouncil1?.fullName||null},
+      {seat:'conselho_fiscal_2',label:'Conselho Fiscal 2',holderId:council.fiscalCouncil2?.id||null,holderName:council.fiscalCouncil2?.fullName||null},
+    ]:[]),
+  ];
+  const approvalBySeat=new Map(approvalsRow.rows.map(row=>[row.seat,row]));
+  const result=seats.map(seatInfo=>{
+    const approval=approvalBySeat.get(seatInfo.seat);
+    return{...seatInfo,approved:approval?.approved||false,note:approval?.note||null,updatedAt:approval?.updated_at||null};
+  });
+  const applicable=result.filter(item=>item.holderId);
+  return res.json({
+    seats:result,
+    approvedCount:result.filter(item=>item.approved).length,
+    totalSeats:result.length,
+    fullyHomologated:applicable.length>0&&applicable.every(item=>item.approved),
+  });
+}));
+router.put('/:id/approval',asyncHandler(async(req,res)=>{
+  const condo=req.user?.condominiumId;if(!condo)return res.status(400).json({message:'Usuário sem condomínio.'});
+  const report=await query(`select id from accountability_reports where id=$1 and condominium_id=$2`,[req.params.id,condo]);
+  if(!report.rows[0])return res.status(404).json({message:'Prestação de contas não encontrada.'});
+  const seat=await resolveApprovalSeat(req);
+  if(!seat)return res.status(403).json({message:'Você não está entre os responsáveis por homologar esta prestação de contas.'});
+  const approved=Boolean(req.body?.approved);
+  const note=noteText(req.body?.note)||null;
+  await query(
+    `insert into accountability_report_approvals(id,report_id,seat,user_id,approved,note,updated_at)
+     values($1,$2,$3,$4,$5,$6,now())
+     on conflict (report_id,seat) do update set user_id=excluded.user_id,approved=excluded.approved,note=excluded.note,updated_at=now()`,
+    [randomUUID(),req.params.id,seat,req.user?.id,approved,note],
+  );
+  await logAudit(req,'prestacao_contas','updated',`${approved?'Homologou':'Atualizou considerações sobre'} a prestação de contas (${seat})`,{entityId:req.params.id});
+  return res.json({ok:true});
+}));
+
 router.use((req,res,next)=>req.method==='GET'||req.user?.role==='sindico'||req.user?.role==='subsindico'?next():res.status(403).json({message:'Permissão insuficiente.'}));
 router.use((req,_res,next)=>{if((req.method==='POST'||req.method==='PUT')&&monthKey(req.body?.referenceMonth)){req.body.periodStart=`${req.body.referenceMonth}-01`;req.body.periodEnd=monthEnd(req.body.referenceMonth)}next()});
 router.use((req,res,next)=>{if(!['POST','PUT'].includes(req.method)||!Array.isArray(req.body?.expenses))return next();for(const [index,item] of req.body.expenses.entries()){const raw=String(item.serviceDate||'');const match=raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);if(match)item.serviceDate=`${match[3]}-${match[2]}-${match[1]}`;if(!String(item.provider||'').trim())return res.status(400).json({message:`Informe a empresa ou pessoa da despesa ${index+1}.`});if(!String(item.purpose||'').trim())return res.status(400).json({message:`Informe o objetivo da despesa ${index+1}.`});if(!isoDate(item.serviceDate))return res.status(400).json({message:`Informe uma data válida na despesa ${index+1}. Use DD/MM/AAAA.`});if(!Number.isInteger(Number(item.amountCents))||Number(item.amountCents)<=0)return res.status(400).json({message:`Informe um valor maior que zero na despesa ${index+1}.`})}return next()});
@@ -54,9 +179,9 @@ router.get('/autofill',authorize('sindico','subsindico'),asyncHandler(async(req,
   const referenceMonth=String(req.query.referenceMonth||'');
   if(!monthKey(referenceMonth))return res.status(400).json({message:'Informe um mês válido (o campo "Mês") para importar os dados do período.'});
   const periodStart=`${referenceMonth}-01`;const periodEnd=monthEnd(referenceMonth);
-  const [condoRow,sindicoRow,invoiceStats,exemptResult]=await Promise.all([
+  const [condoRow,sindicoHolder,invoiceStats,exemptResult]=await Promise.all([
     query<{address:string|null}>(`select address from condominiums where id=$1`,[condo]),
-    query<{full_name:string|null}>(`select full_name from users where condominium_id=$1 and role='sindico' and deleted_at is null order by created_at limit 1`,[condo]),
+    findRoleHolder(condo,'sindico'),
     query<{paid_units:string;unpaid_units:string;received_amount_cents:string}>(
       `select count(*) filter (where status='paid') paid_units,
               count(*) filter (where status in ('issued','overdue')) unpaid_units,
@@ -103,7 +228,7 @@ router.get('/autofill',authorize('sindico','subsindico'),asyncHandler(async(req,
     receivedAmountCents:Number(invoiceStats.rows[0]?.received_amount_cents||0),
     bankBalanceCents,
     city:extractCityFromAddress(condoRow.rows[0]?.address),
-    sindicoName:sindicoRow.rows[0]?.full_name||'',
+    sindicoName:sindicoHolder?.full_name||'',
     expenses,
   },warnings});
 }));

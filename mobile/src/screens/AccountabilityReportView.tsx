@@ -29,8 +29,20 @@ function Row({cells,head,bold,compact}:{cells:string[];head?:boolean;bold?:boole
   ))}</View>;
 }
 
-export default function AccountabilityReportView({report,printId}:{report:any;printId?:string}){
+// Assento -> nome pra assinatura: homologado mostra quem homologou de fato
+// (não o texto livre digitado no formulário); pendente mostra o aviso, pra
+// quem imprime/assina em papel saber que aquele assento ainda falta. Sem
+// `approvals` carregado ainda (ou assento não gerenciado por homologação),
+// cai no nome digitado manualmente no formulário, como já era antes.
+const seatSignature=(approvals:Array<{seat:string;holderName:string|null;approved:boolean}>|undefined,seat:string,typedName?:string|null)=>{
+  const info=(approvals||[]).find(item=>item.seat===seat);
+  if(!info)return typedName||'';
+  return info.approved?(info.holderName||typedName||''):'Ainda não Homologada';
+};
+
+export default function AccountabilityReportView({report,printId,approvals}:{report:any;printId?:string;approvals?:Array<{seat:string;holderName:string|null;approved:boolean}>}){
   const {isMobile}=useBreakpoint();
+  const hasCouncilSeats=(approvals||[]).some(item=>item.seat==='conselho_fiscal_1'||item.seat==='conselho_fiscal_2');
   // O portal de impressão sai em papel A4: lá a folha mantém as proporções
   // originais, independente da largura da janela.
   const compact=isMobile&&!printId;
@@ -68,13 +80,13 @@ export default function AccountabilityReportView({report,printId}:{report:any;pr
       <Text style={styles.footer}>{report.city||''} {footerDate(report.reference_month)}</Text>
 
       <View style={styles.signatures}>
-        <View style={styles.signCol}><Text style={styles.signLine}>{report.sindico_name||''}</Text><Text style={styles.signLabel}>Sindico</Text></View>
-        <View style={styles.signCol}><Text style={styles.signLine}>{report.subsindico_name||''}</Text><Text style={styles.signLabel}>Subsindico</Text></View>
+        <View style={styles.signCol}><Text style={styles.signLine}>{seatSignature(approvals,'sindico',report.sindico_name)}</Text><Text style={styles.signLabel}>Síndico</Text></View>
+        <View style={styles.signCol}><Text style={styles.signLine}>{seatSignature(approvals,'subsindico',report.subsindico_name)}</Text><Text style={styles.signLabel}>Subsíndico</Text></View>
       </View>
-      <View style={styles.signatures}>
-        <View style={styles.signCol}><Text style={styles.signLine}>{report.fiscal_council_1_name||''}</Text><Text style={styles.signLabel}>Conselho Fiscal</Text></View>
-        <View style={styles.signCol}><Text style={styles.signLine}>{report.fiscal_council_2_name||''}</Text><Text style={styles.signLabel}>Conselho Fiscal</Text></View>
-      </View>
+      {hasCouncilSeats?<View style={styles.signatures}>
+        <View style={styles.signCol}><Text style={styles.signLine}>{seatSignature(approvals,'conselho_fiscal_1',report.fiscal_council_1_name)}</Text><Text style={styles.signLabel}>Conselho Fiscal 1</Text></View>
+        <View style={styles.signCol}><Text style={styles.signLine}>{seatSignature(approvals,'conselho_fiscal_2',report.fiscal_council_2_name)}</Text><Text style={styles.signLabel}>Conselho Fiscal 2</Text></View>
+      </View>:null}
     </View>
   );
 }

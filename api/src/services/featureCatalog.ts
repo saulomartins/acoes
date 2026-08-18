@@ -22,13 +22,19 @@ export type FeatureKey =
   | 'reserva_espacos'
   | 'regimento_ocorrencias'
   | 'consumo_individualizado'
-  | 'painel_usuarios';
+  | 'painel_usuarios'
+  | 'conselho_fiscal';
 
 export const FEATURE_CATALOG: Record<FeatureKey, { label: string; dependsOn: FeatureKey[] }> = {
   pessoas: { label: 'Pessoas', dependsOn: [] },
   tipologias: { label: 'Tipologias', dependsOn: [] },
   blocos_unidades: { label: 'Blocos e unidades', dependsOn: [] },
   prestacao_contas: { label: 'Prestação de contas', dependsOn: [] },
+  // Opcional: quando ligado, o síndico/subsíndico indica quem são os dois
+  // conselheiros fiscais, e eles passam a homologar (ou comentar) a
+  // prestação de contas junto com síndico e subsíndico. Sem esta feature, a
+  // homologação continua existindo só entre síndico e subsíndico.
+  conselho_fiscal: { label: 'Conselho Fiscal', dependsOn: ['prestacao_contas'] },
   gestao_cobrancas: { label: 'Gestão de cobranças', dependsOn: ['tipologias', 'blocos_unidades'] },
   gestao_debitos: { label: 'Gestão de débitos', dependsOn: ['gestao_cobrancas'] },
   historico_acordos: { label: 'Histórico de acordos', dependsOn: ['gestao_debitos'] },
@@ -81,6 +87,7 @@ export const NEW_CONDOMINIUM_FEATURE_DEFAULTS: Record<FeatureKey, boolean> = {
   cobrancas_adicionais: false,
   regimento_ocorrencias: false,
   consumo_individualizado: false,
+  conselho_fiscal: false,
 };
 
 export const isFeatureKey = (value: unknown): value is FeatureKey =>

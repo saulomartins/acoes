@@ -1355,3 +1355,37 @@ create table if not exists clearance_certificates (
 );
 create index if not exists clearance_certificates_condominium_idx on clearance_certificates(condominium_id, created_at desc);
 create index if not exists clearance_certificates_requester_idx on clearance_certificates(requested_by, created_at desc);
+
+-- Conselho Fiscal: opcional por condomínio (feature `conselho_fiscal`, ver
+-- condominium_features abaixo). Quando ligado, o síndico/subsíndico indica
+-- quem ocupa os dois assentos entre os moradores (proprietário/inquilino) já
+-- cadastrados no condomínio — não é um `role` novo, só uma referência direta
+-- a `users.id`, no mesmo espírito de `accountability_reports.created_by`.
+alter table condominiums add column if not exists fiscal_council_1_user_id uuid references users(id) on delete set null;
+alter table condominiums add column if not exists fiscal_council_2_user_id uuid references users(id) on delete set null;
+-- Desligada por padrão (inclusive para condomínios sem linha em
+-- condominium_features, que resolvem as demais features como "ativo" — aqui
+-- o default da coluna evita isso de propósito): é um módulo novo e opcional,
+-- só deve aparecer depois que o admin_geral ligar explicitamente.
+alter table condominium_features add column if not exists conselho_fiscal boolean not null default false;
+
+-- Homologação da prestação de contas: cada "assento" (síndico, subsíndico e,
+-- quando o Conselho Fiscal está ligado, conselho_fiscal_1/2) pode homologar
+-- e/ou deixar uma consideração em texto sobre um relatório específico.
+-- `seat` (não `user_id` sozinho) é o que garante 1 linha por assento por
+-- relatório, mesmo que a pessoa que ocupa o assento mude de um mês para o
+-- outro — quem homologou de fato fica registrado em `user_id`. Homologar não
+-- bloqueia nada: é só um registro de aprovação/opinião ao lado do relatório
+-- (que continua sempre visível a todos, como já era antes desta tabela).
+create table if not exists accountability_report_approvals (
+  id uuid primary key default gen_random_uuid(),
+  report_id uuid not null references accountability_reports(id) on delete cascade,
+  seat text not null check (seat in ('sindico','subsindico','conselho_fiscal_1','conselho_fiscal_2')),
+  user_id uuid references users(id) on delete set null,
+  approved boolean not null default false,
+  note text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (report_id, seat)
+);
+create index if not exists accountability_report_approvals_report_idx on accountability_report_approvals(report_id);

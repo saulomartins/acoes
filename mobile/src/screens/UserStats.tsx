@@ -248,7 +248,7 @@ const s = StyleSheet.create({
   condoName: { fontSize: 18, fontWeight: '900', color: colors.ink },
   groupLabel: { color: colors.muted, fontWeight: '800', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 18, marginBottom: 4 },
   summaryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 8 },
-  summaryRowMobile: { gap: 8 },
+  summaryRowMobile: { flexDirection: 'column', gap: 8 },
   summary: { flex: 1, minWidth: 160, borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.surface, padding: 16 },
   summaryMobile: { minWidth: 0 },
   summaryActive: { borderColor: '#a8ddd0', backgroundColor: colors.softGreen },

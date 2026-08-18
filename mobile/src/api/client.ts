@@ -30,22 +30,39 @@ const authStorage = {
   },
 };
 
+// Várias telas fazem polling em paralelo (notificações, tour, features...);
+// se o access token já expirou, todas podem levar 401 ao mesmo tempo e cada
+// uma tentaria renovar com o mesmo refresh token. O backend trata um refresh
+// token reutilizado (já rotacionado por uma chamada concorrente) como reuso
+// indevido e revoga todas as sessões do usuário — por isso as chamadas
+// concorrentes precisam compartilhar a mesma renovação em vez de disparar
+// várias em paralelo.
+let refreshInFlight: Promise<string | null> | null = null;
+
 const refreshAccessToken = async () => {
-  const refreshToken = await authStorage.get('refreshToken');
-  if (!refreshToken) return null;
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const refreshToken = await authStorage.get('refreshToken');
+    if (!refreshToken) return null;
 
-  const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
-  });
-  const data = (await response.json().catch(() => null)) as { token?: string; refreshToken?: string; user?: unknown } | null;
-  if (!response.ok || !data?.token) return null;
+    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    const data = (await response.json().catch(() => null)) as { token?: string; refreshToken?: string; user?: unknown } | null;
+    if (!response.ok || !data?.token) return null;
 
-  await authStorage.set('userToken', data.token);
-  if (data.refreshToken) await authStorage.set('refreshToken', data.refreshToken);
-  if (data.user) await authStorage.set('authUser', JSON.stringify(data.user));
-  return data.token;
+    await authStorage.set('userToken', data.token);
+    if (data.refreshToken) await authStorage.set('refreshToken', data.refreshToken);
+    if (data.user) await authStorage.set('authUser', JSON.stringify(data.user));
+    return data.token;
+  })();
+  try {
+    return await refreshInFlight;
+  } finally {
+    refreshInFlight = null;
+  }
 };
 
 export const apiRequest = async <T>(

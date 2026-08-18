@@ -60,6 +60,17 @@ const paymentColor: Record<PaymentState, string> = {
   paid: colors.green, open: colors.primary, overdue: colors.red,
   awaiting_issue: colors.amber, invoice_canceled: colors.muted, canceled: colors.muted,
 };
+// Resumo "quem pagou" por unidade, pra não precisar contar chips de parcela
+// um a um: quitada (pagou tudo que já é cobrável), parcial (pagou alguma
+// parcela, falta o resto) ou pendente (não pagou nenhuma ainda).
+type UnitPaymentSummary = 'quitada' | 'parcial' | 'pendente';
+const unitPaymentSummary = (charge: UnitCharge): UnitPaymentSummary => {
+  if (charge.payment.billableCount > 0 && charge.payment.paidCount === charge.payment.billableCount) return 'quitada';
+  if (charge.payment.paidCount > 0) return 'parcial';
+  return 'pendente';
+};
+const unitPaymentSummaryLabel: Record<UnitPaymentSummary, string> = { quitada: 'Quitada', parcial: 'Pagamento parcial', pendente: 'Nenhum pagamento' };
+const unitPaymentSummaryColor: Record<UnitPaymentSummary, string> = { quitada: colors.green, parcial: colors.amber, pendente: colors.red };
 // Total recebido x total a receber do grupo inteiro (todas as unidades),
 // ignorando parcelas canceladas.
 const groupPayment = (group: Group) => group.charges.reduce((totals, charge) => ({
@@ -97,9 +108,10 @@ export default function UnitExtraCharges({ navigation }: any) {
   const [dialog, setDialog] = useState<{ title: string; message: string; confirmLabel?: string; cancelLabel?: string; onConfirm?: () => void } | null>(null);
   const [managingDescription, setManagingDescription] = useState<string | null>(null);
   const [addUnitIds, setAddUnitIds] = useState<string[]>([]);
+  const [paymentFilter, setPaymentFilter] = useState<'all' | UnitPaymentSummary>('all');
   const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
   const tourSteps: TourStep[] = [
-    { key: 'list', title: 'Cobranças cadastradas', description: 'Cada card agrupa todas as cobranças que têm a mesma descrição — por exemplo, todas as unidades com "Tag de portaria" aparecem juntas em um card só. O status (Em andamento, Concluída ou Cancelada) reflete o conjunto: se todas as unidades do grupo já terminaram as parcelas, o card fica "Concluída". Toque no card pra abrir o detalhe por unidade, adicionar mais unidades ao mesmo grupo ou remover uma unidade específica.' },
+    { key: 'list', title: 'Cobranças cadastradas', description: 'Cada card agrupa todas as cobranças que têm a mesma descrição — por exemplo, todas as unidades com "Tag de portaria" aparecem juntas em um card só. O status (Em andamento, Concluída ou Cancelada) reflete o conjunto: se todas as unidades do grupo já terminaram as parcelas, o card fica "Concluída". Toque no card pra abrir o detalhe por unidade, adicionar mais unidades ao mesmo grupo ou remover uma unidade específica. Dentro do detalhe, cada unidade mostra um selo de "Quitada", "Pagamento parcial" ou "Nenhum pagamento", e os filtros no topo da lista deixam ver rapidinho só quem já pagou ou só quem ainda não pagou.' },
     { key: 'form', title: 'Nova cobrança adicional', description: 'Escolha uma ou mais unidades (ou "Todas as unidades" pra lançar em todo o condomínio) — unidades com morador isento de boleto não aparecem na lista. Informe a descrição (ela some à observação do boleto e agrupa cobranças iguais no mesmo card), o valor total, quantas parcelas mensais (1 a 60, dividindo o valor entre elas) e o mês da 1ª parcela. A cobrança entra somada à taxa condominial nos boletos das unidades escolhidas, a partir do mês informado até o fim das parcelas.' },
   ];
 
@@ -179,7 +191,12 @@ export default function UnitExtraCharges({ navigation }: any) {
     finally { setIsLoading(false); }
   };
 
-  const openManageGroup = (group: Group) => { setManagingDescription(group.description); setAddUnitIds([]); setError(null); setSuccess(null); };
+  const openManageGroup = (group: Group) => { setManagingDescription(group.description); setAddUnitIds([]); setError(null); setSuccess(null); setPaymentFilter('all'); };
+  const filteredManagingCharges = useMemo(() => {
+    if (!managingGroup) return [];
+    if (paymentFilter === 'all') return managingGroup.charges;
+    return managingGroup.charges.filter((charge) => unitPaymentSummary(charge) === paymentFilter);
+  }, [managingGroup, paymentFilter]);
   const [exporting, setExporting] = useState(false);
   const exportPayments = async (description?: string) => {
     if (!userToken) return;
@@ -293,13 +310,27 @@ export default function UnitExtraCharges({ navigation }: any) {
                 </View>
 
                 <View>
-                  <Text style={styles.fieldLabel}>Unidades</Text>
+                  <View style={styles.modalSubtitleRow}>
+                    <Text style={[styles.fieldLabel, styles.grow]}>Unidades</Text>
+                  </View>
+                  <View style={styles.paymentFilterRow}>
+                    {(['all', 'quitada', 'parcial', 'pendente'] as const).map((value) => {
+                      const count = value === 'all' ? managingGroup.charges.length : managingGroup.charges.filter((charge) => unitPaymentSummary(charge) === value).length;
+                      return <Pressable key={value} onPress={() => setPaymentFilter(value)} style={[styles.paymentFilterChip, paymentFilter === value && styles.paymentFilterChipActive]}>
+                        <Text style={[styles.paymentFilterChipText, paymentFilter === value && styles.paymentFilterChipTextActive]}>{value === 'all' ? 'Todas' : unitPaymentSummaryLabel[value]} ({count})</Text>
+                      </Pressable>;
+                    })}
+                  </View>
                   <View style={styles.unitChargeList}>
-                    {managingGroup.charges.map((charge) => {
+                    {filteredManagingCharges.length === 0 ? <Text style={styles.fieldHint}>Nenhuma unidade nesta situação.</Text> : filteredManagingCharges.map((charge) => {
                       const hasPending = charge.installments.some((item) => item.status === 'pending');
+                      const summary = unitPaymentSummary(charge);
                       return <View key={charge.id} style={styles.unitChargeRow}>
                         <View style={styles.grow}>
-                          <Text style={styles.unitChargeLabel}>{charge.unit_label}</Text>
+                          <View style={styles.unitChargeTitleRow}>
+                            <Text style={styles.unitChargeLabel}>{charge.unit_label}</Text>
+                            <View style={[styles.summaryPill, { borderColor: unitPaymentSummaryColor[summary] }]}><Text style={[styles.summaryPillText, { color: unitPaymentSummaryColor[summary] }]}>{unitPaymentSummaryLabel[summary]}</Text></View>
+                          </View>
                           <Text style={styles.installmentSummary}>{chargePeriod(charge)}</Text>
                           <Text style={styles.installmentPaid}>
                             {charge.payment.paidCount} de {charge.payment.billableCount} paga(s) · {formatCurrency(charge.payment.paidCents)} de {formatCurrency(charge.payment.billableCents)}
@@ -388,4 +419,12 @@ const styles = StyleSheet.create({
   paymentBarFill: { height: 6, backgroundColor: colors.green },
   paymentSummary: { color: colors.ink, fontSize: 12.5, fontWeight: '800' },
   paymentOverdue: { color: colors.red, fontSize: 12, fontWeight: '800' },
+  paymentFilterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
+  paymentFilterChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  paymentFilterChipActive: { borderColor: colors.primary, backgroundColor: colors.softBlue },
+  paymentFilterChipText: { color: colors.muted, fontSize: 12, fontWeight: '800' },
+  paymentFilterChipTextActive: { color: colors.primaryDark },
+  unitChargeTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  summaryPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  summaryPillText: { fontSize: 11, fontWeight: '900' },
 });

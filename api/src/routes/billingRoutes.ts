@@ -58,7 +58,7 @@ const missingBillingFieldsMessage = (item: Record<string, unknown>, hasAmount: b
   const missing = missingBillingFields(item, hasAmount);
   return missing.length ? `Cadastro incompleto: falta preencher ${missing.join(', ')}.` : null;
 };
-type ExtraChargeMapEntry = { sumCents: number; installmentIds: string[]; descriptions: string[] };
+type ExtraChargeMapEntry = { sumCents: number; installmentIds: string[]; descriptions: string[]; items: Array<{ description: string; amountCents: number }> };
 const extraChargesByUnit = async (unitIds: (string | null | undefined)[], referenceMonthDate: string) => {
   const ids = [...new Set(unitIds.filter((id): id is string => Boolean(id)))];
   const map = new Map<string, ExtraChargeMapEntry>();
@@ -70,10 +70,11 @@ const extraChargesByUnit = async (unitIds: (string | null | undefined)[], refere
     [ids, referenceMonthDate],
   );
   for (const row of rows.rows) {
-    const entry = map.get(row.unit_id) || { sumCents: 0, installmentIds: [], descriptions: [] };
+    const entry = map.get(row.unit_id) || { sumCents: 0, installmentIds: [], descriptions: [], items: [] };
     entry.sumCents += Number(row.amount_cents);
     entry.installmentIds.push(row.id);
     if (!entry.descriptions.includes(row.description)) entry.descriptions.push(row.description);
+    entry.items.push({ description: row.description, amountCents: Number(row.amount_cents) });
     map.set(row.unit_id, entry);
   }
   return map;
@@ -202,7 +203,7 @@ router.post('/batches/preview', asyncHandler(async (req, res) => {
     // Duplicidade não bloqueia mais a validade: uma pessoa pode ter mais de um
     // boleto na mesma referência (ex.: cobrança extra). O front decide se pede
     // confirmação extra mostrando existingAmountCents/existingStatus.
-    return ({ ...row, extraChargeCents: extra?.sumCents||0, consumptionChargeCents: consumption?.sumCents||0, manualOverride: hasOverride,
+    return ({ ...row, extraChargeCents: extra?.sumCents||0, extraChargeItems: hasOverride?[]:(extra?.items||[]), consumptionChargeCents: consumption?.sumCents||0, consumptionItems: hasOverride?[]:(consumption?.items||[]), manualOverride: hasOverride,
     existingAmountCents: row.existing_amount_cents, existingStatus: row.existing_status,
     valid: Boolean(!missingFields.length && !row.billing_exempt && dueDate>=todayIso()),
     issues: [missingFields.length ? `Cadastro incompleto: falta preencher ${missingFields.join(', ')}` : null,
@@ -420,7 +421,7 @@ router.get('/batches/:id/items', asyncHandler(async (req,res)=>{
     const baseFeeCents=Number(item.amount_cents||0)-extraCents-consumptionCents;
     const condoFeeCents=condoFeePercent>0?Math.round(baseFeeCents*condoFeePercent/100):null;
     const improvementFeeCents=improvementFeePercent>0?Math.round(baseFeeCents*improvementFeePercent/100):null;
-    return {...item,manualOverride:false,extraChargeCents:extraCents,extraChargeDescriptions:extra?.descriptions||[],consumptionChargeCents:consumptionCents,consumptionChargeDescriptions:consumption?.descriptions||[],consumptionItems:consumption?.items||[],baseFeeCents,condoFeePercent:condoFeeCents!==null?condoFeePercent:null,condoFeeCents,improvementFeePercent:improvementFeeCents!==null?improvementFeePercent:null,improvementFeeCents};
+    return {...item,manualOverride:false,extraChargeCents:extraCents,extraChargeDescriptions:extra?.descriptions||[],extraChargeItems:extra?.items||[],consumptionChargeCents:consumptionCents,consumptionChargeDescriptions:consumption?.descriptions||[],consumptionItems:consumption?.items||[],baseFeeCents,condoFeePercent:condoFeeCents!==null?condoFeePercent:null,condoFeeCents,improvementFeePercent:improvementFeeCents!==null?improvementFeePercent:null,improvementFeeCents};
   });
   return res.json({batch:batch.rows[0],items:itemsWithBreakdown});
 }));

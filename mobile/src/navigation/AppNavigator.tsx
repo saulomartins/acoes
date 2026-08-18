@@ -46,7 +46,7 @@ import ForgotPassword from '../screens/ForgotPassword';
 import ResetPassword from '../screens/ResetPassword';
 import ForcePasswordChange from '../screens/ForcePasswordChange';
 import SelectProfile from '../screens/SelectProfile';
-import { AuthContext, type FeatureKey } from '../context/AuthContext';
+import { AuthContext, storage, type FeatureKey } from '../context/AuthContext';
 import { apiRequest } from '../api/client';
 import { subscribeSystemTour } from '../services/tourEvents';
 
@@ -102,14 +102,25 @@ const navigationRef = createNavigationContainerRef<RootStackParamList>();
 // No app nativo instalado (Android/iOS) o usuário já decidiu usar o app —
 // a primeira tela deve ser sempre o Login, nunca a landing de vendas.
 const isWeb = Platform.OS === 'web';
-export const CURRENT_TOUR_VERSION='2026-08-13-1';
+export const CURRENT_TOUR_VERSION='2026-08-17-1';
 type TourStep={route:keyof RootStackParamList;title:string;description:string;roles:string[];feature?:FeatureKey};
 const TOUR_STEPS:TourStep[]=[
-  {route:'Home',title:'Início',description:'Resumo das informações mais importantes e atalhos para as rotinas do condomínio.',roles:['sindico','subsindico','proprietario','inquilino']},
+  {route:'Home',title:'Início',description:'Resumo das informações mais importantes e atalhos para as rotinas do condomínio.',roles:['admin_geral','sindico','subsindico','proprietario','inquilino']},
   {route:'Dashboard',title:'Painel administrativo',description:'Indicadores financeiros e operacionais para acompanhar a situação do condomínio.',roles:['sindico','subsindico']},
+  {route:'UserStats',title:'Painel de usuários',description:'Cadastro, acesso e ocupação de cada condomínio — toque em um número para ver quem são.',roles:['admin_geral','sindico','subsindico'],feature:'painel_usuarios'},
+  {route:'BillingAnalytics',title:'Indicadores de boletos',description:'Recebidos, não pagos e cancelados por período, com os motivos de cancelamento.',roles:['sindico','subsindico'],feature:'indicadores_boletos'},
+  {route:'Condominiums',title:'Condomínios',description:'Cadastro e gestão de todos os condomínios atendidos pela plataforma.',roles:['admin_geral']},
   {route:'Users',title:'Pessoas',description:'Cadastro e gestão de síndicos, subsíndicos, proprietários e inquilinos.',roles:['sindico','subsindico'],feature:'pessoas'},
+  {route:'Banks',title:'Cadastro de bancos',description:'Catálogo de bancos disponíveis para integração de cobranças.',roles:['admin_geral']},
+  {route:'BankConfigurations',title:'Configurações bancárias',description:'Credenciais e parâmetros de cada integração bancária.',roles:['admin_geral']},
+  {route:'BankLink',title:'Vincular banco ao condomínio',description:'Associação de uma integração bancária a um condomínio específico.',roles:['admin_geral']},
+  {route:'BankIntegrationGuide',title:'Guia de expansão bancária',description:'Referência para adicionar suporte a um novo banco na plataforma.',roles:['admin_geral']},
+  {route:'PlatformPlans',title:'Planos da plataforma',description:'Planos comerciais oferecidos aos condomínios clientes.',roles:['admin_geral']},
+  {route:'PlatformRevenue',title:'Faturamento da plataforma',description:'Receita da plataforma por condomínio e período.',roles:['admin_geral']},
+  {route:'AuditLog',title:'Auditoria',description:'Histórico de ações realizadas por administradores e síndicos no sistema.',roles:['admin_geral']},
   {route:'UnitTypes',title:'Tipologias',description:'Configuração dos tipos de unidade e valores usados nas cobranças.',roles:['sindico','subsindico'],feature:'tipologias'},
   {route:'Units',title:'Blocos e unidades',description:'Organização dos blocos, apartamentos e moradores vinculados.',roles:['sindico','subsindico'],feature:'blocos_unidades'},
+  {route:'Clearances',title:'Nada consta',description:'Emissão e verificação de certidão negativa de débitos da unidade.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'nada_consta'},
   {route:'Invoices',title:'Gestão de cobranças',description:'Emissão e acompanhamento de boletos, Pix, pagamentos e valores em aberto.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'gestao_cobrancas'},
   {route:'BillingSettings',title:'Configurar e enviar cobranças',description:'Regras de vencimento, multa, juros e emissão das cobranças mensais.',roles:['sindico','subsindico'],feature:'config_enviar_cobrancas'},
   {route:'UnitExtraCharges',title:'Cobranças adicionais',description:'Valores extraordinários por unidade, com parcelas e acompanhamento.',roles:['sindico','subsindico'],feature:'cobrancas_adicionais'},
@@ -121,9 +132,11 @@ const TOUR_STEPS:TourStep[]=[
   {route:'Reports',title:'Relatos e solicitações',description:'Canal para registrar pedidos, acompanhar respostas e resolver demandas.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'relatos_solicitacoes'},
   {route:'Occurrences',title:'Regimento e ocorrências',description:'Registro e acompanhamento de ocorrências relacionadas às regras do condomínio.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'regimento_ocorrencias'},
   {route:'RegulationArticles',title:'Artigos do regimento',description:'Consulta e manutenção das regras usadas na gestão de ocorrências.',roles:['sindico','subsindico'],feature:'regimento_ocorrencias'},
+  {route:'InfractionNoticeIssue',title:'Emitir notificação',description:'Abertura de notificação de infração a partir de uma ocorrência.',roles:['sindico','subsindico'],feature:'regimento_ocorrencias'},
   {route:'InfractionNotices',title:'Notificações de infração',description:'Acompanhamento de notificações, ciência, defesa e situação de cada processo.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'regimento_ocorrencias'},
   {route:'Polls',title:'Enquetes',description:'Consultas criadas pela gestão para participação dos moradores ativos.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'enquetes'},
   {route:'SpaceReservations',title:'Reserva de espaços',description:'Calendário de disponibilidade e solicitações de reserva das áreas comuns.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'reserva_espacos'},
+  {route:'MobileReleases',title:'Instalar aplicativo',description:'Central com a versão mais recente do app para Android e iOS.',roles:['admin_geral','sindico','subsindico','proprietario','inquilino']},
 ];
 
 type InAppNotification = {
@@ -222,10 +235,33 @@ export default function AppNavigator() {
   const { userToken, user, isLoading, condominiumFeatures, updateUser, needsProfileSelection } = useContext(AuthContext);
   const [inAppNotification, setInAppNotification] = useState<InAppNotification | null>(null);
   const [tourActive,setTourActive]=useState(false);const [tourIndex,setTourIndex]=useState(0);const autoTourStarted=useRef(false);
+  // Guarda "tour já visto" também neste aparelho (fora do objeto `user`), pois
+  // completeTour() grava no servidor de forma best-effort: numa rede instável
+  // (comum em app mobile) a chamada pode falhar mesmo com o tour já concluído
+  // na tela. Sem isso, o tourCompletedVersion do usuário nunca era persistido
+  // e o tour reaparecia no próximo login explícito — mais perceptível em quem
+  // tem dois perfis, porque aí o reaparecimento acontece logo após escolher
+  // o perfil em "Entrar como", e não junto com o próprio login.
+  const [deviceTourVersion,setDeviceTourVersion]=useState<string|null>(null);
+  useEffect(()=>{let active=true;storage.get('tourSeenVersion').then(value=>{if(active)setDeviceTourVersion(value);});return()=>{active=false;};},[]);
   const tourSteps=useMemo(()=>TOUR_STEPS.filter(step=>step.roles.includes(user?.role||'')&&(!step.feature||condominiumFeatures?.[step.feature]===true)),[condominiumFeatures,user?.role]);
   const openTourStep=useCallback((index:number)=>{const step=tourSteps[index];if(step&&navigationRef.isReady())navigationRef.navigate(step.route as any);},[tourSteps]);
   const startTour=useCallback(()=>{if(!tourSteps.length)return;setTourIndex(0);setTourActive(true);setTimeout(()=>openTourStep(0),0);},[openTourStep,tourSteps.length]);
-  const completeTour=useCallback(async()=>{setTourActive(false);if(!userToken)return;try{const data=await apiRequest<{user:any}>('/auth/tour/complete',userToken,{method:'POST',body:JSON.stringify({version:CURRENT_TOUR_VERSION})});await updateUser(data.user);}catch(error){console.warn('Failed to record tour completion',error);}},[updateUser,userToken]);
+  const completeTour=useCallback(async()=>{
+    setTourActive(false);
+    // Grava local primeiro (síncrono para quem chama): garante que o tour não
+    // reaparece neste aparelho mesmo que a sincronização com o servidor abaixo
+    // falhe.
+    await storage.set('tourSeenVersion',CURRENT_TOUR_VERSION);
+    setDeviceTourVersion(CURRENT_TOUR_VERSION);
+    if(!userToken)return;
+    try{
+      const data=await apiRequest<{user:any}>('/auth/tour/complete',userToken,{method:'POST',body:JSON.stringify({version:CURRENT_TOUR_VERSION})});
+      await updateUser(data.user);
+    }catch(error){
+      console.warn('Failed to record tour completion on server (kept local so it will not reappear on this device)',error);
+    }
+  },[updateUser,userToken]);
 
   useEffect(()=>subscribeSystemTour(startTour),[startTour]);
   useEffect(()=>{if(!userToken)autoTourStarted.current=false;},[userToken]);
@@ -238,7 +274,10 @@ export default function AppNavigator() {
   // needsProfileSelection está nas dependências de propósito, para o tour
   // disparar sozinho assim que o perfil for escolhido; autoTourStarted só é
   // marcado quando o tour realmente começa, então nada é perdido no caminho.
-  useEffect(()=>{if(!userToken||!user||user.mustChangePassword||needsProfileSelection||user.termsAcceptedVersion!==CURRENT_TERMS_VERSION||user.tourCompletedVersion===CURRENT_TOUR_VERSION||autoTourStarted.current)return;if(!['sindico','subsindico','proprietario','inquilino'].includes(user.role))return;autoTourStarted.current=true;const timer=setTimeout(startTour,500);return()=>clearTimeout(timer);},[startTour,user,userToken,needsProfileSelection]);
+  // deviceTourVersion complementa user.tourCompletedVersion: mesmo que a
+  // confirmação do servidor tenha falhado numa sessão anterior, este aparelho
+  // já registrou localmente que o tour foi concluído/pulado e não deve repetir.
+  useEffect(()=>{if(!userToken||!user||user.mustChangePassword||needsProfileSelection||user.termsAcceptedVersion!==CURRENT_TERMS_VERSION||user.tourCompletedVersion===CURRENT_TOUR_VERSION||deviceTourVersion===CURRENT_TOUR_VERSION||autoTourStarted.current)return;if(!['admin_geral','sindico','subsindico','proprietario','inquilino'].includes(user.role))return;autoTourStarted.current=true;const timer=setTimeout(startTour,500);return()=>clearTimeout(timer);},[startTour,user,userToken,needsProfileSelection,deviceTourVersion]);
 
   useEffect(() => {
     const receivedSubscription = Notifications.addNotificationReceivedListener((event) => {
