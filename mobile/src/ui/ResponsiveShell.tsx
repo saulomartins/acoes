@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Image, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from './text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
@@ -7,7 +7,7 @@ import { AuthContext } from '../context/AuthContext';
 import { startSystemTour } from '../services/tourEvents';
 import { colors, layout } from './theme';
 import { useBreakpoint } from './responsive';
-import { apiRequest } from '../api/client';
+import { apiRequest, API_BASE_URL } from '../api/client';
 import { syncNotificationBadge } from '../services/pushNotifications';
 import { subscribeNotificationsChanged } from '../services/notificationEvents';
 import type { FeatureKey } from '../context/AuthContext';
@@ -55,6 +55,11 @@ const items: Item[] = [
 ];
 
 const roleLabels: Record<string, string> = { admin_geral: 'Administrador geral', sindico: 'Síndico', subsindico: 'Subsíndico', proprietario: 'Proprietário', inquilino: 'Inquilino' };
+
+// Manual do usuário: uma página por dupla de cargo (gestão x moradores). Não
+// existe versão para admin_geral — quem administra a plataforma não usa manual.
+const manualPathByRole: Record<string, string> = { sindico: '/help/sindico', subsindico: '/help/sindico', proprietario: '/help/morador', inquilino: '/help/morador' };
+const manualUrlForRole = (role: string | undefined) => role && manualPathByRole[role] ? `${API_BASE_URL}${manualPathByRole[role]}` : null;
 const billingRoutes = ['Invoices', 'Debts', 'AgreementHistory', 'BillingSettings', 'UnitExtraCharges', 'UnitConsumption'];
 const noticeRoutes = ['Communications', 'Reports'];
 const bankRoutes = ['Banks', 'BankConfigurations', 'BankLink', 'BankIntegration', 'BankIntegrationGuide'];
@@ -71,6 +76,8 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
   const { user, userToken, signOut, condominiumFeatures, profiles, switchProfile } = useContext(AuthContext);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [switchingProfile, setSwitchingProfile] = useState(false);
+  const manualUrl = manualUrlForRole(user?.role);
+  const openManual = useCallback(() => { if (manualUrl) Linking.openURL(manualUrl).catch(() => {}); }, [manualUrl]);
   const handleSwitchProfile = async (profileId: string | null) => {
     if (profileId === (user?.activeProfileId ?? null)) { setProfileMenuOpen(false); return; }
     setSwitchingProfile(true);
@@ -437,6 +444,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                     <Text style={styles.profileRole}>{roleLabels[user?.role || '']}</Text>
                   )}
                 </View>
+                {manualUrl ? <Pressable onPress={openManual} accessibilityLabel="Manual do usuário" style={[styles.profileTourButton, styles.profileManualButton]}><Text style={styles.profileTourIcon}>📘</Text></Pressable> : null}
                 <Pressable onPress={startSystemTour} accessibilityLabel="Refazer tour" style={styles.profileTourButton}><Text style={styles.profileTourIcon}>?</Text></Pressable>
                 <Pressable onPress={() => signOut()}>
                   <Text style={styles.exit}>↪</Text>
@@ -583,6 +591,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                     ))}
                   </View>
                 ) : null}
+                {manualUrl ? <Pressable style={styles.mobileTourFooter} onPress={() => { setMobileMenuOpen(false); openManual(); }}><Text style={styles.mobileTourText}>📘 Manual do usuário</Text></Pressable> : null}
                 <Pressable style={styles.mobileTourFooter} onPress={() => { setMobileMenuOpen(false); startSystemTour(); }}><Text style={styles.mobileTourText}>? Refazer tour do sistema</Text></Pressable>
                 <Pressable style={styles.mobileMenuFooter} onPress={() => { setMobileMenuOpen(false); signOut(); }}>
                   <Text style={styles.mobileMenuLogout}>Sair da conta</Text>
@@ -624,7 +633,7 @@ const styles = StyleSheet.create({
   subnavDotActive: { backgroundColor: colors.primary },
   subnavText: { color: '#6e7b88', fontSize: 14, fontWeight: '700' },
   profileAnchor: { marginTop: 'auto' },
-  profile: { borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 8, paddingTop: 16, flexDirection: 'row', alignItems: 'center', gap: 9 }, avatarLight: { width: 33, height: 33, borderRadius: 17, backgroundColor: '#dfe9f6', alignItems: 'center', justifyContent: 'center' }, avatarLightText: { color: colors.primary, fontSize: 14, fontWeight: '800' }, profileName: { color: colors.ink, fontSize: 14, fontWeight: '800' }, profileRole: { color: '#8190a0', fontSize: 12, marginTop: 2 },profileTourButton:{width:34,height:34,borderRadius:17,backgroundColor:colors.primary,alignItems:'center',justifyContent:'center',shadowColor:colors.primary,shadowOpacity:.22,shadowRadius:6,elevation:2},profileTourIcon:{color:'#fff',fontSize:17,fontWeight:'900'}, exit: { color: colors.red, fontSize: 13, fontWeight: '800' },
+  profile: { borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 8, paddingTop: 16, flexDirection: 'row', alignItems: 'center', gap: 9 }, avatarLight: { width: 33, height: 33, borderRadius: 17, backgroundColor: '#dfe9f6', alignItems: 'center', justifyContent: 'center' }, avatarLightText: { color: colors.primary, fontSize: 14, fontWeight: '800' }, profileName: { color: colors.ink, fontSize: 14, fontWeight: '800' }, profileRole: { color: '#8190a0', fontSize: 12, marginTop: 2 },profileTourButton:{width:34,height:34,borderRadius:17,backgroundColor:colors.primary,alignItems:'center',justifyContent:'center',shadowColor:colors.primary,shadowOpacity:.22,shadowRadius:6,elevation:2},profileManualButton:{backgroundColor:colors.teal,shadowColor:colors.teal},profileTourIcon:{color:'#fff',fontSize:17,fontWeight:'900'}, exit: { color: colors.red, fontSize: 13, fontWeight: '800' },
   profileSwitcher: { paddingHorizontal: 8, paddingVertical: 8, marginBottom: 8, gap: 4, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: colors.border, borderRadius: 12 },
   mobileProfileSwitcher: { paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: '#f9f9fa', gap: 4 },
   profileSwitcherTitle: { fontSize: 11, fontWeight: '800', color: colors.muted, textTransform: 'uppercase', marginBottom: 2 },

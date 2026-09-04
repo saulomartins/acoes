@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Manual do usuario Lar em Dia para sindico e subsindico.">
+<title>Manual do Síndico</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --accent:#2563c5; --accent-dark:#194d9d; --accent-soft:#eef4ff;
+  --navy:#101a2e; --ink:#172033; --muted:#5b6577; --muted-2:#8a94a6;
+  --border:#e2e7f0; --paper:#fbfbfd; --surface:#ffffff; --surface-2:#f4f6fb;
+  --green:#0f927f; --green-soft:#e6f6f2; --amber:#a9720b; --amber-soft:#fbf1dc;
+  --red:#c23b3b; --red-soft:#fbebeb; --teal:#159b8b; --sky:#0d7ab8;
+  /* Painel decorativo fixo (capa, marca) — sempre escuro, não inverte com o tema,
+     igual ao painel de login do próprio app. Nunca reaproveitar --navy aqui: ele
+     serve para o texto dos títulos e passa a ser claro no tema escuro. */
+  --brand-dark:#101a2e; --brand-accent:#2563c5;
+  --shadow: 0 16px 40px -20px rgba(16,26,46,.35);
+  --display:'Sora',system-ui,sans-serif; --body:'Source Sans 3',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --accent:#5b93e6; --accent-dark:#8fb6f0; --accent-soft:#152238;
+    --navy:#eef2f8; --ink:#e7ecf5; --muted:#a7b0c2; --muted-2:#7b8598;
+    --border:#28324a; --paper:#0c1220; --surface:#121a2c; --surface-2:#16203590;
+    --green:#4fd7bd; --green-soft:#0f2a26; --amber:#e7b854; --amber-soft:#2c2410;
+    --red:#f0908c; --red-soft:#2d1616; --teal:#5fd0c1; --sky:#6cc0f0;
+    --shadow: 0 20px 50px -20px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --accent:#5b93e6; --accent-dark:#8fb6f0; --accent-soft:#152238;
+  --navy:#eef2f8; --ink:#e7ecf5; --muted:#a7b0c2; --muted-2:#7b8598;
+  --border:#28324a; --paper:#0c1220; --surface:#121a2c; --surface-2:#16203590;
+  --green:#4fd7bd; --green-soft:#0f2a26; --amber:#e7b854; --amber-soft:#2c2410;
+  --red:#f0908c; --red-soft:#2d1616; --teal:#5fd0c1; --sky:#6cc0f0;
+  --shadow: 0 20px 50px -20px rgba(0,0,0,.6);
+}
+*{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.6;}
+h1,h2,h3,h4{font-family:var(--display);color:var(--navy);text-wrap:balance;margin:0;}
+a{color:var(--accent-dark);}
+img,svg{max-width:100%;}
+.page{display:grid;grid-template-columns:264px minmax(0,1fr);min-height:100vh;}
+/* ---------- TOC ---------- */
+aside.toc{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;border-right:1px solid var(--border);background:var(--surface);padding:22px 18px 40px;}
+.toc-brand{display:flex;align-items:center;gap:10px;margin-bottom:22px;padding-bottom:16px;border-bottom:1px solid var(--border);}
+.toc-mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(155deg,var(--brand-dark),var(--brand-accent));display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+.toc-brand-name{font-family:var(--display);font-weight:800;font-size:15px;color:var(--navy);}
+.toc-brand-sub{font-size:11.5px;color:var(--muted-2);margin-top:1px;}
+.toc-kicker{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;color:var(--muted-2);text-transform:uppercase;margin:18px 0 8px;padding:0 4px;}
+.toc-kicker:first-of-type{margin-top:0;}
+nav.toc-list{display:flex;flex-direction:column;gap:1px;}
+nav.toc-list a{display:block;padding:7px 10px;border-radius:8px;color:var(--muted);text-decoration:none;font-size:13.5px;font-weight:600;}
+nav.toc-list a:hover{background:var(--surface-2);color:var(--ink);}
+.toc-audience{margin-top:20px;padding:12px 12px;background:var(--accent-soft);border-radius:10px;font-size:12px;color:var(--accent-dark);font-weight:600;line-height:1.5;}
+@media (max-width:900px){
+  .page{grid-template-columns:1fr;}
+  aside.toc{position:static;height:auto;display:flex;flex-wrap:nowrap;overflow-x:auto;align-items:center;gap:6px;padding:14px 16px;white-space:nowrap;}
+  .toc-brand{border-bottom:none;margin-bottom:0;padding-bottom:0;margin-right:6px;}
+  .toc-kicker{display:none;}
+  nav.toc-list{flex-direction:row;gap:6px;}
+  nav.toc-list a{border:1px solid var(--border);flex:0 0 auto;}
+  .toc-audience{display:none;}
+}
+/* ---------- MAIN ---------- */
+main{min-width:0;padding:0 0 80px;}
+.hero{background:var(--brand-dark);color:#eef2f8;padding:56px 48px 46px;}
+.hero-kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.1em;color:#7fb0e8;text-transform:uppercase;font-weight:600;}
+.hero h1{color:#fff;font-size:clamp(28px,4vw,42px);margin-top:12px;max-width:16ch;}
+.hero p{max-width:62ch;color:#c3cede;font-size:17px;margin-top:14px;}
+.hero-roles{display:flex;gap:10px;margin-top:22px;flex-wrap:wrap;}
+.role-pill{font-family:var(--mono);font-size:12px;font-weight:600;padding:7px 13px;border-radius:999px;background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.18);color:#eaf1fb;}
+.container{max-width:760px;padding:0 48px;}
+section{padding:52px 0;border-bottom:1px solid var(--border);}
+section:last-of-type{border-bottom:none;}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-dark);font-weight:600;}
+.section-title{font-size:clamp(22px,3vw,30px);margin-top:8px;}
+.lede{color:var(--muted);font-size:16.5px;margin-top:12px;max-width:64ch;}
+p{margin:14px 0;}
+.container > p, .container li{color:var(--ink);}
+ul.plain, ol.plain{padding-left:22px;margin:14px 0;}
+ul.plain li, ol.plain li{margin-bottom:7px;}
+.chip{display:inline-block;font-family:var(--mono);font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--accent-soft);color:var(--accent-dark);border:1px solid transparent;}
+.callout{border:1px solid var(--border);border-left:4px solid var(--accent);background:var(--surface);border-radius:10px;padding:16px 18px;margin:20px 0;font-size:14.5px;}
+.callout.parity{border-left-color:var(--green);}
+.callout.parity .callout-title{color:var(--green);}
+.callout.warn{border-left-color:var(--amber);}
+.callout.warn .callout-title{color:var(--amber);}
+.callout-title{font-weight:800;font-family:var(--display);font-size:14px;color:var(--accent-dark);margin-bottom:5px;}
+.gate{border:1px dashed var(--border);border-radius:10px;padding:12px 14px;margin:18px 0;font-size:13.5px;color:var(--muted);background:var(--surface-2);}
+.gate b{color:var(--ink);}
+/* rule box */
+.rules{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin:22px 0;}
+.rules h4{font-size:14px;color:var(--ink);margin-bottom:10px;}
+.rules ul{margin:0;padding-left:20px;}
+.rules li{margin-bottom:8px;font-size:14.5px;}
+.rules li b{color:var(--ink);}
+/* ---------- MOCKUP ---------- */
+.mock-wrap{margin:26px 0;}
+.mock-cap{font-family:var(--mono);font-size:12px;color:var(--muted-2);margin-bottom:8px;}
+.app-mock{border:1px solid #dfe4ee;border-radius:14px;overflow:hidden;box-shadow:var(--shadow);background:#fff;}
+.mock-bar{background:#101a2e;color:#eef2f8;font-family:var(--mono);font-size:11px;padding:9px 14px;display:flex;align-items:center;gap:9px;}
+.mock-dots{display:flex;gap:5px;}
+.mock-dots span{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.28);}
+.mock-url{margin-left:4px;opacity:.75;}
+.mock-body{display:flex;min-height:230px;background:#f5f7fb;overflow-x:auto;}
+.mock-side{width:150px;flex:0 0 150px;background:#fff;border-right:1px solid #e2e7f0;padding:12px 9px;font-size:10.6px;}
+.mock-side-brand{display:flex;align-items:center;gap:7px;padding:0 4px 10px;margin-bottom:8px;border-bottom:1px solid #eef1f6;}
+.mock-side-brand b{font-family:var(--display);font-size:11.5px;color:#101a2e;}
+.mock-nav{display:flex;align-items:center;gap:7px;padding:6px 7px;border-radius:7px;color:#536474;font-weight:600;margin-bottom:1px;}
+.mock-nav.active{background:#eaf1fb;color:#194d9d;font-weight:800;}
+.mock-nav .sym{width:14px;text-align:center;color:#7d8b99;}
+.mock-nav.active .sym{color:#194d9d;}
+.mock-sub{padding-left:19px;color:#6e7b88;font-weight:600;}
+.mock-sub div{padding:4px 0;}
+.mock-main{flex:1;min-width:280px;padding:14px 16px;font-size:11px;}
+.mock-h{font-family:var(--display);font-weight:800;color:#172033;font-size:14px;}
+.mock-sub-h{color:#788796;font-size:10.6px;margin-top:2px;}
+.mock-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
+.mock-card{background:#fff;border:1px solid #e2e7f0;border-radius:9px;padding:9px 11px;flex:1;min-width:110px;}
+.mock-card .lbl{font-size:9px;color:#788796;font-weight:700;letter-spacing:.03em;text-transform:uppercase;}
+.mock-card .val{font-family:var(--display);font-weight:800;font-size:15px;color:#172033;margin-top:4px;}
+.mock-card .sub{font-size:9.5px;color:#8a94a4;margin-top:2px;}
+.mock-table{width:100%;border-collapse:collapse;margin-top:12px;font-size:10.4px;}
+.mock-table th{text-align:left;color:#788796;font-weight:700;font-size:9.2px;text-transform:uppercase;letter-spacing:.03em;padding:5px 8px;border-bottom:1px solid #e2e7f0;}
+.mock-table td{padding:7px 8px;border-bottom:1px solid #eef1f6;color:#2b3648;}
+.mtag{font-family:var(--mono);font-weight:600;font-size:9px;padding:2px 7px;border-radius:999px;display:inline-block;}
+.mtag.paid{background:#e6f6f2;color:#0f7a68;} .mtag.open{background:#fbf1dc;color:#93650a;} .mtag.late{background:#fbebeb;color:#b23434;}
+.mtag.draft{background:#eef1f6;color:#5b6577;} .mtag.info{background:#eef4ff;color:#194d9d;} .mtag.sent{background:#eef4ff;color:#194d9d;}
+.mock-btn{display:inline-block;font-family:var(--mono);font-weight:600;font-size:9.6px;padding:6px 11px;border-radius:7px;background:#2563c5;color:#fff;margin-top:12px;margin-right:6px;}
+.mock-btn.ghost{background:#fff;color:#194d9d;border:1px solid #cddafb;}
+.mock-btn.line{background:#fff;color:#5b6577;border:1px solid #dbe1e7;}
+.mock-field{margin-top:10px;}
+.mock-field .flbl{font-size:9.6px;font-weight:700;color:#3a4557;margin-bottom:4px;}
+.mock-field .fbox{border:1px solid #dbe1e7;border-radius:7px;height:24px;background:#fff;display:flex;align-items:center;padding:0 8px;color:#98a2b3;font-size:9.8px;}
+.mock-note{margin-top:12px;font-size:10px;color:#8a94a4;line-height:1.5;border-top:1px dashed #e2e7f0;padding-top:9px;}
+.mock-list{margin-top:10px;display:flex;flex-direction:column;gap:6px;}
+.mock-list .item{display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #e2e7f0;border-radius:8px;padding:7px 10px;}
+.mock-list .item .t{font-weight:700;color:#172033;}
+.mock-list .item .m{color:#8a94a4;font-size:9.5px;margin-top:1px;}
+.chat-bubble{max-width:78%;border-radius:10px;padding:7px 10px;font-size:10.2px;margin-top:6px;}
+.chat-bubble.them{background:#fff;border:1px solid #e2e7f0;color:#2b3648;}
+.chat-bubble.me{background:#194d9d;color:#fff;margin-left:auto;}
+.legend{margin-top:6px;}
+.legend h5{font-size:12.5px;color:var(--ink);margin:0 0 8px;font-family:var(--display);}
+.legend ol{margin:0;padding-left:20px;}
+.legend li{font-size:14px;margin-bottom:6px;color:var(--muted);}
+.legend li b{color:var(--ink);}
+/* group grid for menu overview */
+.menu-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin-top:20px;}
+.menu-card{border:1px solid var(--border);background:var(--surface);border-radius:11px;padding:14px 15px;}
+.menu-card .sym{width:28px;height:28px;border-radius:8px;background:var(--accent-soft);color:var(--accent-dark);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;margin-bottom:9px;}
+.menu-card b{display:block;font-size:14px;color:var(--ink);}
+.menu-card span{display:block;font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.45;}
+table.plaintable{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px;}
+table.plaintable th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted-2);padding:8px 10px;border-bottom:1px solid var(--border);}
+table.plaintable td{padding:9px 10px;border-bottom:1px solid var(--border);color:var(--ink);vertical-align:top;}
+.tablewrap{overflow-x:auto;}
+footer.manual-footer{padding:44px 48px 60px;color:var(--muted);font-size:13.5px;}
+footer.manual-footer b{color:var(--ink);}
+.backtop{display:inline-block;margin-top:10px;font-size:13px;color:var(--accent-dark);text-decoration:none;font-weight:700;}
+@media (max-width:640px){ .hero{padding:40px 22px 34px;} .container{padding:0 22px;} section{padding:38px 0;} footer.manual-footer{padding:34px 22px 50px;} }
+/* ---------- IMPRESSÃO / PDF ---------- */
+@media print{
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  body{background:#fff;}
+  .page{display:block;}
+  aside.toc{display:none;}
+  main{padding:0;}
+  .container{max-width:100%;padding:0 8mm;}
+  .hero{padding:20mm 8mm 14mm;}
+  section{padding:10mm 0;border-bottom-color:#e2e7f0;}
+  h2,h3,h4{break-after:avoid;}
+  .mock-wrap,.rules,.callout,.gate,.menu-card,table.plaintable{break-inside:avoid;}
+  .mock-body{overflow-x:visible;}
+  .app-mock{box-shadow:none;}
+  a{text-decoration:none;}
+  .backtop{display:none;}
+}
+</style>
+</head>
+<body>
+<div class="page">
+<aside class="toc">
+  <div class="toc-brand">
+    <div class="toc-mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 11.5 12 4l9 7.5" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 10v9a1 1 0 0 0 1 1H10v-6h4v6h3.5a1 1 0 0 0 1-1v-9" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div><div class="toc-brand-name">Lar em Dia</div><div class="toc-brand-sub">Manual do usuário</div></div>
+  </div>
+  <div class="toc-kicker">Comece aqui</div>
+  <nav class="toc-list">
+    <a href="#sobre">Sobre este manual</a>
+    <a href="#acesso">Como entrar no app</a>
+    <a href="#inicio">Tela inicial</a>
+  </nav>
+  <div class="toc-kicker">Painéis e pessoas</div>
+  <nav class="toc-list">
+    <a href="#painel">Painel financeiro</a>
+    <a href="#usuarios">Painel de usuários</a>
+    <a href="#pessoas">Pessoas</a>
+    <a href="#unidades">Tipologias e unidades</a>
+  </nav>
+  <div class="toc-kicker">Financeiro</div>
+  <nav class="toc-list">
+    <a href="#boletos">Gestão de cobranças</a>
+    <a href="#debitos">Débitos e acordos</a>
+    <a href="#prestacao">Prestação de contas</a>
+  </nav>
+  <div class="toc-kicker">Comunicação e regras</div>
+  <nav class="toc-list">
+    <a href="#avisos">Avisos e relatos</a>
+    <a href="#regimento">Regimento e ocorrências</a>
+    <a href="#enquetes">Enquetes</a>
+    <a href="#reservas">Reserva de espaços</a>
+    <a href="#nadaconsta">Nada consta</a>
+  </nav>
+  <div class="toc-audience">Para: Síndico e Subsíndico<br>Não cobre o perfil Administrador geral.</div>
+</aside>
+
+<main>
+  <div class="hero">
+    <div class="hero-kicker">Lar em Dia · Gestão condominial</div>
+    <h1 id="topo">Manual do Síndico e do Subsíndico</h1>
+    <p>Guia de uso do aplicativo para quem administra o dia a dia do condomínio: financeiro, pessoas, comunicação e regimento interno.</p>
+    <div class="hero-roles"><span class="role-pill">Síndico</span><span class="role-pill">Subsíndico</span></div>
+  </div>
+
+  <div class="container">
+
+  <section id="sobre">
+    <div class="eyebrow">Sobre este manual</div>
+    <h2 class="section-title">O que você vai encontrar aqui</h2>
+    <p class="lede">Este manual cobre tudo o que o síndico e o subsíndico veem e fazem no aplicativo Lar em Dia, tela por tela, com exemplos visuais de cada área.</p>
+    <div class="callout parity">
+      <div class="callout-title">Síndico e subsíndico têm o mesmo acesso</div>
+      No sistema, os dois cargos enxergam exatamente as mesmas telas e podem fazer exatamente as mesmas ações — não existe nenhuma função exclusiva de um ou de outro. A única diferença prática é administrativa: nenhum dos dois pode promover alguém a síndico, remover a conta do outro, ou excluir o condomínio — essas ações ficam com o suporte da plataforma (Administrador geral). Se for preciso desativar a conta de um subsíndico (ou a própria conta do síndico), isso precisa ser pedido ao suporte, não é feito dentro do app.
+    </div>
+    <p>Este documento não cobre o perfil <b>Administrador geral</b> (equipe da plataforma Lar em Dia, responsável por cadastrar condomínios e ativar funcionalidades). Para o dia a dia dos moradores, veja o <b>Manual do Proprietário e do Inquilino</b>.</p>
+    <div class="gate">🔧 <b>Nem todo menu aparece para todo condomínio.</b> O Administrador geral ativa os módulos contratados por cada condomínio (em Condomínios → Funcionalidades ativas). Se uma tela descrita aqui não aparecer no seu menu, é provável que o plano do seu condomínio não a inclua — fale com o suporte para habilitá-la.</div>
+  </section>
+
+  <section id="acesso">
+    <div class="eyebrow">Primeiros passos</div>
+    <h2 class="section-title">Como entrar no aplicativo</h2>
+    <p class="lede">O acesso é sempre criado por outra pessoa (o Administrador geral, no caso do primeiro síndico de um condomínio) — não existe cadastro público. Você recebe um usuário e uma senha inicial para o primeiro login.</p>
+
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Entrar no sistema</div>
+      <div class="app-mock">
+        <div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com</span></div>
+        <div class="mock-body" style="background:#101a2e;justify-content:center;padding:26px 20px;">
+          <div style="max-width:300px;width:100%;">
+            <div style="font-family:var(--display);color:#194d9d;background:#fff;border:1px solid #e2e7f0;border-radius:12px;padding:16px 18px;box-shadow:0 10px 24px -14px rgba(0,0,0,.4);">
+              <div style="font-size:9.5px;font-weight:800;letter-spacing:.06em;color:#2563c5;">BEM-VINDO DE VOLTA</div>
+              <div style="font-family:var(--display);font-weight:800;font-size:15px;color:#172033;margin-top:5px;">Acesse sua conta</div>
+              <div class="mock-field"><div class="flbl">Usuário, CPF ou e-mail</div><div class="fbox">Digite seu usuário, CPF ou e-mail</div></div>
+              <div class="mock-field"><div class="flbl" style="display:flex;justify-content:space-between;">Senha <span style="color:#2563c5;">Esqueci minha senha</span></div><div class="fbox">••••••••</div></div>
+              <div class="mock-btn" style="display:block;text-align:center;">Entrar no sistema</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="legend"><h5>Nesta tela</h5><ol>
+      <li><b>Usuário, CPF ou e-mail</b> — você pode entrar de três formas: o usuário de acesso cadastrado, seu CPF (com ou sem pontuação) ou o e-mail informado no cadastro.</li>
+      <li><b>Esqueci minha senha</b> — abre a recuperação de senha por e-mail cadastrado.</li>
+    </ol></div>
+
+    <div class="rules"><h4>Regras do primeiro acesso</h4><ul>
+      <li>No primeiro login com a senha provisória, o app exige a criação de uma <b>nova senha</b> (mínimo 8 caracteres) antes de liberar qualquer tela.</li>
+      <li>Se você tem mais de um perfil (por exemplo, é síndico em um condomínio e também proprietário de uma unidade em outro), o app mostra a tela <b>"Como você quer entrar?"</b> logo após o login, listando cada perfil com seu cargo e condomínio. Depois de escolher, dá para trocar de perfil a qualquer momento pelo menu, sem sair da conta.</li>
+      <li>No aplicativo instalado (Android/iOS) a tela inicial é sempre o login — a página de apresentação do produto só existe na versão para navegador.</li>
+    </ul></div>
+  </section>
+
+  <section id="inicio">
+    <div class="eyebrow">Painel principal</div>
+    <h2 class="section-title">Tela inicial</h2>
+    <p class="lede">Depois de entrar, você cai na tela <b>Início</b>: um resumo do seu perfil e uma grade de acesso rápido para todas as áreas liberadas para o cargo de síndico/subsíndico.</p>
+
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Início (visão do síndico)</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/inicio</span></div>
+        <div class="mock-body">
+          <div class="mock-side">
+            <div class="mock-side-brand"><b>Lar em Dia</b></div>
+            <div class="mock-nav active"><span class="sym">⌂</span> Início</div>
+            <div class="mock-nav"><span class="sym">◆</span> Painel</div>
+            <div class="mock-nav"><span class="sym">☰</span> Painel de usuários</div>
+            <div class="mock-nav"><span class="sym">📈</span> Indicadores</div>
+            <div class="mock-nav"><span class="sym">♙</span> Pessoas</div>
+            <div class="mock-nav"><span class="sym">▧</span> Tipologias</div>
+            <div class="mock-nav"><span class="sym">▦</span> Blocos e unidades</div>
+            <div class="mock-nav"><span class="sym">$</span> Prestação de contas</div>
+            <div class="mock-nav"><span class="sym">▤</span> Boletos ▾</div>
+            <div class="mock-sub"><div>Gestão de cobranças</div><div>Gestão de débitos</div><div>Config. e enviar</div></div>
+          </div>
+          <div class="mock-main">
+            <div class="mock-h">Olá, Marina! 👋</div><div class="mock-sub-h">Acompanhe e administre o seu condomínio "Residencial Ipê".</div>
+            <div class="mock-row"><div class="mock-card"><div class="lbl">Seu perfil</div><div class="val" style="font-size:12px;">Síndico</div><div class="sub">acesso personalizado por permissão</div></div></div>
+            <div style="margin-top:14px;font-size:11px;font-weight:800;color:#25374b;">Acesso rápido</div>
+            <div class="mock-row">
+              <div class="mock-card"><b class="lbl" style="color:#172033;font-size:10.5px;">Prestação de contas</b><div class="sub">Receitas, despesas e saldo mensal</div></div>
+              <div class="mock-card"><b class="lbl" style="color:#172033;font-size:10.5px;">Pessoas</b><div class="sub">Síndicos, proprietários e inquilinos</div></div>
+              <div class="mock-card"><b class="lbl" style="color:#172033;font-size:10.5px;">Boletos</b><div class="sub">Cobranças, vencimentos e pagamentos</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="legend"><h5>Nesta tela</h5><ol>
+      <li><b>Menu lateral</b> — todas as áreas liberadas para o seu cargo. Grupos com seta (▾) escondem sub-itens relacionados, como "Boletos".</li>
+      <li><b>Seu perfil</b> — mostra o cargo com que você está logado; é ele que define o que aparece no menu.</li>
+      <li><b>Acesso rápido</b> — atalhos em cartões para as mesmas áreas do menu lateral, montados automaticamente por cargo e pelas funcionalidades ativas do seu condomínio.</li>
+    </ol></div>
+  </section>
+
+  <section id="painel">
+    <div class="eyebrow">Financeiro · leitura</div>
+    <h2 class="section-title">Painel financeiro e indicadores</h2>
+    <p class="lede">Duas telas de acompanhamento, só leitura — nenhuma delas tem ações de criar ou editar.</p>
+    <div class="menu-grid">
+      <div class="menu-card"><div class="sym">◆</div><b>Painel</b><span>Quanto foi arrecadado no mês, filtrado por mês de referência do boleto (ou "todo o histórico"). Mostra pagos, em aberto, cancelados, vencidos e aguardando o banco, além de inadimplência ordenada por valor em atraso.</span></div>
+      <div class="menu-card"><div class="sym">📈</div><b>Indicadores de boletos</b><span>A mesma arrecadação vista por outro ângulo: agrupada pela data do pagamento (não pelo mês de vencimento), com o motivo de cada cancelamento.</span></div>
+    </div>
+
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Painel</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/painel</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Painel financeiro</div><div class="mock-sub-h">Referência: Setembro/2026</div>
+          <div class="mock-row">
+            <div class="mock-card"><div class="lbl">Pagos</div><div class="val" style="color:#0f7a68;">R$ 48.230</div></div>
+            <div class="mock-card"><div class="lbl">Em aberto</div><div class="val" style="color:#93650a;">R$ 6.140</div></div>
+            <div class="mock-card"><div class="lbl">Vencidos</div><div class="val" style="color:#b23434;">R$ 2.310</div></div>
+            <div class="mock-card"><div class="lbl">Aguardando banco</div><div class="val">R$ 900</div></div>
+          </div>
+          <div class="mock-note"><b>Inadimplência</b> — Ap. 302 · R$ 1.240 · 34 dias em atraso &nbsp;·&nbsp; Ap. 108 · R$ 610 · 12 dias em atraso</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li>Boletos <b>aguardando o banco</b> não entram na soma de "em aberto" — eles ainda não existem para o morador pagar.</li>
+      <li>Em <b>Indicadores</b>, cobranças canceladas sem motivo informado aparecem agrupadas em "Sem motivo informado".</li>
+    </ul></div>
+  </section>
+
+  <section id="usuarios">
+    <div class="eyebrow">Pessoas · leitura</div>
+    <h2 class="section-title">Painel de usuários</h2>
+    <p class="lede">Contadores de cadastro, acesso e ocupação do condomínio. Toque em qualquer número para abrir a lista de nomes por trás dele.</p>
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Painel de usuários</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/painel-usuarios</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Painel de usuários</div>
+          <div class="mock-row">
+            <div class="mock-card"><div class="lbl">Cadastrados</div><div class="val">86</div></div>
+            <div class="mock-card"><div class="lbl">Proprietários</div><div class="val">40</div></div>
+            <div class="mock-card"><div class="lbl">Inquilinos</div><div class="val">44</div></div>
+            <div class="mock-card"><div class="lbl">Síndico/Subsíndico</div><div class="val">2</div></div>
+          </div>
+          <div class="mock-row">
+            <div class="mock-card"><div class="lbl">Unidades com morador</div><div class="val">38</div></div>
+            <div class="mock-card"><div class="lbl">Unidades sem morador</div><div class="val">2</div></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li>Os quatro contadores de cadastro sempre somam o total — é um jeito de conferir que ninguém ficou de fora.</li>
+      <li>Uma pessoa que também é síndico/subsíndico em outro perfil aparece só nesse grupo, nunca duplicada como proprietário/inquilino — a lista de detalhe marca esse caso como "(perfil adicional)".</li>
+      <li>Os cartões de unidades (com/sem morador) são só informativos, não abrem lista.</li>
+    </ul></div>
+  </section>
+
+  <section id="pessoas">
+    <div class="eyebrow">Cadastros</div>
+    <h2 class="section-title">Pessoas</h2>
+    <p class="lede">É aqui que você cria, edita e desativa as contas de proprietários, inquilinos e de outro subsíndico. Contas com o cargo <b>Síndico</b> só podem ser criadas ou removidas pelo suporte da plataforma.</p>
+
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Pessoas — cadastrar</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/pessoas</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Nova pessoa</div>
+          <div class="mock-row">
+            <div style="flex:1;min-width:120px;"><div class="mock-field"><div class="flbl">Usuário de acesso</div><div class="fbox">joao.silva</div></div></div>
+            <div style="flex:1;min-width:120px;"><div class="mock-field"><div class="flbl">CPF</div><div class="fbox">000.000.000-00</div></div></div>
+          </div>
+          <div class="mock-row">
+            <div style="flex:1;min-width:110px;"><div class="mock-field"><div class="flbl">Cargo</div><div class="fbox">Proprietário ▾</div></div></div>
+            <div style="flex:1;min-width:110px;"><div class="mock-field"><div class="flbl">Unidade</div><div class="fbox">Bloco A · 302 ▾</div></div></div>
+          </div>
+          <div class="mock-btn">Salvar pessoa</div>
+          <div class="mock-note">A senha inicial é gerada a partir do CPF (e do nº da unidade, se for morador) e mostrada uma única vez após salvar.</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="legend"><h5>Nesta tela</h5><ol>
+      <li><b>Cargo</b> — o menu só oferece Subsíndico, Proprietário ou Inquilino: nem síndico nem subsíndico conseguem cadastrar outro síndico por aqui.</li>
+      <li><b>Unidade</b> — obrigatória para proprietário/inquilino; define a qual apartamento a cobrança e a comunicação da pessoa ficam ligadas.</li>
+    </ol></div>
+
+    <table class="plaintable">
+      <tr><th>Ação</th><th>O que faz</th></tr>
+      <tr><td><b>Editar</b></td><td>Altera dados cadastrais, endereço de cobrança (CEP preenche rua/bairro/cidade/UF automaticamente), dia de vencimento preferido (10 ou 20) e isenção de boleto.</td></tr>
+      <tr><td><b>Resetar senha</b></td><td>Individual, ou em massa ("Resetar todos deste condomínio" / "Resetar selecionados").</td></tr>
+      <tr><td><b>Excluir logicamente</b></td><td>Bloqueia o login sem apagar o histórico; reversível a qualquer momento pela aba "Excluídos" → Reativar.</td></tr>
+      <tr><td><b>Excluir fisicamente</b></td><td>Apaga a pessoa em definitivo. Bloqueado se ela tiver boletos ainda não pagos nem cancelados.</td></tr>
+      <tr><td><b>Perfis desta pessoa</b></td><td>Concede ou remove perfis adicionais (ex.: um síndico que também é proprietário em outra unidade) sem sobrescrever o cargo principal.</td></tr>
+    </table>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li>Cadastrar outro subsíndico é permitido, mas depois de criado ele <b>não é gerenciável</b> por você — editar, resetar senha e excluir só funcionam em cartões de proprietário/inquilino.</li>
+      <li>Trocar o cargo principal de uma pessoa pelo seletor <b>substitui</b> o perfil atual — o app mostra um aviso de confirmação antes.</li>
+    </ul></div>
+  </section>
+
+  <section id="unidades">
+    <div class="eyebrow">Cadastros</div>
+    <h2 class="section-title">Tipologias e Blocos e unidades</h2>
+    <div class="menu-grid">
+      <div class="menu-card"><div class="sym">▧</div><b>Tipologias</b><span>Tipos de apartamento e o valor mensal padrão do condomínio (nome, valor, descrição). Esse valor alimenta a emissão automática de cobranças. Não é possível excluir uma tipologia em uso.</span></div>
+      <div class="menu-card"><div class="sym">▦</div><b>Blocos e unidades</b><span>Cadastro de blocos e apartamentos, moradores atuais, representante da unidade e importação em massa por planilha (.xlsx).</span></div>
+    </div>
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Blocos e unidades</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/unidades</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Bloco A</div>
+          <div class="mock-list">
+            <div class="item"><div><div class="t">Apto 101 · Tipo 2 quartos</div><div class="m">Morador: Ana Souza (proprietária) · Representante</div></div><span class="mtag info">editar</span></div>
+            <div class="item"><div><div class="t">Apto 102 · Tipo 3 quartos</div><div class="m">Morador: Carlos Reis (inquilino)</div></div><span class="mtag info">editar</span></div>
+            <div class="item"><div><div class="t">Apto 302</div><div class="m">Sem morador cadastrado</div></div><span class="mtag draft">vazio</span></div>
+          </div>
+          <div class="mock-btn ghost">+ Importar planilha .xlsx</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li><b>Representante</b> — é definido automaticamente para quem acabou de ser vinculado à unidade; você pode trocar tocando em outro morador, ou remover. É só uma etiqueta administrativa, usada quando é preciso um responsável único por unidade — hoje ela não muda quem recebe o boleto nem quem é notificado.</li>
+      <li><b>Proprietários adicionais</b> — se o dono do imóvel não mora nele (por exemplo, aluga para um inquilino), cadastre-o aqui: ele passa a ver os débitos da unidade em modo só leitura, sem responder pela cobrança.</li>
+      <li>Excluir um bloco é bloqueado se algum apartamento dele tiver histórico vinculado.</li>
+      <li>Na importação por planilha, uma linha repetida <b>atualiza</b> o registro em vez de duplicar; a tipologia informada precisa já existir.</li>
+    </ul></div>
+  </section>
+
+  <section id="boletos">
+    <div class="eyebrow">Financeiro</div>
+    <h2 class="section-title">Gestão de cobranças</h2>
+    <p class="lede">O grupo "Boletos" reúne emissão individual e em lote, débitos consolidados, acordos de negociação, cobranças adicionais e consumo individualizado.</p>
+
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Gestão de cobranças</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/boletos</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Gestão de cobranças</div><div class="mock-sub-h">Setembro/2026</div>
+          <table class="mock-table"><tr><th>Unidade</th><th>Descrição</th><th>Valor</th><th>Situação</th></tr>
+            <tr><td>Apto 101</td><td>Taxa condominial</td><td>R$ 620,00</td><td><span class="mtag paid">Pago</span></td></tr>
+            <tr><td>Apto 302</td><td>Taxa + consumo</td><td>R$ 705,40</td><td><span class="mtag open">Em aberto</span></td></tr>
+            <tr><td>Apto 108</td><td>Taxa condominial</td><td>R$ 610,00</td><td><span class="mtag late">Vencido</span></td></tr>
+          </table>
+          <div class="mock-btn">Nova emissão individual</div><div class="mock-btn ghost">Atualizar todos os boletos</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="legend"><h5>Nesta tela</h5><ol>
+      <li><b>Atualizar todos os boletos</b> — sincroniza o status (pago/vencido) com o Banco Inter; não é automático, precisa ser acionado.</li>
+      <li><b>Nova emissão individual</b> — busca a pessoa, mostra a "Composição do próximo boleto" (tipologia + cobranças adicionais + consumo) antes de confirmar.</li>
+      <li><b>Situação</b> — Aguardando Inter, Em aberto, Pago, Vencido ou Cancelado; um boleto vencido é destacado em vermelho.</li>
+    </ol></div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li><b>Retirar da dívida</b> — exclui manualmente um boleto das somas de dívida (Painel/Débitos/Indicadores) sem cancelá-lo de verdade; é reversível e exige justificativa.</li>
+      <li>Parcelas de um acordo aceito aparecem marcadas com a etiqueta <b>"PARCELA DE ACORDO"</b>.</li>
+      <li>Boletos existentes no banco sem um CPF correspondente no condomínio caem em "Cobranças não identificadas", à espera de você dispensá-los.</li>
+    </ul></div>
+
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Config. e enviar cobranças — emissão em lote</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/config-cobrancas</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Emitir lote mensal</div>
+          <div class="mock-row">
+            <div style="flex:1;min-width:100px;"><div class="mock-field"><div class="flbl">Mês de referência</div><div class="fbox">09/2026</div></div></div>
+            <div style="flex:1;min-width:100px;"><div class="mock-field"><div class="flbl">Pessoas</div><div class="fbox">Selecionar todas</div></div></div>
+          </div>
+          <div class="mock-btn ghost">Validar competência</div>
+          <div class="mock-btn">Criar lote mensal</div>
+          <div class="mock-note">Depois de criado: Confirmar seleção para o banco → Gerar boletos no Banco Inter → Ver boletos desta referência.</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li>O vencimento de cada boleto é calculado pelo <b>dia preferido</b> de cada pessoa (10 ou 20) — nunca uma data única para o lote inteiro.</li>
+      <li>"Validar competência" só confere e mostra pendências (✓/⚠ por pessoa) — não emite nada ainda.</li>
+      <li>Uma referência só pode ser excluída se nada nela já tiver sido emitido no banco.</li>
+    </ul></div>
+
+    <div class="menu-grid">
+      <div class="menu-card"><div class="sym">➕</div><b>Cobranças adicionais</b><span>Valores extraordinários por unidade (ex.: tag de portaria), parcelados em 1 a 60 vezes, somados ao boleto do mês. Dá para acompanhar pagamento por grupo e exportar para Excel.</span></div>
+      <div class="menu-card"><div class="sym">💧</div><b>Consumo (água/gás/energia)</b><span>Tarifas por m³/kg/kWh e lançamento mensal por unidade — o valor calculado entra automaticamente na composição do próximo boleto do morador. Um lançamento já emitido só pode ser editado depois de cancelar o boleto vinculado.</span></div>
+    </div>
+  </section>
+
+  <section id="debitos">
+    <div class="eyebrow">Financeiro</div>
+    <h2 class="section-title">Gestão de débitos e acordos</h2>
+    <p class="lede">Visão consolidada por unidade, com multa e mora recalculadas automaticamente, negociação de dívidas antigas e histórico completo de acordos.</p>
+
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Gestão de débitos</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/debitos</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Apto 108 — Carlos Reis</div><div class="mock-sub-h">Débito atualizado agora mesmo</div>
+          <div class="mock-row">
+            <div class="mock-card"><div class="lbl">Original</div><div class="val" style="font-size:13px;">R$ 610,00</div></div>
+            <div class="mock-card"><div class="lbl">Multa + mora</div><div class="val" style="font-size:13px;color:#b23434;">R$ 42,70</div></div>
+            <div class="mock-card"><div class="lbl">Total atualizado</div><div class="val" style="font-size:13px;">R$ 652,70</div></div>
+          </div>
+          <div class="mock-btn">Criar proposta de acordo</div><div class="mock-btn ghost">Comunicar por WhatsApp</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li>Multa e mora são recalculadas automaticamente ao abrir a tela e a cada 5 minutos; "Atualizar agora" força o recálculo na hora.</li>
+      <li><b>Débito antigo (pré-sistema)</b> pode ser lançado um a um ou importado em lote por planilha .xlsx.</li>
+      <li>Toda edição de valor/vencimento, pagamento parcial registrado à mão ou exclusão de débito fica registrada com data, autor e motivo, visível na própria linha.</li>
+    </ul></div>
+
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Histórico de acordos — fluxo de uma proposta</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/acordos</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Acordo · Apto 108</div>
+          <div class="mock-row">
+            <span class="mtag sent">Aguardando aceite do morador</span>
+          </div>
+          <div class="mock-note">6x de R$ 108,78 · 1ª parcela 10/10/2026</div>
+          <div class="mock-btn ghost">Enviar proposta</div><div class="mock-btn line">Excluir acordo</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="rules"><h4>Situações de um acordo</h4><ul>
+      <li><b>Rascunho → Aguardando aceite → Aceito → Ativo</b> — só depois que o morador aceita, o débito original é congelado e as parcelas viram boletos.</li>
+      <li><b>Sob risco / Rompido</b> — quando uma parcela é perdida; um acordo rompido volta a acumular multa e mora normalmente sobre o débito original.</li>
+      <li><b>Quitado</b> — todas as parcelas pagas.</li>
+      <li>"Justificar cancelamento" só aparece quando 100% das parcelas de um acordo ativo já foram canceladas e ainda não há motivo registrado — pode incluir recálculo do valor com atraso, multa e mora.</li>
+    </ul></div>
+  </section>
+
+  <section id="prestacao">
+    <div class="eyebrow">Financeiro · transparência</div>
+    <h2 class="section-title">Prestação de contas</h2>
+    <p class="lede">Fechamento financeiro mensal (receitas, despesas e saldo) publicado para os moradores, com comprovantes anexados e, opcionalmente, homologação do Conselho Fiscal.</p>
+
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Prestação de contas</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/prestacao</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Setembro/2026</div>
+          <div class="mock-row">
+            <div class="mock-card"><div class="lbl">Recebido</div><div class="val" style="font-size:13px;color:#0f7a68;">R$ 48.230</div></div>
+            <div class="mock-card"><div class="lbl">Despesas</div><div class="val" style="font-size:13px;color:#b23434;">R$ 31.410</div></div>
+            <div class="mock-card"><div class="lbl">Saldo</div><div class="val" style="font-size:13px;">R$ 16.820</div></div>
+          </div>
+          <div class="mock-note"><b>Homologação</b> — Síndico ✓ homologado · Subsíndico pendente · Conselho Fiscal 1 ✓ · Conselho Fiscal 2 pendente</div>
+          <div class="mock-btn">Importar PDF</div><div class="mock-btn ghost">Preencher dados do mês</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="legend"><h5>Nesta tela</h5><ol>
+      <li><b>Importar PDF</b> — extrai automaticamente mês, período, despesas e valores de um extrato bancário em PDF.</li>
+      <li><b>Preencher dados do mês</b> — completa sozinho apartamentos pagos/isentos/não pagos e total recebido a partir dos boletos já emitidos, deixando tudo editável antes de salvar.</li>
+      <li><b>Homologação</b> — síndico, subsíndico e (se o condomínio usa Conselho Fiscal) os dois conselheiros marcam "Homologar" com um comentário opcional; é só informativo, não trava a publicação.</li>
+    </ol></div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li>O campo <b>"Saldo bancário da competência"</b> (o extrato real do banco) só aparece para os moradores com o cargo <b>Proprietário</b> — inquilinos não veem esse campo.</li>
+      <li>Cada despesa aceita nota fiscal e comprovante de pagamento em PDF/JPEG/PNG/WEBP, um anexo de cada tipo por despesa.</li>
+      <li>"Excluir prestação" apaga também despesas e anexos — é irreversível.</li>
+      <li>Na versão para navegador, esta tela bloqueia impressão de tela e Ctrl+P/Ctrl+S por segurança dos dados financeiros — use o botão <b>Imprimir</b> para gerar o PDF oficial.</li>
+    </ul></div>
+    <div class="gate">🔧 O <b>Conselho Fiscal</b> (duas vagas de morador com poder de homologar) é uma funcionalidade opcional, desligada por padrão — precisa ser ativada pelo suporte.</div>
+  </section>
+
+  <section id="avisos">
+    <div class="eyebrow">Comunicação</div>
+    <h2 class="section-title">Avisos e relatos</h2>
+    <div class="menu-grid">
+      <div class="menu-card"><div class="sym">◉</div><b>Comunicação</b><span>Envio de avisos gerais (todo o condomínio) ou pessoais (uma pessoa específica), com confirmação de leitura por destinatário.</span></div>
+      <div class="menu-card"><div class="sym">!</div><b>Relatos e solicitações</b><span>Canal privado 1 a 1: cada morador abre um pedido e conversa com a administração até a resolução.</span></div>
+    </div>
+
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Comunicação — novo aviso</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/avisos</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Novo aviso</div>
+          <div class="mock-field"><div class="flbl">Destinatários</div><div class="fbox">Todos do condomínio ▾</div></div>
+          <div class="mock-field"><div class="flbl">Título</div><div class="fbox">Manutenção da caixa d'água</div></div>
+          <div class="mock-btn">Enviar aviso</div>
+          <div class="mock-note">Envios anteriores: "Assembleia de outubro" — 34/40 visualizaram</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li>O histórico de envios mostra quantos visualizaram cada aviso, com data e hora por destinatário.</li>
+      <li>Se você (síndico/subsíndico) também mora no condomínio como morador, é incluído automaticamente nos avisos gerais.</li>
+    </ul></div>
+
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Relatos e solicitações — atendimento</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/relatos</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Manutenção · Apto 108</div><span class="mtag open">Em atendimento</span>
+          <div class="chat-bubble them">Vazamento no hidrômetro da unidade.</div>
+          <div class="chat-bubble me">Equipe já está a caminho, obrigado por avisar.</div>
+          <div class="mock-btn ghost">Atender</div><div class="mock-btn">Resolver</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li>Categorias possíveis: Reclamação, Incômodo, Manutenção, Sugestão, Outro. Situações: Aberto, Em atendimento, Resolvido.</li>
+      <li>Depois de marcado <b>Resolvido</b>, a conversa fica travada dos dois lados — não é possível mandar mais mensagens.</li>
+      <li>O morador recebe notificação a cada mudança de status e a cada resposta sua.</li>
+    </ul></div>
+  </section>
+
+  <section id="regimento">
+    <div class="eyebrow">Regras internas</div>
+    <h2 class="section-title">Regimento e ocorrências</h2>
+    <p class="lede">Quatro telas encadeadas: os artigos do regimento definem a base legal; ocorrências registram o incidente; a notificação de infração aplica a multa; e o morador acompanha/contesta na tela de notificações.</p>
+
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Emitir notificação de infração</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/emitir-notificacao</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Emitir notificação</div>
+          <div class="mock-row">
+            <div style="flex:1;min-width:100px;"><div class="mock-field"><div class="flbl">Artigo</div><div class="fbox">Art. 14 — Barulho ▾</div></div></div>
+            <div style="flex:1;min-width:100px;"><div class="mock-field"><div class="flbl">Unidade</div><div class="fbox">Apto 210 ▾</div></div></div>
+          </div>
+          <div class="mock-btn ghost">Calcular multa e revisar</div>
+          <div class="mock-note">Multa base R$ 124,00 + reincidência R$ 124,00 + juros/correção pendente = R$ 248,00 (parcial)</div>
+          <div class="mock-btn">Enviar notificação</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="legend"><h5>Fluxo da multa</h5><ol>
+      <li><b>Enviada</b> — aguardando o morador dar ciência no app.</li>
+      <li><b>Em defesa</b> — ciência dada (ou automática, após o prazo de tolerância configurado no artigo); o morador pode contestar por escrito.</li>
+      <li><b>Confirmada</b> — você confirma, o que gera automaticamente uma cobrança para a unidade.</li>
+      <li><b>Cancelada</b> — possível a qualquer momento antes do pagamento, com motivo obrigatório.</li>
+    </ol></div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li>Reincidência no mesmo artigo <b>dobra</b> a multa base automaticamente.</li>
+      <li>Juros de mora, correção monetária e multa diária por reincidência contínua são configurados <b>por artigo</b>, em "Artigos do regimento" — e só podem ser editados na configuração viva; notificações já emitidas mantêm o valor calculado na hora do envio.</li>
+      <li>Não é possível emitir notificação sem ao menos um artigo ativo cadastrado.</li>
+      <li>Uma ocorrência pode virar notificação direto pelo botão <b>"Transformar em notificação"</b>, já com a unidade preenchida.</li>
+    </ul></div>
+  </section>
+
+  <section id="enquetes">
+    <div class="eyebrow">Participação</div>
+    <h2 class="section-title">Enquetes</h2>
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Enquetes</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/enquetes</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Nova área de lazer</div><span class="mtag open">Aberta</span>
+          <div class="mock-note">Piscina — 62% (26 votos) · Academia — 38% (16 votos)</div>
+          <div class="mock-btn ghost">Encerrar e divulgar resultado</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li>Uma enquete nasce como <b>rascunho</b> (invisível aos moradores) até você tocar em <b>Publicar</b> — o que dispara notificação push para todos.</li>
+      <li>Você (síndico/subsíndico) vê a contagem de votos em tempo real mesmo com a enquete aberta; os moradores só veem o resultado depois de encerrada.</li>
+      <li>Encerramento pode ser automático (data/hora definida na criação) ou manual, a qualquer momento.</li>
+    </ul></div>
+  </section>
+
+  <section id="reservas">
+    <div class="eyebrow">Participação</div>
+    <h2 class="section-title">Reserva de espaços</h2>
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Reserva de espaços — aprovação</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/reservas</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Salão de festas · 12/10, 18h–23h</div><div class="mock-sub-h">Solicitado por Apto 101</div><span class="mtag open">Aguardando aprovação</span>
+          <div class="mock-btn">Aprovar</div><div class="mock-btn line">Rejeitar com justificativa</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li>Toda solicitação nasce <b>pendente</b> — não existe reserva automática, aprovar ou rejeitar é sempre manual.</li>
+      <li>Rejeitar exige um motivo escrito, mostrado ao morador. Aprovar e rejeitar disparam notificação automática.</li>
+      <li><b>Bloquear um dia inteiro</b> (manutenção, evento) exige motivo e fica registrado na Auditoria; não é possível se já existir reserva pendente ou aprovada naquele dia.</li>
+      <li>O calendário usa cores: verde = livre, amarelo = parcialmente ocupado, vermelho = lotado.</li>
+    </ul></div>
+  </section>
+
+  <section id="nadaconsta">
+    <div class="eyebrow">Documentos</div>
+    <h2 class="section-title">Nada consta</h2>
+    <p class="lede">Emissão da declaração de quitação condominial, com código de verificação público.</p>
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Nada consta — emissão</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/nada-consta</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Solicitação · Apto 101</div><span class="mtag draft">Aguardando emissão</span>
+          <div class="mock-btn">Emitir declaração</div>
+          <div class="mock-note">Código gerado: 4F2A-9C1D-77BE · hash de verificação incluso no PDF</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li>A declaração só sai com <b>tudo zerado</b> — qualquer boleto em aberto/vencido, débito antigo, acordo rompido ou cobrança adicional pendente bloqueia a emissão automaticamente, sem revisão manual.</li>
+      <li>Ao emitir, o sistema confere as dívidas <b>de novo</b>, na hora — se algo surgiu entre o pedido e a emissão, a emissão é bloqueada.</li>
+      <li>O PDF traz um código de verificação público: qualquer banco, imobiliária ou cartório pode conferir a autenticidade em uma página sem login, digitando o código.</li>
+    </ul></div>
+  </section>
+
+  </div>
+
+  <footer class="manual-footer">
+    <p><b>Lar em Dia</b> — gestão condominial. Este manual reflete as telas e regras vigentes do aplicativo para os cargos de Síndico e Subsíndico.</p>
+    <p>Alguma tela não apareceu como descrito aqui? Pode ser uma funcionalidade não incluída no plano do seu condomínio, ou uma ação restrita ao Administrador geral — fale com o suporte da plataforma.</p>
+    <a class="backtop" href="#topo">↑ Voltar ao topo</a>
+  </footer>
+</main>
+</div>
+
+</body>
+</html>

@@ -28,6 +28,7 @@ import infractionNoticeRoutes from './routes/infractionNoticeRoutes';
 import pollRoutes from './routes/pollRoutes';
 import spaceReservationRoutes from './routes/spaceReservationRoutes';
 import clearanceRoutes from './routes/clearanceRoutes';
+import helpRoutes from './routes/helpRoutes';
 import { config } from './config';
 
 export const app = express();
@@ -89,6 +90,7 @@ app.use('/infraction-notices', infractionNoticeRoutes);
 app.use('/polls', pollRoutes);
 app.use('/space-reservations', spaceReservationRoutes);
 app.use('/clearances', clearanceRoutes);
+app.use('/help', helpRoutes);
 
 app.use((_req, res) => res.status(404).json({ message: 'route not found' }));
 
