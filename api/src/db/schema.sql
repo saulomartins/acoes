@@ -1,4 +1,8 @@
 create extension if not exists "pgcrypto";
+-- Usado no login e no cadastro de Pessoas para comparar o usuário de acesso
+-- ignorando acentos (ex.: "joao" e "joão" devem ser tratados como o mesmo
+-- identificador) — ver login() em authService.ts.
+create extension if not exists "unaccent";
 
 do $$
 begin
@@ -119,6 +123,11 @@ alter table users add column if not exists terms_accepted_version text;
 alter table users add column if not exists terms_accepted_at timestamptz;
 alter table users add column if not exists tour_completed_version text;
 alter table users add column if not exists tour_completed_at timestamptz;
+-- Informacional, só relevante para role='proprietario': marca que o dono não
+-- mora na própria unidade porque a aluga a um terceiro não cadastrado no
+-- sistema. Não afeta cobrança, moradia (unit_occupancies) nem posse
+-- (unit_ownerships) — serve só para as estatísticas do Painel de usuários.
+alter table users add column if not exists unit_rented_to_tenant boolean not null default false;
 
 create table if not exists user_terms_acceptances (
   id uuid primary key default gen_random_uuid(),

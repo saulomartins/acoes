@@ -20,6 +20,8 @@ type CondominiumUserStats = {
   inactiveUsers: number;
   registeredOwners: number;
   registeredTenants: number;
+  realTenantResidents: number;
+  ownerResidents: number;
   ownersMonitoringElsewhere: number;
   sindico: NamedUser[];
   subsindico: NamedUser[];
@@ -28,13 +30,15 @@ type CondominiumUserStats = {
   unitsWithoutResident: number;
 };
 
-type Bucket = 'registered' | 'active' | 'inactive' | 'registered_owners' | 'registered_tenants' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
+type Bucket = 'registered' | 'active' | 'inactive' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
 const BUCKET_LABEL: Record<Bucket, string> = {
   registered: 'Cadastrados',
   active: 'Ativos',
   inactive: 'Inativos',
   registered_owners: 'Proprietários (cadastrados)',
   registered_tenants: 'Inquilinos (cadastrados)',
+  real_tenant_residents: 'Inquilinos morando de fato',
+  owner_residents: 'Proprietários morando na própria unidade',
   owners_monitoring_elsewhere: 'Proprietários que monitoram outra unidade',
   sindico: 'Síndico',
   subsindico: 'Subsíndico',
@@ -111,7 +115,7 @@ export default function UserStats() {
   const condominiumOptions = [{ value: '', label: 'Todos os condomínios', description: `${condoOptions.length} condomínio(s)` }, ...condoOptions.map(item => ({ value: item.id, label: item.name }))];
 
   const tourSteps: TourStep[] = [
-    { key: 'summary', title: 'Usuários por condomínio', description: 'Cadastro mostra o papel de cada pessoa (proprietário, inquilino, síndico ou subsíndico) — a soma dos quatro sempre bate com o total de cadastrados, mostrado na linha de conferência. Síndico e subsíndico têm prioridade: quem tem papel principal de proprietário mas também um perfil adicional de síndico/subsíndico é contado só como síndico/subsíndico, nunca como proprietário — a lista de nomes ao tocar no número mostra "(perfil adicional)" nesse caso. Ativos/Inativos divide o total cadastrado pelo acesso ao app estar habilitado ou não. "Unidades / apartamentos" mostra o total de unidades cadastradas no condomínio (independente de morador) e como elas se dividem entre com e sem morador ativo no momento — soma sempre bate com o total. "Proprietários que também monitoram outra unidade" mostra quem tem posse ativa (unit_ownerships) de uma unidade diferente da própria — normalmente uma unidade alugada a um inquilino; isso não é exclusivo com morar na própria unidade, então esse número não é subtraído do total de proprietários. Toque em qualquer número para ver os nomes e apartamentos correspondentes (a contagem de unidades não é clicável). A tela atualiza sozinha a cada 30 segundos.' },
+    { key: 'summary', title: 'Usuários por condomínio', description: 'Cadastro mostra o papel de cada pessoa (proprietário, inquilino, síndico ou subsíndico) — a soma dos quatro sempre bate com o total de cadastrados, mostrado na linha de conferência. Síndico e subsíndico têm prioridade: quem tem papel principal de proprietário mas também um perfil adicional de síndico/subsíndico é contado só como síndico/subsíndico, nunca como proprietário — a lista de nomes ao tocar no número mostra "(perfil adicional)" nesse caso. Ativos/Inativos divide o total cadastrado pelo acesso ao app estar habilitado ou não. "Unidades / apartamentos" mostra o total de unidades cadastradas no condomínio (independente de morador) e como elas se dividem entre com e sem morador ativo no momento — soma sempre bate com o total. "Proprietários que também monitoram outra unidade" mostra quem tem posse ativa (unit_ownerships) de uma unidade diferente da própria — normalmente uma unidade alugada a um inquilino; isso não é exclusivo com morar na própria unidade, então esse número não é subtraído do total de proprietários. "Quem mora de fato na unidade" é diferente de "cadastrado": proprietário e inquilino cadastrados indicam o responsável financeiro; já "inquilino morando de fato" e "proprietário morando na própria unidade" refletem quem realmente ocupa o imóvel, com base no campo opcional "Unidade alugada a terceiros" preenchido em Pessoas quando o proprietário responsável financeiro aluga a unidade a alguém não cadastrado no sistema. Toque em qualquer número para ver os nomes e apartamentos correspondentes (a contagem de unidades não é clicável). A tela atualiza sozinha a cada 30 segundos.' },
   ];
 
   return (
@@ -202,6 +206,18 @@ export default function UserStats() {
               <Pressable style={[s.summary, s.summaryMonitor, compact && s.summaryMobile]} onPress={() => openDetail(item.condominiumId, item.name, 'owners_monitoring_elsewhere')}>
                 <Text {...summaryValueProps} style={[s.summaryValue, s.monitorText]}>{item.ownersMonitoringElsewhere}</Text>
                 <Text {...summaryLabelProps} style={s.summaryLabel}>proprietário{item.ownersMonitoringElsewhere === 1 ? '' : 's'} com posse de outra unidade (ex.: alugada a um inquilino) além da própria — inclusive quem também mora no condomínio</Text>
+              </Pressable>
+            </View>
+
+            <Text style={s.groupLabel}>Quem mora de fato na unidade</Text>
+            <View style={[s.summaryRow, compact && s.summaryRowMobile]}>
+              <Pressable style={[s.summary, compact && s.summaryMobile]} onPress={() => openDetail(item.condominiumId, item.name, 'real_tenant_residents')}>
+                <Text {...summaryValueProps} style={s.summaryValue}>{item.realTenantResidents}</Text>
+                <Text {...summaryLabelProps} style={s.summaryLabel}>inquilino{item.realTenantResidents === 1 ? '' : 's'} morando de fato</Text>
+              </Pressable>
+              <Pressable style={[s.summary, compact && s.summaryMobile]} onPress={() => openDetail(item.condominiumId, item.name, 'owner_residents')}>
+                <Text {...summaryValueProps} style={s.summaryValue}>{item.ownerResidents}</Text>
+                <Text {...summaryLabelProps} style={s.summaryLabel}>proprietário{item.ownerResidents === 1 ? '' : 's'} morando na própria unidade</Text>
               </Pressable>
             </View>
           </Panel>

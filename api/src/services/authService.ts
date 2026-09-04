@@ -190,7 +190,7 @@ export const login = async (identifier: string, password: string) => {
   const result = await query<DbUser & { login_enabled: boolean }>(
     `select u.id, u.username, u.password_hash, u.role, u.condominium_id, u.full_name, u.must_change_password, u.terms_accepted_version, u.terms_accepted_at, u.tour_completed_version, u.tour_completed_at, u.login_enabled, c.name condominium_name
      from users u left join condominiums c on c.id=u.condominium_id
-     where u.username = $1
+     where unaccent(lower(u.username)) = unaccent($1)
         or (u.email is not null and lower(trim(u.email)) = $1)
         or ($2 <> '' and regexp_replace(coalesce(u.cpf,''), '[^0-9]', '', 'g') = $2)`,
     [normalizedIdentifier, cpfDigits],

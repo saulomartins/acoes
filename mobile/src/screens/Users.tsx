@@ -1,7 +1,7 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../ui/text';
-import { apiRequest } from '../api/client';
+import { apiRequest, downloadAuthenticated } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
 import { AppButton, AppDialog, EmptyState, Field, Panel, TextField } from '../ui/components';
 import { ComboBox } from '../ui/ComboBox';
@@ -30,6 +30,7 @@ type UserItem = {
   is_unit_representative?: boolean;
   billing_exempt?: boolean;
   preferred_due_day?: 10 | 20;
+  unit_rented_to_tenant?: boolean;
   street?: string | null; address_number?: string | null; address_complement?: string | null;
   neighborhood?: string | null; city?: string | null; state?: string | null; postal_code?: string | null;
   deleted_at?: string | null;
@@ -127,6 +128,7 @@ export default function Users({ navigation }: any) {
   const [unitId, setUnitId] = useState('');
   const [billingExempt, setBillingExempt] = useState(false);
   const [preferredDueDay, setPreferredDueDay] = useState<10 | 20>(10);
+  const [unitRentedToTenant, setUnitRentedToTenant] = useState(false);
   const [street, setStreet] = useState('');
   const [addressNumber, setAddressNumber] = useState('');
   const [addressComplement, setAddressComplement] = useState('');
@@ -147,6 +149,7 @@ export default function Users({ navigation }: any) {
   const [filterCpf, setFilterCpf] = useState('');
   const [filterUnitTypeId, setFilterUnitTypeId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -193,6 +196,23 @@ export default function Users({ navigation }: any) {
       return matchesCondominium && matchesName && matchesCpf && matchesUnitType;
     });
   }, [filterCondominiumId, filterCpf, filterName, filterUnitTypeId, items]);
+
+  // Exporta exatamente quem está na lista filtrada na tela (mesmos filtros
+  // de condomínio, nome, CPF e tipologia já aplicados acima) — o CPF sai
+  // mascarado na planilha (LGPD), gerado pelo backend em GET /users/export.
+  const exportList = async () => {
+    if (!userToken || filteredItems.length === 0) return;
+    setExporting(true);
+    setError(null);
+    try {
+      const ids = filteredItems.map((item) => item.id).join(',');
+      await downloadAuthenticated(`/users/export?ids=${encodeURIComponent(ids)}`, userToken, 'pessoas.xlsx', { awaitCompletion: true });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Não foi possível exportar a lista.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Condomínio grande tem dezenas de apartamentos: a busca dentro do ComboBox
   // cobre bloco, número e tipologia (a tipologia vai em `description`).
@@ -315,6 +335,7 @@ export default function Users({ navigation }: any) {
           unitId: role === 'proprietario' || role === 'inquilino' ? unitId : undefined,
           billingExempt,
           preferredDueDay,
+          unitRentedToTenant: role === 'proprietario' ? unitRentedToTenant : undefined,
           street: street.trim() || null, addressNumber: addressNumber.trim() || null,
           addressComplement: addressComplement.trim() || null, neighborhood: neighborhood.trim() || null,
           city: city.trim() || null, state: addressState.trim().toUpperCase() || null,
@@ -334,6 +355,7 @@ export default function Users({ navigation }: any) {
       setUnitId('');
       setBillingExempt(false);
       setPreferredDueDay(10);
+      setUnitRentedToTenant(false);
       setUnitTypeId('');
       setStreet(''); setAddressNumber(''); setAddressComplement(''); setNeighborhood(''); setCity(''); setAddressState(''); setPostalCode('');
       setCondominiumId('');
@@ -437,6 +459,7 @@ export default function Users({ navigation }: any) {
     setUnitId(item.unit_id || '');
     setBillingExempt(Boolean(item.billing_exempt));
     setPreferredDueDay(item.preferred_due_day === 20 ? 20 : 10);
+    setUnitRentedToTenant(Boolean(item.unit_rented_to_tenant));
     setRole(item.role);
     setCondominiumId(item.condominium_id || '');
     setUnitTypeId(item.unit_type_id || '');
@@ -446,7 +469,7 @@ export default function Users({ navigation }: any) {
   };
 
   const cancelEditing = () => {
-    setEditingId(null); setUsername(''); setPassword(''); setFullName(''); setCpf(''); setEmail(''); setPhone(''); setUnit(''); setUnitId(''); setBillingExempt(false); setPreferredDueDay(10); setCondominiumId(''); setUnitTypeId('');
+    setEditingId(null); setUsername(''); setPassword(''); setFullName(''); setCpf(''); setEmail(''); setPhone(''); setUnit(''); setUnitId(''); setBillingExempt(false); setPreferredDueDay(10); setUnitRentedToTenant(false); setCondominiumId(''); setUnitTypeId('');
     setPersonProfiles([]); setNewProfileRole(''); setNewProfileUnitId(''); setProfilesError(null);
     setStreet(''); setAddressNumber(''); setAddressComplement(''); setNeighborhood(''); setCity(''); setAddressState(''); setPostalCode('');
     setRole('');
@@ -797,9 +820,14 @@ export default function Users({ navigation }: any) {
           <FormFieldFull>
             <View style={styles.condominiumPicker}>
               <Text style={styles.label}>Geração de boleto</Text>
-              <Pressable onPress={() => setBillingExempt((value) => !value)} style={[styles.representativeOption, billingExempt && styles.exemptOptionActive]}>
-                <Text style={[styles.roleText, billingExempt && styles.roleTextActive]}>{billingExempt ? '✓ Pessoa isenta de boleto' : 'Pessoa não isenta — gerar boletos normalmente'}</Text>
-              </Pressable>
+              <View style={styles.roleGrid}>
+                <Pressable onPress={() => setBillingExempt(false)} style={[styles.roleButton, !billingExempt && styles.roleButtonActive]}>
+                  <Text style={[styles.roleText, !billingExempt && styles.roleTextActive]}>Gerar boletos normalmente</Text>
+                </Pressable>
+                <Pressable onPress={() => setBillingExempt(true)} style={[styles.roleButton, billingExempt && styles.roleButtonActive]}>
+                  <Text style={[styles.roleText, billingExempt && styles.roleTextActive]}>Isento de boleto</Text>
+                </Pressable>
+              </View>
               <Text style={styles.fieldHint}>{billingExempt ? 'Esta pessoa não aparecerá para geração de boletos.' : 'A pessoa poderá receber cobranças conforme a tipologia da unidade.'}</Text>
               {!billingExempt ? <><Text style={styles.label}>Dia preferido para pagamento</Text><View style={styles.roleGrid}>{([10,20] as const).map(day=><Pressable key={day} onPress={()=>setPreferredDueDay(day)} style={[styles.roleButton,preferredDueDay===day&&styles.roleButtonActive]}><Text style={[styles.roleText,preferredDueDay===day&&styles.roleTextActive]}>Dia {day}</Text></Pressable>)}</View></> : null}
             </View>
@@ -821,6 +849,24 @@ export default function Users({ navigation }: any) {
                 />
               )}
               {unitId ? <Text style={styles.fieldHint}>Esta pessoa vai virar automaticamente a representante da unidade.</Text> : null}
+            </View>
+          </FormFieldFull>
+        ) : null}
+        {user?.role !== 'admin_geral' && role === 'proprietario' && unitId ? (
+          <FormFieldFull>
+            <View style={styles.condominiumPicker}>
+              <Text style={styles.label}>Quem mora de fato na unidade? (opcional)</Text>
+              <View style={styles.roleGrid}>
+                <Pressable onPress={() => setUnitRentedToTenant(false)} style={[styles.roleButton, !unitRentedToTenant && styles.roleButtonActive]}>
+                  <Text style={[styles.roleText, !unitRentedToTenant && styles.roleTextActive]}>O próprio proprietário</Text>
+                </Pressable>
+                <Pressable onPress={() => setUnitRentedToTenant(true)} style={[styles.roleButton, unitRentedToTenant && styles.roleButtonActive]}>
+                  <Text style={[styles.roleText, unitRentedToTenant && styles.roleTextActive]}>Um inquilino não cadastrado</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.fieldHint}>{unitRentedToTenant
+                ? 'Este proprietário é o responsável financeiro cadastrado, mas quem mora na unidade é um inquilino que não tem cadastro no sistema.'
+                : 'Informação só para fins estatísticos (Painel de usuários) — não afeta cobrança nem representação da unidade. Troque para "Um inquilino não cadastrado" quando o proprietário aluga a unidade a alguém de fora do sistema.'}</Text>
             </View>
           </FormFieldFull>
         ) : null}
@@ -970,7 +1016,14 @@ export default function Users({ navigation }: any) {
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>{viewingDeleted ? 'Excluídos logicamente' : user?.role === 'admin_geral' ? 'Gestores cadastrados' : 'Cadastrados'}</Text>
-        <Text style={styles.counter}>{filteredItems.length}/{items.length}</Text>
+        <View style={styles.sectionHeaderActions}>
+          <Text style={styles.counter}>{filteredItems.length}/{items.length}</Text>
+          {!viewingDeleted && filteredItems.length > 0 ? (
+            <Pressable onPress={exportList} disabled={exporting} style={styles.exportButton}>
+              <Text style={styles.exportButtonText}>{exporting ? 'Gerando...' : '↓ Exportar lista'}</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
 
       {filteredItems.length === 0 ? (
@@ -988,6 +1041,7 @@ export default function Users({ navigation }: any) {
               {user?.role === 'admin_geral' ? <Text style={styles.cardCondominium}>{condominiumName(item.condominium_id)}</Text> : null}
               <Text style={styles.cardLine}>Unidade: {item.unit || 'nao informada'}</Text>
               {item.billing_exempt ? <Text style={styles.exemptBadge}>Isento de boleto</Text> : null}
+              {item.role === 'proprietario' && item.unit_rented_to_tenant ? <Text style={styles.exemptBadge}>Unidade alugada a terceiros</Text> : null}
               {!item.billing_exempt ? <Text style={styles.cardLine}>Vencimento preferido: dia {item.preferred_due_day || 10}</Text> : null}
               {item.unit_type_name ? <Text style={styles.cardLine}>Tipologia: {item.unit_type_name} · {formatCurrency(item.condominium_fee_cents || 0)}</Text> : null}
               <Text style={styles.cardLine}>
@@ -1124,14 +1178,15 @@ const styles = StyleSheet.create({
   roleButtonActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   roleText: { color: colors.muted, fontWeight: '800' },
   roleTextActive: { color: '#fff' },
-  representativeOption: { minHeight: 42, borderRadius: 8, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff', marginTop: 4 },
-  exemptOptionActive: { backgroundColor: colors.amber, borderColor: colors.amber },
   exemptBadge: { alignSelf: 'flex-start', color: colors.amber, backgroundColor: '#fff8e8', borderRadius: 8, overflow: 'hidden', paddingHorizontal: 8, paddingVertical: 4, marginTop: 6, fontSize: 14, fontWeight: '900' },
   error: { color: colors.red, marginBottom: 10 },
   success: { color: colors.green, marginBottom: 10, fontWeight: '800' },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 24, marginBottom: 10 },
+  sectionHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   sectionTitle: { color: colors.ink, fontSize: 19, fontWeight: '900' },
   counter: { color: colors.primary, fontWeight: '900' },
+  exportButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: colors.softBlue },
+  exportButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 12.5 },
   filterPanel: { borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, padding: 16, marginBottom: 14 },
   tabRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   tabButton: { minHeight: 40, paddingHorizontal: 16, borderRadius: 8, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },

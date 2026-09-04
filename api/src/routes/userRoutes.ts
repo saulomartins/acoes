@@ -1,4 +1,5 @@
 import bcrypt from 'bcrypt';
+import ExcelJS from 'exceljs';
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
@@ -28,7 +29,7 @@ router.get('/', asyncHandler(async (req, res) => {
 
   const result = await query(
     `select users.id, users.username, users.full_name, users.cpf, users.email, users.phone, users.role,
-            users.condominium_id, users.unit_id, coalesce(blocks.name || ' / ' || units.number, users.unit) as unit, units.unit_type_id, users.billing_exempt, users.preferred_due_day, users.created_at,
+            users.condominium_id, users.unit_id, coalesce(blocks.name || ' / ' || units.number, users.unit) as unit, units.unit_type_id, users.billing_exempt, users.preferred_due_day, users.unit_rented_to_tenant, users.created_at,
             users.street, users.address_number, users.address_complement, users.neighborhood, users.city, users.state, users.postal_code, users.deleted_at,
             unit_types.name as unit_type_name, unit_types.fee_cents as condominium_fee_cents,
             exists(select 1 from unit_occupancies uo where uo.user_id=users.id and uo.unit_id=users.unit_id and uo.ended_at is null and uo.is_representative=true) as is_unit_representative
@@ -46,9 +47,67 @@ router.get('/', asyncHandler(async (req, res) => {
   return res.json({ users: result.rows });
 }));
 
+// Mascara o CPF/CNPJ para exposição fora do sistema (planilha exportada) —
+// exigência de LGPD: mantém só os dígitos das pontas, o suficiente para
+// conferência visual, sem expor o documento completo.
+const maskDocument = (raw: string | null) => {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length === 11) return `${digits.slice(0, 3)}.***.***-${digits.slice(9)}`;
+  if (digits.length === 14) return `${digits.slice(0, 2)}.***.***/****-${digits.slice(12)}`;
+  return 'Não informado';
+};
+
+// Planilha de Pessoas para o gestor levar a informação para fora do sistema
+// (ex.: assembleia, prestação de contas) sem expor o CPF completo. `ids`
+// vem da lista já filtrada na tela — exporta exatamente o que está visível
+// ali, e a query abaixo ainda restringe ao condomínio/papéis que este
+// usuário pode enxergar, como defesa em profundidade.
+router.get('/export', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
+  const ids = String(req.query.ids || '').split(',').map((value) => value.trim()).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ message: 'Nenhuma pessoa selecionada para exportar.' });
+
+  const condominiumId = req.user?.role === 'admin_geral' ? null : req.user?.condominiumId;
+  const result = await query<{ full_name: string | null; username: string; cpf: string | null; unit: string | null }>(
+    `select users.full_name, users.username, users.cpf,
+            coalesce(blocks.name || ' / ' || units.number, users.unit) as unit
+     from users
+     left join units on units.id = users.unit_id
+     left join blocks on blocks.id = units.block_id
+     where users.id = any($1::uuid[])
+       and ($2::uuid is null or users.condominium_id = $2)
+       and ($3::boolean = false or users.role in ('sindico','subsindico'))
+       and users.deleted_at is null
+     order by users.full_name nulls last, users.username`,
+    [ids, condominiumId || null, req.user?.role === 'admin_geral'],
+  );
+
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Pessoas');
+  sheet.columns = [
+    { header: 'Nome completo', key: 'fullName', width: 32 },
+    { header: 'Usuário de acesso', key: 'username', width: 22 },
+    { header: 'CPF', key: 'cpf', width: 18 },
+    { header: 'Unidade / apartamento', key: 'unit', width: 26 },
+  ];
+  for (const row of result.rows) {
+    sheet.addRow({
+      fullName: row.full_name || row.username,
+      username: row.username,
+      cpf: maskDocument(row.cpf),
+      unit: row.unit || 'Não informado',
+    });
+  }
+  sheet.getRow(1).font = { bold: true };
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="pessoas.xlsx"');
+  return res.send(Buffer.from(buffer));
+}));
+
 router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
   const { username, password, role, condominiumId, fullName, cpf, email, phone, unitId, billingExempt, preferredDueDay,
-    street, addressNumber, addressComplement, neighborhood, city, state, postalCode } = req.body ?? {};
+    unitRentedToTenant, street, addressNumber, addressComplement, neighborhood, city, state, postalCode } = req.body ?? {};
 
   const isResident = role === 'proprietario' || role === 'inquilino';
 
@@ -89,7 +148,10 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
     return res.status(400).json({ message: 'Informe o CPF — ele é necessário para gerar a senha inicial.' });
   }
 
-  const existingUsername = await query(`select id from users where lower(username) = $1`, [normalizedUsername]);
+  // unaccent(): "joao" e "joão" devem ser tratados como o mesmo usuário de
+  // acesso — impede criar uma segunda conta que colidiria no login (ver
+  // login() em authService.ts).
+  const existingUsername = await query(`select id from users where unaccent(lower(username)) = unaccent($1)`, [normalizedUsername]);
   if (existingUsername.rows[0]) {
     return res.status(409).json({ message: 'Usuário de acesso já cadastrado. Escolha outro nome de usuário.' });
   }
@@ -113,10 +175,10 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
   const initialPassword = plainPassword;
   const passwordHash = await bcrypt.hash(plainPassword, 10);
   const result = await query(
-    `insert into users (id, username, password_hash, role, condominium_id, full_name, cpf, email, phone, unit, unit_id, billing_exempt, preferred_due_day,
+    `insert into users (id, username, password_hash, role, condominium_id, full_name, cpf, email, phone, unit, unit_id, billing_exempt, preferred_due_day, unit_rented_to_tenant,
        street, address_number, address_complement, neighborhood, city, state, postal_code, must_change_password)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
-     returning id, username, full_name, cpf, email, phone, role, condominium_id, unit, unit_id, billing_exempt, preferred_due_day, created_at`,
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+     returning id, username, full_name, cpf, email, phone, role, condominium_id, unit, unit_id, billing_exempt, preferred_due_day, unit_rented_to_tenant, created_at`,
     [
       randomUUID(),
       normalizedUsername,
@@ -131,6 +193,7 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
       unitId || null,
       Boolean(billingExempt),
       Number(preferredDueDay) === 20 ? 20 : 10,
+      role === 'proprietario' && Boolean(unitRentedToTenant),
       street || null, addressNumber || null, addressComplement || null, neighborhood || null,
       city || null, state ? String(state).trim().toUpperCase() : null,
       postalCode ? String(postalCode).replace(/\D/g, '') : null,
@@ -161,7 +224,7 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
 
 router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
   const { username, password, role, condominiumId, fullName, cpf, email, phone, unitId, billingExempt, preferredDueDay,
-    street, addressNumber, addressComplement, neighborhood, city, state, postalCode } = req.body ?? {};
+    unitRentedToTenant, street, addressNumber, addressComplement, neighborhood, city, state, postalCode } = req.body ?? {};
   const current = await query<{ id: string; role: UserRole; condominium_id: string | null; unit_id:string|null }>(
     `select id, role, condominium_id, unit_id from users where id = $1`, [req.params.id],
   );
@@ -195,7 +258,7 @@ router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), requireF
   if (!normalizedUsername) return res.status(400).json({ message: 'Usuário de acesso é obrigatório.' });
   if (cpfDigits && ![11, 14].includes(cpfDigits.length)) return res.status(400).json({ message: 'CPF deve ter 11 dígitos ou CNPJ deve ter 14 dígitos.' });
 
-  const usernameConflict = await query(`select id from users where lower(username) = $1 and id <> $2`, [normalizedUsername, req.params.id]);
+  const usernameConflict = await query(`select id from users where unaccent(lower(username)) = unaccent($1) and id <> $2`, [normalizedUsername, req.params.id]);
   if (usernameConflict.rows[0]) return res.status(409).json({ message: 'Usuário de acesso já cadastrado para outra pessoa.' });
   if (cpfDigits && unitId) {
     const cpfConflict = await query(`select id from users where regexp_replace(coalesce(cpf, ''), '[^0-9]', '', 'g') = $1 and unit_id=$2 and id <> $3`, [cpfDigits, unitId, req.params.id]);
@@ -210,14 +273,16 @@ router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), requireF
 
   const result = await query(
     `update users set username = $1, role = $2,
-       condominium_id = $3, full_name = $4, cpf = $5, email = $6, phone = $7, unit = $8, unit_id=$9, unit_type_id = null, billing_exempt=$10, preferred_due_day=$11,
-       street = $12, address_number = $13, address_complement = $14, neighborhood = $15,
-       city = $16, state = $17, postal_code = $18,
+       condominium_id = $3, full_name = $4, cpf = $5, email = $6, phone = $7, unit = $8, unit_id=$9, unit_type_id = null, billing_exempt=$10, preferred_due_day=$11, unit_rented_to_tenant=$12,
+       street = $13, address_number = $14, address_complement = $15, neighborhood = $16,
+       city = $17, state = $18, postal_code = $19,
        login_enabled = case when deleted_at is null then true else login_enabled end
-     where id = $19
-     returning id, username, full_name, cpf, email, phone, role, condominium_id, unit, unit_id, billing_exempt, preferred_due_day, created_at`,
+     where id = $20
+     returning id, username, full_name, cpf, email, phone, role, condominium_id, unit, unit_id, billing_exempt, preferred_due_day, unit_rented_to_tenant, created_at`,
     [normalizedUsername, nextRole, targetCondominiumId, fullName || null, cpfDigits, email || null, phoneDigits,
-      selectedUnit?.rows[0]?.number || null, unitId || null, Boolean(billingExempt), Number(preferredDueDay) === 20 ? 20 : 10, street || null, addressNumber || null, addressComplement || null,
+      selectedUnit?.rows[0]?.number || null, unitId || null, Boolean(billingExempt), Number(preferredDueDay) === 20 ? 20 : 10,
+      nextRole === 'proprietario' && Boolean(unitRentedToTenant),
+      street || null, addressNumber || null, addressComplement || null,
       neighborhood || null, city || null, state ? String(state).trim().toUpperCase() : null,
       postalCode ? String(postalCode).replace(/\D/g, '') : null, req.params.id],
   );

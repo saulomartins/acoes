@@ -64,11 +64,22 @@ const EFFECTIVE_ROLE = `(case
 end)`;
 const MONITORS_ELSEWHERE = `exists (select 1 from unit_ownerships oo where oo.owner_user_id=u.id and oo.ended_at is null and oo.unit_id is distinct from u.unit_id)`;
 
+// Quem mora de fato na unidade x quem é o responsável financeiro cadastrado:
+// para role='inquilino' os dois já coincidem (o inquilino cadastrado é quem
+// mora e paga). Para role='proprietario' pode divergir quando o dono aluga a
+// unidade a um terceiro não cadastrado (users.unit_rented_to_tenant, ver
+// schema.sql) — nesse caso o proprietário cadastrado não mora lá, e o
+// morador real (o locatário) não tem cadastro próprio no sistema.
+const OWNER_UNIT_RENTED = `${EFFECTIVE_ROLE}='proprietario' and u.unit_rented_to_tenant`;
+const OWNER_RESIDING = `${EFFECTIVE_ROLE}='proprietario' and not u.unit_rented_to_tenant`;
+const REAL_TENANT_RESIDENT = `(${EFFECTIVE_ROLE}='inquilino' or (${OWNER_UNIT_RENTED}))`;
+
 router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('painel_usuarios'), asyncHandler(async (req, res) => {
   const condominiumId = req.user?.role === 'admin_geral' ? (String(req.query.condominiumId || '') || null) : req.user?.condominiumId;
   const result = await query<{
     condominium_id: string; name: string; registered_users: number; active_users: number;
     registered_owners: number; registered_tenants: number;
+    real_tenant_residents: number; owner_residents: number;
     monitor_only_owners: number; sindico: Array<{ id: string; fullName: string }>; subsindico: Array<{ id: string; fullName: string }>;
     total_units: number; units_with_resident: number;
   }>(
@@ -77,6 +88,8 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
        count(*) filter (where u.deleted_at is null and u.login_enabled)::int as active_users,
        count(*) filter (where u.deleted_at is null and ${EFFECTIVE_ROLE}='proprietario')::int as registered_owners,
        count(*) filter (where u.deleted_at is null and ${EFFECTIVE_ROLE}='inquilino')::int as registered_tenants,
+       count(*) filter (where u.deleted_at is null and ${REAL_TENANT_RESIDENT})::int as real_tenant_residents,
+       count(*) filter (where u.deleted_at is null and ${OWNER_RESIDING})::int as owner_residents,
        count(*) filter (where u.deleted_at is null and ${EFFECTIVE_ROLE}='proprietario' and ${MONITORS_ELSEWHERE})::int as monitor_only_owners,
        coalesce(jsonb_agg(distinct jsonb_build_object('id',u.id,'fullName',coalesce(u.full_name,u.username))) filter (where u.deleted_at is null and ${EFFECTIVE_ROLE}='sindico'), '[]'::jsonb) as sindico,
        coalesce(jsonb_agg(distinct jsonb_build_object('id',u.id,'fullName',coalesce(u.full_name,u.username))) filter (where u.deleted_at is null and ${EFFECTIVE_ROLE}='subsindico'), '[]'::jsonb) as subsindico,
@@ -99,6 +112,8 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
       inactiveUsers: row.registered_users - row.active_users,
       registeredOwners: row.registered_owners,
       registeredTenants: row.registered_tenants,
+      realTenantResidents: row.real_tenant_residents,
+      ownerResidents: row.owner_residents,
       ownersMonitoringElsewhere: row.monitor_only_owners,
       sindico: row.sindico,
       subsindico: row.subsindico,
@@ -109,13 +124,15 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
   });
 }));
 
-type UserStatsBucket = 'registered' | 'active' | 'inactive' | 'registered_owners' | 'registered_tenants' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
+type UserStatsBucket = 'registered' | 'active' | 'inactive' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
 const USER_STATS_BUCKET_WHERE: Record<UserStatsBucket, string> = {
   registered: `u.deleted_at is null`,
   active: `u.deleted_at is null and u.login_enabled`,
   inactive: `u.deleted_at is null and not u.login_enabled`,
   registered_owners: `u.deleted_at is null and ${EFFECTIVE_ROLE}='proprietario'`,
   registered_tenants: `u.deleted_at is null and ${EFFECTIVE_ROLE}='inquilino'`,
+  real_tenant_residents: `u.deleted_at is null and ${REAL_TENANT_RESIDENT}`,
+  owner_residents: `u.deleted_at is null and ${OWNER_RESIDING}`,
   owners_monitoring_elsewhere: `u.deleted_at is null and ${EFFECTIVE_ROLE}='proprietario' and ${MONITORS_ELSEWHERE}`,
   sindico: `u.deleted_at is null and ${EFFECTIVE_ROLE}='sindico'`,
   subsindico: `u.deleted_at is null and ${EFFECTIVE_ROLE}='subsindico'`,
