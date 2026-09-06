@@ -687,3 +687,109 @@ mas com o código de antes do trial expirar, sem as mudanças pendentes).
   aparelho/emulador Android): instalação do APK, abertura sem crash, login
   e uma chamada autenticada, e conferência visual de versão/ícone. Validar
   antes de divulgar amplamente a nova versão aos moradores.
+
+## Publicação de 18/08/2026 — incidente: passo 3 (migração) pulado, menu vazio para todo mundo
+
+Commit publicado: `8c4f03e` (Conselho Fiscal e homologação da prestação de
+contas, Android 1.3.2 build 25). API e web foram publicados, mas o passo 3
+deste runbook (aplicar `schema.sql` dentro do container) não foi executado
+depois do `railway up` — não há evidência de que tenha rodado nesta sessão,
+e o container ficou sem a coluna nova.
+
+Sintoma reportado pelo usuário: tanto a web quanto o app abriam em "Início"
+mostrando só "Início" e "Instalar aplicativo" no menu — "Acesso rápido"
+vazio, nenhum módulo (Painel, Pessoas, Boletos, Prestação de contas etc.)
+para um usuário Subsíndico que antes via o menu completo.
+
+Causa raiz: `api/src/services/featureCatalog.ts` adicionou a chave
+`conselho_fiscal` a `FEATURE_KEYS`, e `GET /auth/me`
+(`api/src/routes/authRoutes.ts`) monta a query de features com
+`` `select ${FEATURE_KEYS.join(', ')} from condominium_features ...` ``. Sem
+a coluna nova na tabela, todo `SELECT` falhava com
+`column "conselho_fiscal" does not exist` — confirmado nos logs do Railway
+(`Unhandled API error`, `routine: 'errorMissingColumn'`). A rota devolvia
+erro, e `mobile/src/context/AuthContext.tsx:287` trata qualquer falha de
+`/auth/me` fazendo fallback para `condominiumFeatures = {}`. Como
+`Home.tsx` e `ResponsiveShell.tsx` só mostram um item de menu quando ele não
+tem `feature` ou quando `condominiumFeatures[feature] === true`, um objeto
+vazio esconde literalmente tudo que depende de feature — não só em
+Templum, em **qualquer condomínio**, web e app, porque os dois consomem a
+mesma API.
+
+Diagnóstico feito com consultas somente leitura via
+`railway ssh --service acoes --environment production` (script node
+temporário usando o `pg` já presente em `/app/node_modules`, apagado depois
+de usado): confirmou `condominium_features` sem a coluna `conselho_fiscal`
+e os logs reproduzindo o erro em tempo real.
+
+Correção aplicada, com autorização do usuário: rodar o passo 3 já descrito
+neste runbook —
+
+```powershell
+& "$env:APPDATA\npm\railway.cmd" ssh --service acoes --environment production `
+  "mkdir -p dist/db && cp src/db/schema.sql dist/db/schema.sql && node dist/scripts/setupDatabase.js"
+```
+
+Resultado: `Schema applied successfully`. Reconferido depois: a coluna
+`conselho_fiscal` existe (`false` por padrão, como esperado — feature
+opcional, desligada até o admin_geral ativar) e a mesma query que a API usa
+roda sem erro.
+
+**Lição para publicações futuras**: quando o commit mexe em
+`api/src/db/schema.sql`, o passo 3 (migração) não é opcional mesmo que a
+mudança pareça pequena — uma única coluna faltando derruba o menu inteiro
+do app pra todo usuário, não só quem usa a feature nova. Vale considerar
+uma checagem automática pós-deploy (smoke test que loga com um usuário
+sindico/subsindico real e confere se `condominiumFeatures` voltou não-vazio)
+em vez de depender de execução manual do passo 3.
+
+## Publicação de 04/09/2026 — correção: "invalid or expired token" na tela de Termos de Uso
+
+Sintoma reportado pelo usuário (clientes reclamando): a tela "Primeiro
+Acesso — Leia e aceite os Termos de Uso" (web, `gestaolaremdia.com`) exibia
+"invalid or expired token" acima do botão "Aceitar e continuar", bloqueando
+o primeiro acesso.
+
+Causa raiz: `mobile/src/context/AuthContext.tsx` fazia sua própria chamada
+não protegida a `/auth/refresh` no efeito de montagem do `AuthProvider` (todo
+carregamento/reload do app), em paralelo com a renovação já protegida por
+mutex em `mobile/src/api/client.ts` (usada no retry automático de 401 de
+telas em polling — notificações, tour, features). Quando as duas disparavam
+ao mesmo tempo com o mesmo refresh token, o backend
+(`api/src/services/authService.ts:134-141`, `validateRefreshSession`) trata
+isso como reuso indevido (sinal de token vazado) e revoga **todas** as
+sessões do usuário. Dali em diante o access token falha em
+`api/src/middleware/auth.ts:16-21` sem conseguir se renovar, e a mensagem
+crua `invalid or expired token` chega à tela — de forma permanente, até
+logout/login completo.
+
+Correção: unificado o ponto de renovação em `client.ts` (`refreshSession()`,
+exportado, único dono do mutex `refreshInFlight`); `AuthContext.tsx` passou a
+chamar essa mesma função em vez de manter sua própria implementação
+duplicada e sem proteção. Nenhuma mudança de backend foi necessária — a
+detecção de reuso em si é uma proteção legítima contra roubo de token; o bug
+era a corrida no cliente.
+
+Sem mudança em `api/src/db/schema.sql` — passo 3 (migração) deliberadamente
+pulado.
+
+- Web: build local (`npm run build:web` com
+  `EXPO_PUBLIC_API_URL=https://acoes-production.up.railway.app`), conferido
+  antes de publicar: bundle contém `acoes-production.up.railway.app`, zero
+  ocorrências de `localhost:3000`. Deployment Cloudflare
+  `bff40b49.lar-em-dia.pages.dev`; domínio `gestaolaremdia.com` HTTP 200
+  servindo o mesmo bundle (`AppEntry-df1de9c79ddf758f048653c02d7fea6d.js`).
+- API: não republicada — só código do app mudou.
+- Smoke test: `POST /auth/login` em produção com usuário inexistente
+  devolveu HTTP 401 (não 500) e
+  `access-control-allow-origin: https://gestaolaremdia.com`.
+- Publicado a partir da working tree, ainda não commitado no momento deste
+  registro (aguardando confirmação do usuário para commit/push).
+- **Usuários já afetados antes desta correção não são recuperados
+  automaticamente** — a sessão deles já foi revogada no banco pelo backend.
+  Precisam de um logout/login completo (o próprio botão "Não aceito — sair
+  da conta" já resolve).
+- Android: mesma classe de bug existe no app nativo (mesmo
+  `AuthContext.tsx`), mas não foi o caminho reportado (o print era do
+  navegador). Nenhum APK novo publicado nesta revisão — pendente de decisão
+  do usuário sobre gerar um build `production-apk` com a mesma correção.

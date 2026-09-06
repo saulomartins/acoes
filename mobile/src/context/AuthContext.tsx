@@ -1,7 +1,7 @@
 import React, { createContext, ReactNode, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { API_BASE_URL } from '../api/client';
+import { API_BASE_URL, refreshSession } from '../api/client';
 import { registerForPushNotifications, unregisterPushNotifications } from '../services/pushNotifications';
 
 type UserRole = 'admin_geral' | 'sindico' | 'subsindico' | 'proprietario' | 'inquilino';
@@ -134,21 +134,6 @@ const requestAuth = async (path: '/auth/login' | '/auth/register', username: str
   return data;
 };
 
-const refreshAuth = async (refreshToken: string) => {
-  const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
-  });
-
-  const data = (await response.json().catch(() => null)) as AuthResponse | null;
-  if (!response.ok || !data?.token || !data.user) {
-    throw new Error('Sessao expirada');
-  }
-
-  return data;
-};
-
 const fetchProfiles = async (token: string): Promise<Profile[]> => {
   const response = await fetch(`${API_BASE_URL}/auth/profiles`, { headers: { Authorization: `Bearer ${token}` } });
   if (!response.ok) return [];
@@ -213,11 +198,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         if (refreshToken) {
           try {
-            const response = await refreshAuth(refreshToken);
-            await saveAuth(response);
-            setUserToken(response.token);
-            setUser(response.user);
-            return;
+            // Compartilha o mutex de renovação com api/client.ts: se uma tela
+            // já disparou uma renovação (401 em polling), esta chamada espera
+            // o mesmo resultado em vez de reapresentar o refresh token antigo
+            // em paralelo — evitar essa corrida é o que impede o backend de
+            // interpretar como reuso indevido e revogar todas as sessões.
+            const result = await refreshSession();
+            if (result?.user) {
+              setUserToken(result.token);
+              setUser(result.user as AuthUser);
+              return;
+            }
           } catch (error) {
             // Se estiver offline, mantém a sessão já armazenada no aparelho.
             console.warn('Could not refresh auth session', error);

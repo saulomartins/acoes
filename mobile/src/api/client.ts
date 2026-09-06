@@ -30,16 +30,17 @@ const authStorage = {
   },
 };
 
-// Várias telas fazem polling em paralelo (notificações, tour, features...);
-// se o access token já expirou, todas podem levar 401 ao mesmo tempo e cada
-// uma tentaria renovar com o mesmo refresh token. O backend trata um refresh
-// token reutilizado (já rotacionado por uma chamada concorrente) como reuso
-// indevido e revoga todas as sessões do usuário — por isso as chamadas
-// concorrentes precisam compartilhar a mesma renovação em vez de disparar
-// várias em paralelo.
-let refreshInFlight: Promise<string | null> | null = null;
+// Várias telas fazem polling em paralelo (notificações, tour, features...) e
+// o AuthProvider também renova a sessão ao montar o app; se o access token já
+// expirou, todos esses pontos podem tentar renovar ao mesmo tempo com o mesmo
+// refresh token. O backend trata um refresh token reutilizado (já rotacionado
+// por uma chamada concorrente) como reuso indevido e revoga TODAS as sessões
+// do usuário — por isso é essencial que exista um único ponto de renovação
+// (este módulo) compartilhado por qualquer chamador, em vez de cada um disparar
+// sua própria requisição a /auth/refresh.
+let refreshInFlight: Promise<{ token: string; user?: unknown } | null> | null = null;
 
-const refreshAccessToken = async () => {
+export const refreshSession = async () => {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     const refreshToken = await authStorage.get('refreshToken');
@@ -56,7 +57,7 @@ const refreshAccessToken = async () => {
     await authStorage.set('userToken', data.token);
     if (data.refreshToken) await authStorage.set('refreshToken', data.refreshToken);
     if (data.user) await authStorage.set('authUser', JSON.stringify(data.user));
-    return data.token;
+    return { token: data.token, user: data.user };
   })();
   try {
     return await refreshInFlight;
@@ -64,6 +65,8 @@ const refreshAccessToken = async () => {
     refreshInFlight = null;
   }
 };
+
+const refreshAccessToken = async () => (await refreshSession())?.token ?? null;
 
 export const apiRequest = async <T>(
   path: string,
