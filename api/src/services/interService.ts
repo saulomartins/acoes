@@ -21,6 +21,22 @@ type BoletoInput = {
   payerState: string;
   payerPostalCode: string;
   payerUnit?: string | null;
+  // Sem multa/mora/desconto aqui, o Inter registra a cobrança isenta e o
+  // boleto/Pix nunca refletem juros e multa por atraso, nem desconto
+  // antecipado — o valor cobrado no banco fica sempre igual a amountCents,
+  // não importa o quão atrasado. `fineValue`/`interestValue`/`discountValue`
+  // usam a mesma convenção de billing_settings: número já em % para
+  // PERCENT/PERCENT_MONTH, já em reais para FIXED (mesmas unidades de
+  // services/lateFeeService.ts calculateLateFee). interestType 'FIXED' não
+  // tem equivalente na API do Inter (mora lá é sempre uma taxa que acumula
+  // por mês ou por dia, nunca um valor único) — fica isento nesse caso.
+  fineType?: 'NONE' | 'PERCENT' | 'FIXED';
+  fineValue?: number;
+  interestType?: 'NONE' | 'PERCENT_MONTH' | 'FIXED';
+  interestValue?: number;
+  discountType?: 'NONE' | 'PERCENT' | 'FIXED';
+  discountValue?: number;
+  discountDays?: number;
 };
 
 export type InterIntegrationConfig = {
@@ -259,6 +275,19 @@ export const createInterBoleto = async (input: BoletoInput, integration?: InterI
 
   const phone = (input.payerPhone || '').replace(/\D/g, '');
   const seuNumero = randomUUID().replace(/-/g, '').slice(0, 15);
+  // codigo/taxa/valor conferidos contra a documentação pública da API
+  // Cobrança v3 do Inter (exemplo de payload/resposta real). Omitir o campo
+  // inteiro (em vez de mandar algo tipo "ISENTO") é a forma documentada de
+  // dizer "sem multa/mora/desconto" — mesmo comportamento de hoje quando
+  // fineType/interestType/discountType é 'NONE'.
+  const multa = input.fineType === 'PERCENT' ? { codigo: 'PERCENTUAL', taxa: input.fineValue }
+    : input.fineType === 'FIXED' ? { codigo: 'VALORFIXO', valor: input.fineValue }
+    : null;
+  const mora = input.interestType === 'PERCENT_MONTH' ? { codigo: 'TAXAMENSAL', taxa: input.interestValue }
+    : null;
+  const descontos = input.discountType === 'PERCENT' ? [{ codigo: 'PERCENTUALDATAINFORMADA', quantidadeDias: input.discountDays ?? 0, taxa: input.discountValue }]
+    : input.discountType === 'FIXED' ? [{ codigo: 'VALORFIXODATAINFORMADA', quantidadeDias: input.discountDays ?? 0, valor: input.discountValue }]
+    : null;
   const response = await interRequest<{ codigoSolicitacao: string }>(integration as InterIntegrationConfig, '/cobranca/v3/cobrancas', {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -283,6 +312,9 @@ export const createInterBoleto = async (input: BoletoInput, integration?: InterI
       },
       mensagem: { linha1: input.description.slice(0, 78) },
       formasRecebimento: ['BOLETO', 'PIX'],
+      ...(multa ? { multa } : {}),
+      ...(mora ? { mora } : {}),
+      ...(descontos ? { descontos } : {}),
     }),
   });
 

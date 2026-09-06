@@ -9,6 +9,7 @@ import ExcelJS from 'exceljs';
 import bcrypt from 'bcrypt';
 import { Readable } from 'stream';
 import { createInterBoleto } from '../services/interService';
+import { getBillingRules } from '../services/lateFeeService';
 import { createBillingTemplateWorkbook } from '../services/billingTemplateService';
 import { getInterIntegration } from './invoiceRoutes';
 import { notifyNewInvoice } from '../services/invoiceReminderService';
@@ -550,6 +551,7 @@ router.post('/batches/:id/issue', asyncHandler(async (req,res)=>{
   const feeSettings=await query<{condo_fee_percent:number|null;improvement_fee_percent:number|null}>(`select condo_fee_percent,improvement_fee_percent from billing_settings where condominium_id=$1`,[condominiumId]);
   const condoFeePercent=Number(feeSettings.rows[0]?.condo_fee_percent||0);
   const improvementFeePercent=Number(feeSettings.rows[0]?.improvement_fee_percent||0);
+  const billingRules=await getBillingRules(condominiumId!);
   const items=await query<any>(
     `select bi.*,u.full_name,u.username,u.cpf,u.email,u.phone,u.street,u.address_number,u.address_complement,u.neighborhood,u.city,u.state,u.postal_code,u.unit,un.id unit_id,
             ut.name unit_type_name,ut.fee_cents
@@ -608,7 +610,7 @@ router.post('/batches/:id/issue', asyncHandler(async (req,res)=>{
         consumption?.descriptions.length?`${consumption.descriptions.join('/')}:${moneyBRL(consumption.sumCents)}`:null,
       ].filter((part):part is string=>Boolean(part)):[];
       const description=[baseDescription,...breakdownParts].filter(Boolean).join('+')||'Taxa condominial';
-      const boleto=await createInterBoleto({payerName:item.full_name,payerDocument:item.cpf,amountCents,dueDate,description,payerEmail:item.email,payerPhone:item.phone,payerStreet:item.street,payerNumber:item.address_number,payerComplement:item.address_complement,payerNeighborhood:item.neighborhood,payerCity:item.city,payerState:item.state,payerPostalCode:item.postal_code,payerUnit:item.unit},integration);
+      const boleto=await createInterBoleto({payerName:item.full_name,payerDocument:item.cpf,amountCents,dueDate,description,payerEmail:item.email,payerPhone:item.phone,payerStreet:item.street,payerNumber:item.address_number,payerComplement:item.address_complement,payerNeighborhood:item.neighborhood,payerCity:item.city,payerState:item.state,payerPostalCode:item.postal_code,payerUnit:item.unit,fineType:billingRules.fineType,fineValue:billingRules.fineValue,interestType:billingRules.interestType,interestValue:billingRules.interestValue,discountType:billingRules.discountType,discountValue:billingRules.discountValue,discountDays:billingRules.discountDays},integration);
       const invoice=await query<any>(`insert into invoices(id,condominium_id,user_id,amount_cents,due_date,reference_month,batch_id,status,provider,external_id,digitable_line,pdf_url,condo_fee_percent,condo_fee_cents,improvement_fee_percent,improvement_fee_cents,condo_base_fee_cents) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) returning id`,[randomUUID(),condominiumId,item.user_id,amountCents,item.due_date,batch.reference_month,batch.id,boleto.status==='issued'?'issued':'pending_provider',boleto.provider,boleto.externalId,boleto.digitableLine,boleto.pdfUrl,condoFeeCents!==null?condoFeePercent:null,condoFeeCents,improvementFeeCents!==null?improvementFeePercent:null,improvementFeeCents,condoBaseFeeCents]);
       await query(`update billing_batch_items set status='issued',invoice_id=$1,amount_cents=$2,issues='[]'::jsonb where id=$3`,[invoice.rows[0].id,amountCents,item.id]);
       await query(`update inter_issuance_guards set invoice_id=$1,reservation_key=null where payer_cpf=$2 and reservation_key=$3`,[invoice.rows[0].id,payerCpf,reservationKey]);

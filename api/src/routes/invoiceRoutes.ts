@@ -12,6 +12,7 @@ import { sendPushNotification } from '../services/notificationService';
 import { notifyNewInvoice, transitionOverdueInvoices } from '../services/invoiceReminderService';
 import { logAudit } from '../services/auditService';
 import { getRepresentedUnitIds } from '../services/unitOwnershipService';
+import { getBillingRules } from '../services/lateFeeService';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -649,6 +650,7 @@ router.post('/', authorize('sindico', 'subsindico'), asyncHandler(async (req, re
   }
 
   const integration = await getInterIntegration(targetCondominiumId);
+  const billingRules = await getBillingRules(targetCondominiumId);
   const boleto = await createInterBoleto(
     {
       payerName: payer.full_name || payer.username,
@@ -666,6 +668,13 @@ router.post('/', authorize('sindico', 'subsindico'), asyncHandler(async (req, re
       payerState: payer.state,
       payerPostalCode: payer.postal_code,
       payerUnit: payer.unit,
+      fineType: billingRules.fineType,
+      fineValue: billingRules.fineValue,
+      interestType: billingRules.interestType,
+      interestValue: billingRules.interestValue,
+      discountType: billingRules.discountType,
+      discountValue: billingRules.discountValue,
+      discountDays: billingRules.discountDays,
     },
     integration,
   );
