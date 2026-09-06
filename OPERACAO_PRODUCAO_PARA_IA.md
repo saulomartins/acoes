@@ -793,3 +793,114 @@ pulado.
   `AuthContext.tsx`), mas não foi o caminho reportado (o print era do
   navegador). Nenhum APK novo publicado nesta revisão — pendente de decisão
   do usuário sobre gerar um build `production-apk` com a mesma correção.
+- **Atualização de 06/09/2026**: o commit e o APK Android pendentes acima
+  foram concluídos — ver seção seguinte. Se um usuário reportar esse mesmo
+  sintoma de novo, **não repita o diagnóstico do zero**: primeiro use a
+  ferramenta **Suporte** (só `admin_geral`, tela "Suporte" no app > "Forçar
+  logout") em vez de SQL manual — ver seção "Publicação de 06/09/2026"
+  abaixo.
+
+## Publicação de 06/09/2026 — cobrança com dois moradores por unidade, visibilidade de boleto para o representante, e conclusão da correção de 04/09
+
+### Responsável financeiro por unidade (inquilino paga, boleto do proprietário)
+
+Caso de uso: unidade alugada onde o inquilino acessa o app e paga o boleto,
+mas o titular perante o condomínio (e os dados do boleto — nome/CPF/
+endereço) continua sendo o proprietário. A emissão do boleto **não muda**:
+ela sempre usa os dados de quem for selecionado como pagador na hora de
+gerar a cobrança — o que muda é como o sistema ajuda a escolher essa pessoa
+sem deixar a unidade ser cobrada duas vezes.
+
+- `unit_occupancies.is_financial_responsible` (nova coluna, `api/src/db/
+  schema.sql`): marca, entre os moradores cadastrados de uma unidade, quem
+  deve ser selecionado como pagador. Índice único garante no máximo um
+  responsável financeiro ativo por unidade — mesmo padrão de
+  `is_representative`, já existente para "representante da unidade".
+- `PATCH /units/:id/financial-responsible` (`api/src/routes/unitRoutes.ts`)
+  + botão "Definir financeiro" na tela **Blocos e unidades** (mobile) —
+  espelha exatamente o `PATCH /units/:id/representative` já existente.
+- **Enviar cobranças não deixa mais uma unidade aparecer duas vezes**: em
+  `POST /billing/batches/preview` e `POST /billing/batches`
+  (`api/src/routes/billingRoutes.ts`), quando dois moradores cobráveis da
+  mesma unidade são selecionados, só o responsável financeiro fica válido;
+  sem ninguém marcado, a unidade inteira fica de fora com um aviso — nunca
+  escolhe "um qualquer" automaticamente (evita boleto duplicado/errado num
+  caso que envolve dinheiro real). Mesma trava em
+  `POST /billing/batches/:batchId/items` (adicionar pessoa a um lote já
+  existente). Tela `BillingSettings.tsx` mostra o total de pessoas
+  elegíveis e se há unidade duplicada pendente, com botão para atualizar a
+  lista.
+- **Visibilidade do boleto para quem não é o titular**: o "representante
+  atual" da unidade (`unit_occupancies.is_representative`, mesmo conceito
+  de Blocos e unidades) agora vê os boletos da própria unidade em **Gestão
+  de cobranças** mesmo quando o responsável financeiro é outro morador —
+  ex.: inquilino vendo o boleto emitido no nome do proprietário. Implementado
+  em `api/src/routes/invoiceRoutes.ts` (`GET /invoices`, `GET /invoices/:id/
+  pix`, `GET /invoices/:id/pdf`) via novo helper `getRepresentedUnitIds` em
+  `api/src/services/unitOwnershipService.ts` (espelha o já existente
+  `getOwnedUnitIds`). É só leitura — nunca habilita pagar/sincronizar/
+  aceitar acordo para quem não é o titular do boleto.
+
+### Conclusão da correção de 04/09/2026 (refresh token)
+
+O fix descrito na seção anterior tinha sido publicado no build web mas
+**nunca commitado**. Hoje: commit isolado (`15bbdfd`, só `client.ts` +
+`AuthContext.tsx` + este documento — as mudanças de cobrança acima ficaram
+de fora desse commit de propósito) e publicado um novo APK Android com a
+correção (build 28, versão 1.3.4, `production-apk`).
+
+**Incidente durante a publicação do APK**: `/data` (volume do serviço
+`acoes` no Railway, onde ficam os `.apk` de `mobile_releases`) estava 100%
+cheio (434M, 7 builds antigos nunca limpos — o script de publicação
+(`mobile/scripts/publish-apk.js` → `api/src/scripts/seedAndroidRelease.ts`)
+nunca desativa nem apaga builds anteriores). Resolvido apagando os 5 builds
+mais antigos de `/data/mobile-releases` via `railway ssh --service acoes
+--environment production` e marcando `active=false` nas linhas
+correspondentes de `mobile_releases` (mantido o build 27 como fallback). Se
+uma publicação de APK falhar de novo com `ENOSPC`, o diagnóstico é este:
+`railway ssh --service acoes --environment production -- df -h /data` e
+`ls -la /data/mobile-releases` para confirmar, depois limpar os builds mais
+antigos (não os mais recentes) antes de tentar `npm run release:apk:resume
+-- --build-id <id>` de novo — o build em si não precisa ser refeito, só a
+etapa de download+publicação.
+
+### Nova ferramenta: Suporte (admin_geral + síndico/subsíndico)
+
+O caso concreto que motivou tudo isso: um usuário real (JOSE WILLIAM) ficou
+preso na tela de Termos com "invalid or expired token" — sessão revogada
+pela corrida de refresh token **antes** da correção de 04/09 ir ao ar (a
+correção não recupera retroativamente sessões já revogadas). Até hoje, a
+única forma de resolver isso era SQL manual direto no banco.
+
+Agora existe `api/src/routes/supportRoutes.ts` (montado em `/support`) +
+tela **Suporte** no app (mobile), com ações: Forçar logout (revoga
+`refresh_tokens` — resolve exatamente o caso do JOSE WILLIAM), Destravar
+login, Resetar senha, Reenviar e-mail de acesso, e Limpar aceite dos Termos
+de Uso. Toda ação grava em `audit_log` com o `condominium_id` da pessoa
+alvo e `feature='suporte_admin'` — esse valor precisa estar tanto no union
+type `AuditFeature` (`api/src/services/auditService.ts`) quanto na
+constraint de banco `audit_log_feature_check` (`api/src/db/schema.sql`); os
+dois ficaram fora de sincronia uma vez durante o desenvolvimento e o insert
+falhou em silêncio (só logou no console) até a constraint ser atualizada —
+**passo 3 (migração) é obrigatório para este deploy**, não pode ser pulado
+como foi o de 04/09.
+
+**Escopo por papel** (ajustado ainda em 06/09, poucas horas depois da
+primeira versão): a primeira versão só liberava `admin_geral`, reaproveitando
+`GET /users?condominiumId=X` pra listar as pessoas — só que esse endpoint,
+quando quem pergunta é `admin_geral`, filtra propositalmente só
+síndico/subsíndico (regra da tela Pessoas, `userRoutes.ts:42`), então o
+admin só via 1-2 pessoas por condomínio, nunca moradores. Corrigido com um
+endpoint dedicado, `GET /support/people`, que não herda esse filtro. No
+mesmo ajuste, `síndico`/`subsíndico` passaram a ter acesso à mesma tela,
+mas com o condomínio implícito (sempre o próprio, nunca escolhido) e
+restritos a agir só sobre moradores (`proprietario`/`inquilino`) — mesma
+divisão de autoridade que `POST /users/reset-password` já usava
+(`allowedRoles` por papel de quem age). `admin_geral` continua sendo quem
+resolve conta de síndico/subsíndico e casos cross-condomínio.
+
+**Orientação de suporte, daqui pra frente**: se um usuário reportar sessão
+travada / "invalid or expired token" / precisar resetar senha ou destravar
+login, o caminho é a tela **Suporte** — pelo síndico/subsíndico daquele
+condomínio, se possível, senão por `admin_geral`. SQL direto no banco só
+deve ser usado se a ferramenta não cobrir o caso.

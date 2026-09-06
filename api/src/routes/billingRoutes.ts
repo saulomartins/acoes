@@ -182,34 +182,49 @@ router.post('/batches/preview', asyncHandler(async (req, res) => {
     id: string; full_name: string | null; username: string; cpf: string | null; unit: string | null; unit_id: string | null;
     unit_type_name: string | null; fee_cents: number | null; street: string|null; address_number: string|null; neighborhood: string|null;
     city: string|null; state: string|null; postal_code: string|null; duplicate: boolean; billing_exempt:boolean; preferred_due_day:number;
-    existing_amount_cents: number|null; existing_status: string|null;
+    existing_amount_cents: number|null; existing_status: string|null; is_unit_financial_responsible: boolean;
   }>(
     `select u.id,u.full_name,u.username,u.cpf,u.unit,u.billing_exempt,u.preferred_due_day,
        u.street,u.address_number,u.neighborhood,u.city,u.state,u.postal_code,
        un.id unit_id,ut.name unit_type_name,ut.fee_cents,
        exists(select 1 from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status <> 'canceled') duplicate,
        (select i.amount_cents from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status <> 'canceled' order by i.created_at desc limit 1) existing_amount_cents,
-       (select i.status from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status <> 'canceled' order by i.created_at desc limit 1) existing_status
+       (select i.status from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status <> 'canceled' order by i.created_at desc limit 1) existing_status,
+       exists(select 1 from unit_occupancies uo where uo.user_id=u.id and uo.unit_id=u.unit_id and uo.ended_at is null and uo.is_financial_responsible=true) is_unit_financial_responsible
      from users u left join units un on un.id=u.unit_id left join unit_types ut on ut.id=un.unit_type_id
      where u.condominium_id=$1 and u.id=any($2::uuid[]) order by u.full_name,u.username`,
     [condominiumId, userIds, `${referenceMonth}-01`],
   );
+  // Uma unidade só pode gerar uma cobrança por competência. Quando mais de
+  // um morador cobrável da mesma unidade foi selecionado, só o responsável
+  // financeiro (Blocos e unidades > Definir financeiro) fica válido; sem
+  // ninguém marcado, ninguém do grupo é liberado — nunca escolhemos "um
+  // qualquer" automaticamente, pois isso geraria boleto real no banco para
+  // a pessoa errada.
+  const unitDuplicates = new Map<string, number>();
+  for (const row of result.rows) { if (!row.unit_id) continue; unitDuplicates.set(row.unit_id, (unitDuplicates.get(row.unit_id) || 0) + 1); }
+  const unitResponsible = new Map<string, string>();
+  for (const row of result.rows) { if (row.unit_id && row.is_unit_financial_responsible) unitResponsible.set(row.unit_id, row.id); }
   const extraMap = await extraChargesByUnit(result.rows.map(row => row.unit_id), `${referenceMonth}-01`);
   const consumptionMap = await consumptionChargesByUnit(condominiumId, result.rows.map(row => row.unit_id), `${referenceMonth}-01`);
   const items = result.rows.map(row => {const dueDate=`${referenceMonth}-${String(row.preferred_due_day).padStart(2,'0')}`;const extra=row.unit_id?extraMap.get(row.unit_id):undefined;const consumption=row.unit_id?consumptionMap.get(row.unit_id):undefined;
     const override=Number(amountOverrides[row.id]); const hasOverride=Number.isInteger(override)&&override>0;
     const feeCents=hasOverride?override:Number(row.fee_cents||0)+(extra?.sumCents||0)+(consumption?.sumCents||0);
     const missingFields=missingBillingFields(row,Boolean(hasOverride||row.fee_cents));
+    const isDuplicateUnit=Boolean(row.unit_id&&(unitDuplicates.get(row.unit_id)||0)>1);
+    const responsibleWinner=row.unit_id?unitResponsible.get(row.unit_id):undefined;
+    const blockedByDuplicateUnit=isDuplicateUnit&&responsibleWinner!==row.id;
     // Duplicidade não bloqueia mais a validade: uma pessoa pode ter mais de um
     // boleto na mesma referência (ex.: cobrança extra). O front decide se pede
     // confirmação extra mostrando existingAmountCents/existingStatus.
     return ({ ...row, extraChargeCents: extra?.sumCents||0, extraChargeItems: hasOverride?[]:(extra?.items||[]), consumptionChargeCents: consumption?.sumCents||0, consumptionItems: hasOverride?[]:(consumption?.items||[]), manualOverride: hasOverride,
     existingAmountCents: row.existing_amount_cents, existingStatus: row.existing_status,
-    valid: Boolean(!missingFields.length && !row.billing_exempt && dueDate>=todayIso()),
+    valid: Boolean(!missingFields.length && !row.billing_exempt && dueDate>=todayIso()&&!blockedByDuplicateUnit),
     issues: [missingFields.length ? `Cadastro incompleto: falta preencher ${missingFields.join(', ')}` : null,
       row.duplicate ? `Já existe cobrança de ${(Number(row.existing_amount_cents||0)/100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} nesta referência (não impede uma nova emissão)` : null,
       row.billing_exempt ? 'Pessoa isenta de boleto' : null,
-      dueDate<todayIso() ? `O vencimento ${formatDateBr(dueDate)} já passou` : null].filter(Boolean),
+      dueDate<todayIso() ? `O vencimento ${formatDateBr(dueDate)} já passou` : null,
+      blockedByDuplicateUnit ? (responsibleWinner ? 'Escolha só o responsável financeiro desta unidade (defina em Blocos e unidades).' : 'Esta unidade tem mais de um morador cobrável sem responsável financeiro definido — defina em Blocos e unidades antes de gerar a cobrança.') : null].filter(Boolean),
       due_date:dueDate, fee_cents:feeCents })});
   return res.json({ referenceMonth, items, validCount: items.filter(i => i.valid).length,
     totalAmountCents: items.filter(i => i.valid).reduce((sum, i) => sum + Number(i.fee_cents || 0), 0) });
@@ -236,6 +251,19 @@ router.post('/batches', asyncHandler(async (req, res) => {
      where u.condominium_id=$1 and u.billing_exempt=false and u.id=any($2::uuid[])`,
     [condominiumId,userIds],
   );
+  // Uma unidade só pode gerar uma cobrança por competência. A prévia
+  // (/batches/preview) já barra isso mostrando qual é o responsável
+  // financeiro, mas revalidamos aqui como trava definitiva — este endpoint
+  // é quem de fato grava o lote que depois vira boleto real no banco.
+  const unitCounts=new Map<string,number>();
+  for(const person of people.rows) if(person.unit_id) unitCounts.set(person.unit_id,(unitCounts.get(person.unit_id)||0)+1);
+  const duplicateUnitIds=[...unitCounts.entries()].filter(([,count])=>count>1).map(([id])=>id);
+  if(duplicateUnitIds.length){
+    const responsible=await query<{unit_id:string;user_id:string}>(`select unit_id,user_id from unit_occupancies where unit_id=any($1::uuid[]) and ended_at is null and is_financial_responsible=true`,[duplicateUnitIds]);
+    const responsibleByUnit=new Map(responsible.rows.map(r=>[r.unit_id,r.user_id]));
+    const unresolved=people.rows.filter((person:any)=>duplicateUnitIds.includes(person.unit_id)&&responsibleByUnit.get(person.unit_id)!==person.id);
+    if(unresolved.length) return res.status(400).json({message:`Selecione só o responsável financeiro de cada unidade (Blocos e unidades > Definir financeiro): ${unresolved.map((p:any)=>p.full_name||p.username).join(', ')}.`});
+  }
   // Uma pessoa pode ter mais de uma cobrança na mesma referência (ex.: cobrança
   // extra/avulsa) — não bloqueamos aqui. O aviso já foi mostrado na prévia
   // (/batches/preview) para o síndico confirmar antes de chegar neste ponto.
@@ -437,13 +465,18 @@ router.post('/batches/:batchId/items', asyncHandler(async (req,res)=>{
   const person=await query<any>(
     `select u.id,u.full_name,u.username,u.cpf,u.preferred_due_day,un.id unit_id,ut.fee_cents,
        exists(select 1 from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status<>'canceled') duplicate,
-       exists(select 1 from billing_batch_items bi where bi.batch_id=$4 and bi.user_id=u.id) already_in_batch
+       exists(select 1 from billing_batch_items bi where bi.batch_id=$4 and bi.user_id=u.id) already_in_batch,
+       exists(select 1 from billing_batch_items bi join users u2 on u2.id=bi.user_id where bi.batch_id=$4 and u2.unit_id=u.unit_id and u2.id<>u.id) unit_already_in_batch
      from users u join units un on un.id=u.unit_id join unit_types ut on ut.id=un.unit_type_id
      where u.id=$1 and u.condominium_id=$2 and u.billing_exempt=false`,
     [userId,condominiumId,referenceMonth,req.params.batchId]);
   if(!person.rows[0]) return res.status(404).json({message:'Pessoa não encontrada, isenta de boleto ou sem tipologia/unidade configurada.'});
   if(person.rows[0].duplicate) return res.status(409).json({message:'Esta pessoa já possui cobrança nesta referência.'});
   if(person.rows[0].already_in_batch) return res.status(409).json({message:'Esta pessoa já está neste lote.'});
+  // Uma unidade só pode ter uma cobrança por lote — se outro morador da
+  // mesma unidade já está neste lote, use "Definir financeiro" (Blocos e
+  // unidades) para trocar quem é cobrado em vez de adicionar os dois.
+  if(person.rows[0].unit_already_in_batch) return res.status(409).json({message:'Esta unidade já tem uma cobrança neste lote.'});
   const extraMap=await extraChargesByUnit([person.rows[0].unit_id],referenceMonth);
   const consumptionMap=await consumptionChargesByUnit(condominiumId,[person.rows[0].unit_id],referenceMonth);
   const amountCents=Number(person.rows[0].fee_cents||0)+(extraMap.get(person.rows[0].unit_id)?.sumCents||0)+(consumptionMap.get(person.rows[0].unit_id)?.sumCents||0);

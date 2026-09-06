@@ -34,6 +34,7 @@ import MobileReleases from '../screens/MobileReleases';
 import PlatformPlans from '../screens/PlatformPlans';
 import PlatformRevenue from '../screens/PlatformRevenue';
 import AuditLog from '../screens/AuditLog';
+import Support from '../screens/Support';
 import RegulationArticles from '../screens/RegulationArticles';
 import Occurrences from '../screens/Occurrences';
 import InfractionNoticeIssue from '../screens/InfractionNoticeIssue';
@@ -86,6 +87,7 @@ type RootStackParamList = {
   PlatformPlans: undefined;
   PlatformRevenue: undefined;
   AuditLog: undefined;
+  Support: undefined;
   RegulationArticles: undefined;
   Occurrences: undefined;
   InfractionNoticeIssue: { occurrenceId?: string; unitId?: string } | undefined;
@@ -118,6 +120,7 @@ const TOUR_STEPS:TourStep[]=[
   {route:'PlatformPlans',title:'Planos da plataforma',description:'Planos comerciais oferecidos aos condomínios clientes.',roles:['admin_geral']},
   {route:'PlatformRevenue',title:'Faturamento da plataforma',description:'Receita da plataforma por condomínio e período.',roles:['admin_geral']},
   {route:'AuditLog',title:'Auditoria',description:'Histórico de ações realizadas por administradores e síndicos no sistema.',roles:['admin_geral']},
+  {route:'Support',title:'Suporte',description:'Localize uma pessoa (síndico/subsíndico só no próprio condomínio; admin_geral em qualquer um) e resolva problemas de acesso: sessão travada, login bloqueado, senha e aceite de termos.',roles:['admin_geral','sindico','subsindico'],feature:'pessoas'},
   {route:'UnitTypes',title:'Tipologias',description:'Configuração dos tipos de unidade e valores usados nas cobranças.',roles:['sindico','subsindico'],feature:'tipologias'},
   {route:'Units',title:'Blocos e unidades',description:'Organização dos blocos, apartamentos e moradores vinculados.',roles:['sindico','subsindico'],feature:'blocos_unidades'},
   {route:'Clearances',title:'Nada consta',description:'Emissão e verificação de certidão negativa de débitos da unidade.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'nada_consta'},
@@ -205,6 +208,7 @@ const MobileReleasesScreen = withResponsiveShell(MobileReleases, 'MobileReleases
 const PlatformPlansScreen = withResponsiveShell(PlatformPlans, 'PlatformPlans');
 const PlatformRevenueScreen = withResponsiveShell(PlatformRevenue, 'PlatformRevenue');
 const AuditLogScreen = withResponsiveShell(AuditLog, 'AuditLog');
+const SupportScreen = withResponsiveShell(Support, 'Support');
 const RegulationArticlesScreen = withResponsiveShell(RegulationArticles, 'RegulationArticles');
 const OccurrencesScreen = withResponsiveShell(Occurrences, 'Occurrences');
 const InfractionNoticeIssueScreen = withResponsiveShell(InfractionNoticeIssue, 'InfractionNoticeIssue');
@@ -359,6 +363,7 @@ export default function AppNavigator() {
               <Stack.Screen name="PlatformPlans" component={PlatformPlansScreen} options={{ headerShown: false }} />
               <Stack.Screen name="PlatformRevenue" component={PlatformRevenueScreen} options={{ headerShown: false }} />
               <Stack.Screen name="AuditLog" component={AuditLogScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Support" component={SupportScreen} options={{ headerShown: false }} />
               <Stack.Screen name="RegulationArticles" component={RegulationArticlesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Occurrences" component={OccurrencesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="InfractionNoticeIssue" component={InfractionNoticeIssueScreen} options={{ headerShown: false }} />

@@ -16,7 +16,8 @@ export type AuditFeature =
   | 'reserva_espacos'
   | 'regimento'
   | 'ocorrencias'
-  | 'notificacoes_infracao';
+  | 'notificacoes_infracao'
+  | 'suporte_admin';
 
 // Por padrão só audita sindico/subsindico (admin_geral e moradores ficam
 // fora do escopo deste log). Exceção: em Regimento/Ocorrências/Notificações

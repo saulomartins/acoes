@@ -204,6 +204,7 @@ footer.manual-footer b{color:var(--ink);}
     <a href="#usuarios">Painel de usuários</a>
     <a href="#pessoas">Pessoas</a>
     <a href="#unidades">Tipologias e unidades</a>
+    <a href="#suporte">Suporte</a>
   </nav>
   <div class="toc-kicker">Financeiro</div>
   <nav class="toc-list">
@@ -443,10 +444,27 @@ footer.manual-footer b{color:var(--ink);}
       </div>
     </div>
     <div class="rules"><h4>Regras importantes</h4><ul>
-      <li><b>Representante</b> — é definido automaticamente para quem acabou de ser vinculado à unidade; você pode trocar tocando em outro morador, ou remover. É só uma etiqueta administrativa, usada quando é preciso um responsável único por unidade — hoje ela não muda quem recebe o boleto nem quem é notificado.</li>
+      <li><b>Representante</b> — é definido automaticamente para quem acabou de ser vinculado à unidade; você pode trocar tocando em outro morador, ou remover. Além de etiqueta administrativa, o representante passa a enxergar os boletos da unidade em Gestão de cobranças mesmo quando o responsável financeiro é outro morador — não muda quem paga nem quem recebe notificação de novo boleto, só quem consegue visualizar/baixar o PDF e o Pix.</li>
+      <li><b>Definir financeiro</b> — quando a unidade tem mais de um morador cadastrado (por exemplo, dono e inquilino), marque aqui quem deve ser selecionado como pagador ao gerar a cobrança mensal. Sem essa marcação, a unidade fica de fora de "Config. e Enviar cobranças" com um aviso — o sistema nunca escolhe um morador qualquer sozinho, para não arriscar duplicar ou errar o boleto. Os dados que saem no boleto (nome, CPF, endereço) continuam vindo do cadastro de quem você selecionar — se for o inquilino pagando no lugar do proprietário, mantenha o CPF/endereço dele iguais aos do proprietário no cadastro.</li>
       <li><b>Proprietários adicionais</b> — se o dono do imóvel não mora nele (por exemplo, aluga para um inquilino), cadastre-o aqui: ele passa a ver os débitos da unidade em modo só leitura, sem responder pela cobrança.</li>
       <li>Excluir um bloco é bloqueado se algum apartamento dele tiver histórico vinculado.</li>
       <li>Na importação por planilha, uma linha repetida <b>atualiza</b> o registro em vez de duplicar; a tipologia informada precisa já existir.</li>
+    </ul></div>
+  </section>
+
+  <section id="suporte">
+    <div class="eyebrow">Cadastros</div>
+    <h2 class="section-title">Suporte</h2>
+    <p class="lede">Localize um morador (proprietário ou inquilino) do seu condomínio e resolva problemas de acesso sem precisar pedir ajuda à administração da plataforma.</p>
+    <div class="legend"><h5>Ações disponíveis</h5><ol>
+      <li><b>Forçar logout</b> — revoga todas as sessões da pessoa; ela precisa logar de novo no próximo acesso. Use quando alguém relata a tela travada com uma mensagem de sessão/token inválido.</li>
+      <li><b>Destravar login</b> — reativa um acesso que estava desabilitado.</li>
+      <li><b>Resetar senha</b> e <b>Reenviar e-mail de acesso</b> — geram uma senha temporária nova e a enviam por e-mail; não é possível recuperar a senha original, só criar uma nova.</li>
+      <li><b>Limpar aceite dos Termos de Uso</b> — a pessoa vê a tela de Termos de novo no próximo acesso.</li>
+    </ol></div>
+    <div class="rules"><h4>Regras importantes</h4><ul>
+      <li>Aqui você só age sobre <b>moradores</b> (proprietário/inquilino) do seu próprio condomínio — contas de síndico, subsíndico ou administração da plataforma não aparecem nem podem ser alteradas por aqui.</li>
+      <li>Toda ação fica registrada em Auditoria.</li>
     </ul></div>
   </section>
 
@@ -499,6 +517,7 @@ footer.manual-footer b{color:var(--ink);}
       <li>O vencimento de cada boleto é calculado pelo <b>dia preferido</b> de cada pessoa (10 ou 20) — nunca uma data única para o lote inteiro.</li>
       <li>"Validar competência" só confere e mostra pendências (✓/⚠ por pessoa) — não emite nada ainda.</li>
       <li>Uma referência só pode ser excluída se nada nela já tiver sido emitido no banco.</li>
+      <li>Uma unidade com mais de um morador cadastrado (dono e inquilino) aparece só <b>uma vez</b> na lista de seleção — sempre a pessoa marcada como "Definir financeiro" em Blocos e unidades. Se ninguém estiver marcado, a unidade some da lista com um aviso no topo, em vez de aparecer duplicada.</li>
     </ul></div>
 
     <div class="menu-grid">

@@ -163,6 +163,16 @@ create unique index if not exists unit_occupancies_active_user
 create unique index if not exists unit_occupancies_one_representative
   on unit_occupancies(unit_id) where ended_at is null and is_representative = true;
 
+-- Marca, entre os moradores cadastrados de uma unidade, quem deve ser
+-- efetivamente cobrado (ex.: inquilino que paga no lugar do proprietário).
+-- Não afeta emissão de boleto nem visibilidade de faturas — só indica, na
+-- tela de Unidades, qual morador o síndico deve selecionar como pagador ao
+-- gerar a cobrança. Os dados do boleto continuam vindo do cadastro (cpf,
+-- full_name, endereço) de quem for de fato selecionado.
+alter table unit_occupancies add column if not exists is_financial_responsible boolean not null default false;
+create unique index if not exists unit_occupancies_one_financial_responsible
+  on unit_occupancies(unit_id) where ended_at is null and is_financial_responsible = true;
+
 -- Posse de unidade, separada de moradia (unit_occupancies acima). Um
 -- proprietário que não mora na unidade não deve virar "morador" para fins
 -- de avisos/enquetes/ocorrências, mas precisa ver (não pagar/gerenciar) os
@@ -1129,7 +1139,7 @@ create table if not exists audit_log (
     'gestao_cobrancas','gestao_debitos','historico_acordos',
     'config_enviar_cobrancas','cobrancas_adicionais','consumo_individualizado',
     'enquetes','reserva_espacos',
-    'regimento','ocorrencias','notificacoes_infracao'
+    'regimento','ocorrencias','notificacoes_infracao','suporte_admin'
   )),
   action text not null,
   entity_id text,
@@ -1149,7 +1159,7 @@ alter table audit_log add constraint audit_log_feature_check check (feature in (
   'gestao_cobrancas','gestao_debitos','historico_acordos',
   'config_enviar_cobrancas','cobrancas_adicionais','consumo_individualizado',
   'enquetes','reserva_espacos',
-  'regimento','ocorrencias','notificacoes_infracao'
+  'regimento','ocorrencias','notificacoes_infracao','suporte_admin'
 ));
 
 -- ============================================================

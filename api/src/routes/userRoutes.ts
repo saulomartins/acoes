@@ -32,7 +32,8 @@ router.get('/', asyncHandler(async (req, res) => {
             users.condominium_id, users.unit_id, coalesce(blocks.name || ' / ' || units.number, users.unit) as unit, units.unit_type_id, users.billing_exempt, users.preferred_due_day, users.unit_rented_to_tenant, users.created_at,
             users.street, users.address_number, users.address_complement, users.neighborhood, users.city, users.state, users.postal_code, users.deleted_at,
             unit_types.name as unit_type_name, unit_types.fee_cents as condominium_fee_cents,
-            exists(select 1 from unit_occupancies uo where uo.user_id=users.id and uo.unit_id=users.unit_id and uo.ended_at is null and uo.is_representative=true) as is_unit_representative
+            exists(select 1 from unit_occupancies uo where uo.user_id=users.id and uo.unit_id=users.unit_id and uo.ended_at is null and uo.is_representative=true) as is_unit_representative,
+            exists(select 1 from unit_occupancies uo where uo.user_id=users.id and uo.unit_id=users.unit_id and uo.ended_at is null and uo.is_financial_responsible=true) as is_unit_financial_responsible
      from users
      left join units on units.id = users.unit_id
      left join blocks on blocks.id = units.block_id

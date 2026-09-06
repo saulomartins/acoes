@@ -29,6 +29,7 @@ import pollRoutes from './routes/pollRoutes';
 import spaceReservationRoutes from './routes/spaceReservationRoutes';
 import clearanceRoutes from './routes/clearanceRoutes';
 import helpRoutes from './routes/helpRoutes';
+import supportRoutes from './routes/supportRoutes';
 import { config } from './config';
 
 export const app = express();
@@ -91,6 +92,7 @@ app.use('/polls', pollRoutes);
 app.use('/space-reservations', spaceReservationRoutes);
 app.use('/clearances', clearanceRoutes);
 app.use('/help', helpRoutes);
+app.use('/support', supportRoutes);
 
 app.use((_req, res) => res.status(404).json({ message: 'route not found' }));
 

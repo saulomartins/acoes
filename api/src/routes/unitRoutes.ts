@@ -21,19 +21,22 @@ router.get('/', asyncHandler(async (req, res) => {
     query(`select id, condominium_id, name, active from blocks where condominium_id=$1 order by name`, [condominiumId]),
     query(`select u.id,u.condominium_id,u.block_id,u.number,u.unit_type_id,u.active,b.name block_name,ut.name unit_type_name,
                   o.user_id representative_user_id,ru.full_name representative_name,
-                  coalesce(jsonb_agg(distinct jsonb_build_object('user_id',oc.user_id,'full_name',cu.full_name,'cpf',cu.cpf,'role',cu.role,'is_representative',oc.is_representative))
+                  fr.user_id financial_responsible_user_id,fru.full_name financial_responsible_name,
+                  coalesce(jsonb_agg(distinct jsonb_build_object('user_id',oc.user_id,'full_name',cu.full_name,'cpf',cu.cpf,'role',cu.role,'is_representative',oc.is_representative,'is_financial_responsible',oc.is_financial_responsible))
                     filter (where oc.id is not null),'[]') residents,
                   coalesce(jsonb_agg(distinct jsonb_build_object('user_id',oo.owner_user_id,'full_name',own.full_name,'cpf',own.cpf))
                     filter (where oo.id is not null),'[]') owners
            from units u join blocks b on b.id=u.block_id left join unit_types ut on ut.id=u.unit_type_id
            left join unit_occupancies o on o.unit_id=u.id and o.ended_at is null and o.is_representative=true
            left join users ru on ru.id=o.user_id
+           left join unit_occupancies fr on fr.unit_id=u.id and fr.ended_at is null and fr.is_financial_responsible=true
+           left join users fru on fru.id=fr.user_id
            left join unit_occupancies oc on oc.unit_id=u.id and oc.ended_at is null
            left join users cu on cu.id=oc.user_id
            left join unit_ownerships oo on oo.unit_id=u.id and oo.ended_at is null
            left join users own on own.id=oo.owner_user_id
            where u.condominium_id=$1
-           group by u.id,b.name,ut.name,o.user_id,ru.full_name order by b.name,u.number`, [condominiumId]),
+           group by u.id,b.name,ut.name,o.user_id,ru.full_name,fr.user_id,fru.full_name order by b.name,u.number`, [condominiumId]),
   ]);
   return res.json({ blocks: blocks.rows, units: units.rows });
 }));
@@ -173,6 +176,22 @@ router.patch('/:id/representative', authorize('sindico','subsindico'), asyncHand
   await withTransaction(async client => { await client.query(`update unit_occupancies set is_representative=false where unit_id=$1 and ended_at is null`,[req.params.id]); if(userId) await client.query(`update unit_occupancies set is_representative=true where unit_id=$1 and user_id=$2 and ended_at is null`,[req.params.id,userId]); });
   await logAudit(req, 'blocos_unidades', 'updated', `Alterou o representante da unidade ${unit.rows[0].number}`, { entityId: req.params.id });
   return res.json({ message:'Representante atualizado.' });
+}));
+
+// Responsável financeiro: marca, entre os moradores cadastrados da unidade,
+// quem deve ser selecionado como pagador ao gerar a cobrança (ex.: inquilino
+// que paga no lugar do proprietário). Não muda a emissão do boleto em si —
+// os dados que saem no boleto continuam vindo do cadastro de quem for
+// selecionado, então para o boleto sair no nome do proprietário o cadastro
+// desse morador precisa ter os mesmos dados fiscais/endereço dele.
+router.patch('/:id/financial-responsible', authorize('sindico','subsindico'), asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.condominiumId; const userId = req.body?.userId || null;
+  const unit = await query<any>(`select id,number from units where id=$1 and condominium_id=$2`,[req.params.id,condominiumId]);
+  if (!unit.rows[0]) return res.status(404).json({ message:'Unidade não encontrada.' });
+  if (userId) { const resident = await query(`select id from unit_occupancies where unit_id=$1 and user_id=$2 and ended_at is null`,[req.params.id,userId]); if (!resident.rows[0]) return res.status(400).json({ message:'Selecione um morador atual desta unidade.' }); }
+  await withTransaction(async client => { await client.query(`update unit_occupancies set is_financial_responsible=false where unit_id=$1 and ended_at is null`,[req.params.id]); if(userId) await client.query(`update unit_occupancies set is_financial_responsible=true where unit_id=$1 and user_id=$2 and ended_at is null`,[req.params.id,userId]); });
+  await logAudit(req, 'blocos_unidades', 'updated', `Alterou o responsável financeiro da unidade ${unit.rows[0].number}`, { entityId: req.params.id });
+  return res.json({ message:'Responsável financeiro atualizado.' });
 }));
 
 // Posse (unit_ownerships) é independente de moradia (unit_occupancies) —

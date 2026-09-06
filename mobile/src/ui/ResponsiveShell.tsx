@@ -33,6 +33,7 @@ const items: Item[] = [
   { label: 'Planos da plataforma', route: 'PlatformPlans', symbol: '◆', roles: ['admin_geral'] },
   { label: 'Faturamento da plataforma', route: 'PlatformRevenue', symbol: '$', roles: ['admin_geral'] },
   { label: 'Auditoria', route: 'AuditLog', symbol: '🛡', roles: ['admin_geral'] },
+  { label: 'Suporte', route: 'Support', symbol: '🛠', roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'pessoas' },
   { label: 'Tipologias', route: 'UnitTypes', symbol: '▧', roles: ['sindico', 'subsindico'], feature: 'tipologias' },
   { label: 'Blocos e unidades', route: 'Units', symbol: '▦', roles: ['sindico', 'subsindico'], feature: 'blocos_unidades' },
   { label: 'Nada consta', route: 'Clearances', symbol: '✓', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'nada_consta' },

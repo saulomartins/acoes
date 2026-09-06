@@ -11,6 +11,7 @@ import { createInterBoleto, getInterBoleto, getInterBoletoPdf, listInterBoletosB
 import { sendPushNotification } from '../services/notificationService';
 import { notifyNewInvoice, transitionOverdueInvoices } from '../services/invoiceReminderService';
 import { logAudit } from '../services/auditService';
+import { getRepresentedUnitIds } from '../services/unitOwnershipService';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -307,6 +308,12 @@ router.get('/', asyncHandler(async (req, res) => {
   const scopedCondominiumId = req.user?.role === 'admin_geral'
     ? condominiumId || null
     : req.user?.condominiumId;
+  // Representante atual da unidade (Blocos e unidades) vê os boletos da
+  // própria unidade mesmo quando o responsável financeiro (Definir
+  // financeiro) é outro morador — ex.: inquilino vendo o boleto emitido no
+  // nome do proprietário. Só leitura: nunca habilita ações de quem não é o
+  // titular do boleto.
+  const representedUnitIds = isResident ? await getRepresentedUnitIds(req.user!.id) : [];
 
   await transitionOverdueInvoices();
 
@@ -336,12 +343,12 @@ router.get('/', asyncHandler(async (req, res) => {
      from invoices
      join users on users.id = invoices.user_id
      left join users excluder on excluder.id = invoices.debt_excluded_by
-     where ($1::uuid is null or invoices.user_id = $1)
+     where (($1::uuid is null or invoices.user_id = $1) or users.unit_id = any($4::uuid[]))
        and ($2::uuid is null or invoices.condominium_id = $2)
        and ($3::text is null or invoices.status = $3::invoice_status)
        and invoices.deleted_at is null
      order by invoices.due_date desc, invoices.created_at desc`;
-  const invoicesParams = [scopedUserId || null, scopedCondominiumId || null, status || null];
+  const invoicesParams = [scopedUserId || null, scopedCondominiumId || null, status || null, representedUnitIds];
 
   const result = await query(invoicesQuery, invoicesParams);
 
@@ -1154,10 +1161,13 @@ router.patch('/:id/debt-exclusion', authorize('sindico', 'subsindico'), asyncHan
 }));
 
 router.get('/:id/pix', asyncHandler(async(req,res)=>{
-  const result=await query<any>(`select id,condominium_id,user_id,external_id,status,pix_copy_paste from invoices where id=$1 and condominium_id=$2`,[req.params.id,req.user?.condominiumId]);
+  const result=await query<any>(`select i.id,i.condominium_id,i.user_id,i.external_id,i.status,i.pix_copy_paste,u.unit_id from invoices i join users u on u.id=i.user_id where i.id=$1 and i.condominium_id=$2`,[req.params.id,req.user?.condominiumId]);
   let invoice=result.rows[0];
   if(!invoice)return res.status(404).json({message:'Boleto não encontrado.'});
-  if(['proprietario','inquilino'].includes(req.user?.role||'')&&invoice.user_id!==req.user?.id)return res.status(403).json({message:'Você não pode acessar o Pix deste boleto.'});
+  if(['proprietario','inquilino'].includes(req.user?.role||'')&&invoice.user_id!==req.user?.id){
+    const representedUnitIds=await getRepresentedUnitIds(req.user!.id);
+    if(!invoice.unit_id||!representedUnitIds.includes(invoice.unit_id))return res.status(403).json({message:'Você não pode acessar o Pix deste boleto.'});
+  }
   if(['paid','canceled'].includes(invoice.status))return res.status(409).json({message:invoice.status==='paid'?'Este boleto já foi pago.':'Este boleto foi cancelado.'});
   if(!invoice.external_id)return res.status(409).json({message:'O Banco Inter ainda não disponibilizou o Pix desta cobrança.'});
   if(!invoice.pix_copy_paste){const synced=await syncInterInvoice(invoice);invoice=synced.invoice;}
@@ -1166,10 +1176,13 @@ router.get('/:id/pix', asyncHandler(async(req,res)=>{
 }));
 
 router.get('/:id/pdf', asyncHandler(async(req,res)=>{
-  const invoice=await query<any>(`select i.id,i.condominium_id,i.user_id,i.external_id,i.status,u.full_name,u.username
+  const invoice=await query<any>(`select i.id,i.condominium_id,i.user_id,i.external_id,i.status,u.full_name,u.username,u.unit_id
     from invoices i join users u on u.id=i.user_id where i.id=$1 and i.condominium_id=$2`,[req.params.id,req.user?.condominiumId]);
   const row=invoice.rows[0];if(!row)return res.status(404).json({message:'Boleto não encontrado.'});
-  if(['proprietario','inquilino'].includes(req.user?.role||'')&&row.user_id!==req.user?.id)return res.status(403).json({message:'Você não pode acessar este boleto.'});
+  if(['proprietario','inquilino'].includes(req.user?.role||'')&&row.user_id!==req.user?.id){
+    const representedUnitIds=await getRepresentedUnitIds(req.user!.id);
+    if(!row.unit_id||!representedUnitIds.includes(row.unit_id))return res.status(403).json({message:'Você não pode acessar este boleto.'});
+  }
   if(row.status==='canceled')return res.status(409).json({message:'Este boleto foi cancelado e não deve ser impresso para pagamento.'});
   // 'pending_provider' = enviado ao Inter, sem confirmação de registro. O
   // PDF ou não existe ainda no banco ou sairia sem linha digitável válida —
