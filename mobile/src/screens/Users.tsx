@@ -314,9 +314,6 @@ export default function Users({ navigation }: any) {
     if (!username.trim()) { setError('Informe o usuário de acesso.'); return; }
     if (!editingId && !onlyDigits(cpf)) { setError('Informe o CPF — ele é necessário para gerar a senha inicial.'); return; }
     if (user?.role === 'admin_geral' && !condominiumId.trim()) { setError('Selecione o condomínio.'); return; }
-    if (user?.role !== 'admin_geral' && (role === 'proprietario' || role === 'inquilino')) {
-      if (!unitId) { setError('Selecione a unidade ou apartamento.'); return; }
-    }
     const cpfDigits = onlyDigits(cpf);
 
     setIsLoading(true);
@@ -404,7 +401,6 @@ export default function Users({ navigation }: any) {
     if (!userToken || !newProfileRole) return;
     const isResident = newProfileRole === 'proprietario' || newProfileRole === 'inquilino';
     const grantUnitId = item.unit_id || newProfileUnitId;
-    if (isResident && !grantUnitId) { setProfilesError('Selecione a unidade para o perfil de morador.'); return; }
     setGrantingProfile(true);
     setProfilesError(null);
     try {
@@ -694,7 +690,7 @@ export default function Users({ navigation }: any) {
           if (!editingItem) return null;
           const heldRoles = new Set<UserRole>([editingItem.role, ...personProfiles.map((profile) => profile.role)]);
           const grantableRoles = roles.filter((item) => (user?.role === 'admin_geral' ? item.value === 'sindico' || item.value === 'subsindico' : item.value === 'subsindico' || item.value === 'proprietario' || item.value === 'inquilino') && !heldRoles.has(item.value));
-          const needsUnitPicker = (newProfileRole === 'proprietario' || newProfileRole === 'inquilino') && !editingItem.unit_id;
+          const showUnitPicker = (newProfileRole === 'proprietario' || newProfileRole === 'inquilino') && !editingItem.unit_id;
           return (
             <View style={styles.profilesPanel}>
               <Text style={styles.profilesPanelTitle}>Perfis desta pessoa</Text>
@@ -722,22 +718,21 @@ export default function Users({ navigation }: any) {
                       </Pressable>
                     ))}
                   </View>
-                  {needsUnitPicker ? (
-                    managedUnits.length === 0 ? <View style={styles.helperBox}><Text style={styles.helperText}>Cadastre blocos e apartamentos antes de conceder um perfil de morador.</Text></View> : (
-                      <View style={styles.profileUnitPicker}>
-                        <ComboBox
-                          options={unitOptions}
-                          value={newProfileUnitId}
-                          onChange={setNewProfileUnitId}
-                          placeholder="Selecione a unidade"
-                          title="Unidade / apartamento"
-                          searchPlaceholder="Buscar bloco, apartamento ou tipologia"
-                          emptyText="Nenhuma unidade encontrada para esta busca."
-                        />
-                      </View>
-                    )
+                  {showUnitPicker && managedUnits.length > 0 ? (
+                    <View style={styles.profileUnitPicker}>
+                      <Text style={styles.label}>Unidade / apartamento (opcional)</Text>
+                      <ComboBox
+                        options={unitOptions}
+                        value={newProfileUnitId}
+                        onChange={setNewProfileUnitId}
+                        placeholder="Selecione a unidade"
+                        title="Unidade / apartamento"
+                        searchPlaceholder="Buscar bloco, apartamento ou tipologia"
+                        emptyText="Nenhuma unidade encontrada para esta busca."
+                      />
+                    </View>
                   ) : null}
-                  <AppButton title={grantingProfile ? 'Concedendo...' : 'Conceder perfil'} onPress={() => grantProfile(editingItem)} disabled={grantingProfile || !newProfileRole || (needsUnitPicker && !newProfileUnitId)} variant="secondary" />
+                  <AppButton title={grantingProfile ? 'Concedendo...' : 'Conceder perfil'} onPress={() => grantProfile(editingItem)} disabled={grantingProfile || !newProfileRole} variant="secondary" />
                 </View>
               ) : null}
             </View>
@@ -836,7 +831,7 @@ export default function Users({ navigation }: any) {
         {user?.role !== 'admin_geral' ? (
           <FormFieldFull>
             <View style={styles.condominiumPicker}>
-              <Text style={styles.label}>Unidade / apartamento</Text>
+              <Text style={styles.label}>Unidade / apartamento (opcional)</Text>
               {managedUnits.length === 0 ? <View style={styles.helperBox}><Text style={styles.helperText}>Cadastre blocos e apartamentos antes de cadastrar o morador.</Text></View> : (
                 <ComboBox
                   options={unitOptions}
@@ -848,7 +843,9 @@ export default function Users({ navigation }: any) {
                   emptyText="Nenhuma unidade encontrada para esta busca."
                 />
               )}
-              {unitId ? <Text style={styles.fieldHint}>Esta pessoa vai virar automaticamente a representante da unidade.</Text> : null}
+              {unitId
+                ? <Text style={styles.fieldHint}>Esta pessoa vai virar automaticamente a representante da unidade.</Text>
+                : <Text style={styles.fieldHint}>Deixe em branco para cadastrar alguém sem vínculo formal com uma unidade (ex.: só acompanhando um imóvel alugado). Sem unidade, a pessoa não recebe boletos automáticos.</Text>}
             </View>
           </FormFieldFull>
         ) : null}
@@ -918,9 +915,6 @@ export default function Users({ navigation }: any) {
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {success ? <Text style={styles.success}>{success}</Text> : null}
-        {editingId && user?.role !== 'admin_geral' && (role === 'proprietario' || role === 'inquilino') && !unitId ? (
-          <View style={styles.requiredNotice}><Text style={styles.requiredNoticeText}>Selecione uma unidade cadastrada para salvar este cadastro antigo.</Text></View>
-        ) : null}
         <AppButton
           title={editingId ? 'Salvar alterações' : user?.role === 'admin_geral' ? 'Cadastrar gestor' : 'Cadastrar usuário'}
           onPress={create}
@@ -1123,8 +1117,6 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   fieldHint: { color: colors.muted, fontSize: 14, lineHeight: 17, marginTop: -5, marginBottom: 10 },
-  requiredNotice: { borderRadius: 8, borderWidth: 1, borderColor: '#f4d49b', backgroundColor: '#fff8e8', padding: 10, marginBottom: 10 },
-  requiredNoticeText: { color: colors.amber, fontSize: 14, lineHeight: 18, fontWeight: '800' },
   addressPanel: { borderRadius: 9, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 10 },
   addressRow: { flexDirection: 'row', gap: 10 }, addressRowMobile: { flexDirection: 'column', gap: 0 },
   addressNumber: { flex: .4 }, addressNumberMobile: { flex: 1 },

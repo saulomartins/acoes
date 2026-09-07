@@ -164,15 +164,18 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
     }
   }
 
-  if (isResident && !unitId) {
-    return res.status(400).json({ message: 'Selecione a unidade do morador.' });
-  }
+  // Unidade é opcional para morador — cobre quem só acompanha um imóvel
+  // alugado sem vínculo formal com uma unidade deste condomínio (ex.:
+  // fiador/responsável monitorando à distância). Sem unidade, a senha
+  // inicial cai na mesma regra dos gestores (baseada só no CPF).
   const selectedUnit = unitId ? await query<{id:string;number:string;unit_type_id:string|null}>(`select id,number,unit_type_id from units where id=$1 and condominium_id=$2 and active=true`,[unitId,targetCondominiumId]) : null;
   if (unitId && !selectedUnit?.rows[0]) return res.status(400).json({ message:'Unidade inválida para o condomínio.' });
 
   const condominium = await query<{ name: string }>(`select name from condominiums where id=$1`, [targetCondominiumId]);
   const condominiumName = condominium.rows[0]?.name || '';
-  const plainPassword = isResident ? buildInitialPassword(selectedUnit!.rows[0].number, cpfDigits!) : buildManagerInitialPassword(cpfDigits!);
+  const plainPassword = isResident && selectedUnit?.rows[0]
+    ? buildInitialPassword(selectedUnit.rows[0].number, cpfDigits!)
+    : buildManagerInitialPassword(cpfDigits!);
   const initialPassword = plainPassword;
   const passwordHash = await bcrypt.hash(plainPassword, 10);
   const result = await query(
@@ -266,9 +269,7 @@ router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), requireF
     if (cpfConflict.rows[0]) return res.status(409).json({ message: 'CPF já cadastrado para outra pessoa.' });
   }
 
-  if ((nextRole === 'proprietario' || nextRole === 'inquilino') && !unitId) {
-    return res.status(400).json({ message: 'Unidade e tipologia são obrigatórias para moradores.' });
-  }
+  // Unidade é opcional para morador — ver mesma observação no POST /.
   const selectedUnit = unitId ? await query<{id:string;number:string;unit_type_id:string|null}>(`select id,number,unit_type_id from units where id=$1 and condominium_id=$2 and active=true`,[unitId,targetCondominiumId]) : null;
   if (unitId && !selectedUnit?.rows[0]) return res.status(400).json({ message:'Unidade inválida para o condomínio.' });
 
@@ -479,7 +480,6 @@ router.post('/:id/profiles', authorize('admin_geral', 'sindico', 'subsindico'), 
   }
 
   const isResidentProfile = role === 'proprietario' || role === 'inquilino';
-  if (isResidentProfile && !unitId) return res.status(400).json({ message: 'Selecione a unidade para o perfil de morador.' });
   if (isResidentProfile && person.unit_id && unitId && person.unit_id !== unitId) {
     return res.status(409).json({ message: 'Esta pessoa já possui outra unidade como principal; perfis de morador adicionais precisam apontar para a mesma unidade.' });
   }

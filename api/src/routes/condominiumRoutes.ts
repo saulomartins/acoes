@@ -63,6 +63,13 @@ const EFFECTIVE_ROLE = `(case
   else u.role
 end)`;
 const MONITORS_ELSEWHERE = `exists (select 1 from unit_ownerships oo where oo.owner_user_id=u.id and oo.ended_at is null and oo.unit_id is distinct from u.unit_id)`;
+// "Logou no sistema": existe pelo menos uma sessão (refresh_tokens) já criada
+// pra esse usuário — refresh_tokens nunca é apagada, só marcada como
+// revogada, e uma linha só nasce em login()/refresh()/switchProfile()
+// (authService.ts), todos exigindo autenticação prévia bem-sucedida. Por
+// isso é diferente de `login_enabled` (Ativos/Inativos, que é permissão de
+// acessar, não uso de fato).
+const LOGGED_IN = `exists(select 1 from refresh_tokens rt where rt.user_id=u.id)`;
 
 // Quem mora de fato na unidade x quem é o responsável financeiro cadastrado:
 // para role='inquilino' os dois já coincidem (o inquilino cadastrado é quem
@@ -78,6 +85,7 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
   const condominiumId = req.user?.role === 'admin_geral' ? (String(req.query.condominiumId || '') || null) : req.user?.condominiumId;
   const result = await query<{
     condominium_id: string; name: string; registered_users: number; active_users: number;
+    logged_in_users: number;
     registered_owners: number; registered_tenants: number;
     real_tenant_residents: number; owner_residents: number;
     monitor_only_owners: number; sindico: Array<{ id: string; fullName: string }>; subsindico: Array<{ id: string; fullName: string }>;
@@ -86,6 +94,7 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
     `select c.id as condominium_id, c.name,
        count(*) filter (where u.deleted_at is null)::int as registered_users,
        count(*) filter (where u.deleted_at is null and u.login_enabled)::int as active_users,
+       count(*) filter (where u.deleted_at is null and ${LOGGED_IN})::int as logged_in_users,
        count(*) filter (where u.deleted_at is null and ${EFFECTIVE_ROLE}='proprietario')::int as registered_owners,
        count(*) filter (where u.deleted_at is null and ${EFFECTIVE_ROLE}='inquilino')::int as registered_tenants,
        count(*) filter (where u.deleted_at is null and ${REAL_TENANT_RESIDENT})::int as real_tenant_residents,
@@ -110,6 +119,8 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
       registeredUsers: row.registered_users,
       activeUsers: row.active_users,
       inactiveUsers: row.registered_users - row.active_users,
+      loggedInUsers: row.logged_in_users,
+      neverLoggedIn: row.registered_users - row.logged_in_users,
       registeredOwners: row.registered_owners,
       registeredTenants: row.registered_tenants,
       realTenantResidents: row.real_tenant_residents,
@@ -124,11 +135,13 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
   });
 }));
 
-type UserStatsBucket = 'registered' | 'active' | 'inactive' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
+type UserStatsBucket = 'registered' | 'active' | 'inactive' | 'logged_in' | 'never_logged_in' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
 const USER_STATS_BUCKET_WHERE: Record<UserStatsBucket, string> = {
   registered: `u.deleted_at is null`,
   active: `u.deleted_at is null and u.login_enabled`,
   inactive: `u.deleted_at is null and not u.login_enabled`,
+  logged_in: `u.deleted_at is null and ${LOGGED_IN}`,
+  never_logged_in: `u.deleted_at is null and not ${LOGGED_IN}`,
   registered_owners: `u.deleted_at is null and ${EFFECTIVE_ROLE}='proprietario'`,
   registered_tenants: `u.deleted_at is null and ${EFFECTIVE_ROLE}='inquilino'`,
   real_tenant_residents: `u.deleted_at is null and ${REAL_TENANT_RESIDENT}`,
