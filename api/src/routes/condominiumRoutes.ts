@@ -117,7 +117,7 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
   const condominiumId = req.user?.role === 'admin_geral' ? (String(req.query.condominiumId || '') || null) : req.user?.condominiumId;
   const result = await query<{
     condominium_id: string; name: string; registered_users: number; active_users: number;
-    logged_in_users: number;
+    logged_in_users: number; deleted_users: number;
     registered_owners: number; registered_tenants: number;
     real_tenant_residents: number; owner_residents: number;
     monitor_only_owners: number; sindico: Array<{ id: string; fullName: string }>; subsindico: Array<{ id: string; fullName: string }>;
@@ -137,7 +137,12 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
        coalesce(jsonb_agg(distinct jsonb_build_object('id',p.rep_id,'fullName',coalesce(p.full_name,p.username))) filter (where p.person_role='subsindico'), '[]'::jsonb) as subsindico,
        (select count(*) from units un where un.condominium_id = c.id)::int as total_units,
        (select count(*) from units un where un.condominium_id = c.id
-          and exists(select 1 from unit_occupancies oc where oc.unit_id = un.id and oc.ended_at is null))::int as units_with_resident
+          and exists(select 1 from unit_occupancies oc where oc.unit_id = un.id and oc.ended_at is null))::int as units_with_resident,
+       -- Excluídos logicamente (deleted_at preenchido) ficam de fora do
+       -- PERSON_CTE de propósito (a aba "Excluídos" de Pessoas já trata como
+       -- lista à parte, sem colapsar por CPF) — contagem simples de linhas,
+       -- igual ao que a aba já mostra.
+       (select count(*) from users du where du.condominium_id = c.id and du.deleted_at is not null)::int as deleted_users
      from condominiums c
      left join person p on p.condominium_id = c.id
      where ($1::uuid is null or c.id = $1)
@@ -154,6 +159,7 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
       inactiveUsers: row.registered_users - row.active_users,
       loggedInUsers: row.logged_in_users,
       neverLoggedIn: row.registered_users - row.logged_in_users,
+      deletedUsers: row.deleted_users,
       registeredOwners: row.registered_owners,
       registeredTenants: row.registered_tenants,
       realTenantResidents: row.real_tenant_residents,
@@ -168,8 +174,11 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
   });
 }));
 
-type UserStatsBucket = 'registered' | 'active' | 'inactive' | 'logged_in' | 'never_logged_in' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
+type UserStatsBucket = 'registered' | 'active' | 'inactive' | 'logged_in' | 'never_logged_in' | 'deleted' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
 const USER_STATS_BUCKET_WHERE: Record<UserStatsBucket, string> = {
+  // Nunca usado — bucket 'deleted' retorna antes de chegar aqui (ver
+  // /user-stats/members), só existe pra satisfazer o Record exaustivo.
+  deleted: '',
   registered: `true`,
   active: `p.person_active`,
   inactive: `not p.person_active`,
@@ -194,6 +203,28 @@ router.get('/user-stats/members', authorize('admin_geral', 'sindico', 'subsindic
   const condominiumId = req.user?.role === 'admin_geral' ? String(req.query.condominiumId || '') : req.user?.condominiumId;
   if (!condominiumId) return res.status(400).json({ message: 'Selecione o condomínio.' });
   const bucket = String(req.query.bucket || '') as UserStatsBucket;
+
+  // "Excluídos logicamente" fica de fora do PERSON_CTE de propósito (ver
+  // comentário em deleted_users acima) — lista direto de `users`, sem
+  // colapsar por CPF, igual à aba "Excluídos" de Pessoas.
+  if (bucket === 'deleted') {
+    const deleted = await query<{ id: string; full_name: string | null; username: string; role: string; unit: string | null }>(
+      `select u.id, u.full_name, u.username, u.role,
+              coalesce(nullif(concat_ws(' - ', nullif(b.name,''), nullif(un.number,'')), ''), nullif(u.unit,''), 'Sem apartamento') as unit
+       from users u
+       left join units un on un.id = u.unit_id
+       left join blocks b on b.id = un.block_id
+       where u.condominium_id = $1 and u.deleted_at is not null
+       order by coalesce(u.full_name, u.username)`,
+      [condominiumId],
+    );
+    return res.json({
+      members: deleted.rows.map(row => ({
+        id: row.id, fullName: row.full_name || row.username, role: row.role, isExtra: false, unit: row.unit,
+      })),
+    });
+  }
+
   const bucketWhere = USER_STATS_BUCKET_WHERE[bucket];
   if (!bucketWhere) return res.status(400).json({ message: 'Categoria inválida.' });
 
