@@ -729,6 +729,7 @@ export default function Users({ navigation }: any) {
                         title="Unidade / apartamento"
                         searchPlaceholder="Buscar bloco, apartamento ou tipologia"
                         emptyText="Nenhuma unidade encontrada para esta busca."
+                        allowClear
                       />
                     </View>
                   ) : null}
@@ -841,6 +842,7 @@ export default function Users({ navigation }: any) {
                   title="Unidade / apartamento"
                   searchPlaceholder="Buscar bloco, apartamento ou tipologia"
                   emptyText="Nenhuma unidade encontrada para esta busca."
+                  allowClear
                 />
               )}
               {unitId

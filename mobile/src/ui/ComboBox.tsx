@@ -22,6 +22,11 @@ type Props = {
   disabled?: boolean;
   // Abaixo disso a lista cabe na tela e o campo de busca só atrapalha.
   searchThreshold?: number;
+  // Mostra um "×" pra voltar a value='' sem abrir a lista, e uma opção
+  // "Limpar seleção" no topo do modal — só faz sentido em campos opcionais
+  // (ex.: unidade do morador), então fica desligado por padrão pra não
+  // criar um jeito de esvaziar campos que exigem valor sempre selecionado.
+  allowClear?: boolean;
 };
 
 // Combobox único para web e nativo: fechado mostra só o valor escolhido e
@@ -39,6 +44,7 @@ export const ComboBox = ({
   emptyText = 'Nenhuma opção encontrada.',
   disabled = false,
   searchThreshold = 8,
+  allowClear = false,
 }: Props) => {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -67,26 +73,41 @@ export const ComboBox = ({
     setOpen(false);
   };
 
+  const clear = () => {
+    onChange('');
+    setOpen(false);
+  };
+
   return (
     <View>
-      <Pressable
-        onPress={openList}
-        disabled={disabled}
-        accessibilityRole="button"
-        accessibilityState={{ disabled, expanded: open }}
-        accessibilityLabel={selected ? selected.label : placeholder}
-        style={[styles.control, disabled && styles.controlDisabled]}
-      >
-        <View style={styles.controlText}>
-          <Text style={selected ? styles.controlValue : styles.controlPlaceholder} numberOfLines={1}>
-            {selected ? selected.label : placeholder}
-          </Text>
-          {selected?.description ? (
-            <Text style={styles.controlMeta} numberOfLines={1}>{selected.description}</Text>
-          ) : null}
-        </View>
-        <Text style={styles.chevron}>▾</Text>
-      </Pressable>
+      <View style={[styles.control, disabled && styles.controlDisabled]}>
+        {/* Pressable próprio (não aninhado no botão de limpar) — dois
+            Pressable um dentro do outro deixa o clique de limpar, na versão
+            web, borbulhar e reabrir a lista logo em seguida. */}
+        <Pressable
+          onPress={openList}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityState={{ disabled, expanded: open }}
+          accessibilityLabel={selected ? selected.label : placeholder}
+          style={styles.controlMain}
+        >
+          <View style={styles.controlText}>
+            <Text style={selected ? styles.controlValue : styles.controlPlaceholder} numberOfLines={1}>
+              {selected ? selected.label : placeholder}
+            </Text>
+            {selected?.description ? (
+              <Text style={styles.controlMeta} numberOfLines={1}>{selected.description}</Text>
+            ) : null}
+          </View>
+          <Text style={styles.chevron}>▾</Text>
+        </Pressable>
+        {allowClear && selected && !disabled ? (
+          <Pressable onPress={clear} accessibilityRole="button" accessibilityLabel="Limpar seleção" hitSlop={8} style={styles.clearButton}>
+            <Text style={styles.clearButtonText}>✕</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
@@ -113,6 +134,17 @@ export const ComboBox = ({
             ) : null}
 
             <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
+              {allowClear && value ? (
+                <Pressable
+                  onPress={clear}
+                  accessibilityRole="button"
+                  style={styles.option}
+                >
+                  <View style={styles.grow}>
+                    <Text style={styles.optionLabel}>Limpar seleção</Text>
+                  </View>
+                </Pressable>
+              ) : null}
               {matches.length === 0 ? (
                 <Text style={styles.empty}>{emptyText}</Text>
               ) : (
@@ -144,7 +176,10 @@ export const ComboBox = ({
 };
 
 const styles = StyleSheet.create({
-  control: { minHeight: 52, borderWidth: 1, borderColor: colors.border, borderRadius: 9, backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  control: { minHeight: 52, borderWidth: 1, borderColor: colors.border, borderRadius: 9, backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  controlMain: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  clearButton: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f2f4f8' },
+  clearButtonText: { color: colors.muted, fontSize: 13, fontWeight: '900' },
   controlDisabled: { backgroundColor: '#f2f4f8' },
   controlText: { flex: 1, minWidth: 0 },
   controlValue: { color: colors.ink, fontSize: 16, fontWeight: '700' },
