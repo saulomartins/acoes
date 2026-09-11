@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from './text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
@@ -11,6 +11,7 @@ import { apiRequest, API_BASE_URL } from '../api/client';
 import { syncNotificationBadge } from '../services/pushNotifications';
 import { subscribeNotificationsChanged } from '../services/notificationEvents';
 import type { FeatureKey } from '../context/AuthContext';
+import { MANAGEMENT_ROUTES } from '../navigation/routeRoles';
 
 type Item = { label: string; route: string; symbol: string; roles: string[]; feature?: FeatureKey };
 type AndroidRelease = { id:string; version:string; buildNumber:string; releaseNotes:string|null; hasFile:boolean };
@@ -79,6 +80,16 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
   const [switchingProfile, setSwitchingProfile] = useState(false);
   const manualUrl = manualUrlForRole(user?.role);
   const openManual = useCallback(() => { if (manualUrl) Linking.openURL(manualUrl).catch(() => {}); }, [manualUrl]);
+  // No app nativo, rotas de gestão nem existem no Stack (ver ManagementStack
+  // .web/.native.tsx) — tocar num item de menu dessas mostra este aviso em vez
+  // de tentar navegar para uma tela que não foi empacotada no binário.
+  const goTo = useCallback((route: string) => {
+    if (Platform.OS !== 'web' && MANAGEMENT_ROUTES.has(route)) {
+      Alert.alert('Disponível na versão web', 'Esta função está disponível apenas na versão web. Abra app.laremdia.com.br no navegador do seu celular ou computador para usá-la.');
+      return;
+    }
+    navigation.navigate(route);
+  }, [navigation]);
   const handleSwitchProfile = async (profileId: string | null) => {
     if (profileId === (user?.activeProfileId ?? null)) { setProfileMenuOpen(false); return; }
     setSwitchingProfile(true);
@@ -220,7 +231,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                       <Pressable
                         key={item.route}
                         style={[styles.navItem, activeRoute === item.route && styles.navItemActive]}
-                        onPress={() => navigation.navigate(item.route)}
+                        onPress={() => goTo(item.route)}
                       >
                         <Text style={styles.navSymbol}>{item.symbol}</Text>
                         <Text style={[styles.navText, activeRoute === item.route && styles.navActive]}>{item.label}</Text>
@@ -251,7 +262,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                           <Pressable
                             key={item.route}
                             style={[styles.subnavItem, activeRoute === item.route && styles.subnavItemActive]}
-                            onPress={() => navigation.navigate(item.route)}
+                            onPress={() => goTo(item.route)}
                           >
                             <View style={[styles.subnavDot, activeRoute === item.route && styles.subnavDotActive]} />
                             <Text style={styles.subnavText}>{item.label}</Text>
@@ -281,7 +292,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                           <Pressable
                             key={item.route}
                             style={[styles.subnavItem, activeRoute === item.route && styles.subnavItemActive]}
-                            onPress={() => navigation.navigate(item.route)}
+                            onPress={() => goTo(item.route)}
                           >
                             <View style={[styles.subnavDot, activeRoute === item.route && styles.subnavDotActive]} />
                             <Text style={styles.subnavText}>{item.label}</Text>
@@ -312,7 +323,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                           <Pressable
                             key={item.route}
                             style={[styles.subnavItem, activeRoute === item.route && styles.subnavItemActive]}
-                            onPress={() => navigation.navigate(item.route)}
+                            onPress={() => goTo(item.route)}
                           >
                             <View style={[styles.subnavDot, activeRoute === item.route && styles.subnavDotActive]} />
                             <Text style={styles.subnavText}>{item.route === 'Communications' ? 'Comunicação' : item.label}</Text>
@@ -342,7 +353,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                           <Pressable
                             key={item.route}
                             style={[styles.subnavItem, activeRoute === item.route && styles.subnavItemActive]}
-                            onPress={() => navigation.navigate(item.route)}
+                            onPress={() => goTo(item.route)}
                           >
                             <View style={[styles.subnavDot, activeRoute === item.route && styles.subnavDotActive]} />
                             <Text style={styles.subnavText}>{item.label}</Text>
@@ -372,7 +383,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                           <Pressable
                             key={item.route}
                             style={[styles.subnavItem, activeRoute === item.route && styles.subnavItemActive]}
-                            onPress={() => navigation.navigate(item.route)}
+                            onPress={() => goTo(item.route)}
                           >
                             <View style={[styles.subnavDot, activeRoute === item.route && styles.subnavDotActive]} />
                             <Text style={styles.subnavText}>{item.label}</Text>
@@ -402,7 +413,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                           <Pressable
                             key={item.route}
                             style={[styles.subnavItem, activeRoute === item.route && styles.subnavItemActive]}
-                            onPress={() => navigation.navigate(item.route)}
+                            onPress={() => goTo(item.route)}
                           >
                             <View style={[styles.subnavDot, activeRoute === item.route && styles.subnavDotActive]} />
                             <Text style={styles.subnavText}>{item.label}</Text>
@@ -534,7 +545,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                     <Pressable
                       key={item.route}
                       style={styles.mobileMenuItemParent}
-                      onPress={() => { navigation.navigate(item.route); setMobileMenuOpen(false); }}
+                      onPress={() => { goTo(item.route); setMobileMenuOpen(false); }}
                     >
                       <Text style={styles.mobileMenuItemIcon}>{item.symbol}</Text>
                       <Text style={[styles.mobileMenuItemText, styles.grow]}>{item.label}</Text>
@@ -565,7 +576,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                             <Pressable
                               key={subitem.route}
                               style={styles.mobileMenuItemChild}
-                              onPress={() => { navigation.navigate(subitem.route); setMobileMenuOpen(false); }}
+                              onPress={() => { goTo(subitem.route); setMobileMenuOpen(false); }}
                             >
                               <View style={styles.mobileMenuSubmenuDot} />
                               <Text style={styles.mobileMenuItemChildText}>{subitem.route === 'Communications' ? 'Comunicação' : subitem.label}</Text>

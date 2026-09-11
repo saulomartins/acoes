@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '../ui/text';
 import { AuthContext } from '../context/AuthContext';
 import { colors, layout } from '../ui/theme';
@@ -10,6 +10,20 @@ import { subscribeNotificationsChanged } from '../services/notificationEvents';
 import type { FeatureKey } from '../context/AuthContext';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import { MANAGEMENT_ROUTES } from '../navigation/routeRoles';
+
+// No app nativo, rotas de gestão nem existem no Stack (ver ManagementStack
+// .web/.native.tsx) — tocar num atalho dessas mostra este aviso em vez de
+// tentar navegar para uma tela que não foi empacotada no binário.
+const WEB_ONLY_MESSAGE = 'Esta função está disponível apenas na versão web. Abra app.laremdia.com.br no navegador do seu celular ou computador para usá-la.';
+const goToRoute = (navigation: any, route?: string) => {
+  if (!route) return;
+  if (Platform.OS !== 'web' && MANAGEMENT_ROUTES.has(route)) {
+    Alert.alert('Disponível na versão web', WEB_ONLY_MESSAGE);
+    return;
+  }
+  navigation.navigate(route);
+};
 
 type MenuItem = {
   title: string;
@@ -212,15 +226,16 @@ export default function Home({ navigation }: any) {
             };
           }
           
+          const webOnly = Platform.OS !== 'web' && !!item.route && MANAGEMENT_ROUTES.has(item.route);
           return (
-          <Pressable key={item.title} disabled={!item.route && !item.submenu} onPress={() => item.route ? navigation.navigate(item.route) : null} style={({ pressed }) => [
+          <Pressable key={item.title} disabled={!item.route && !item.submenu} onPress={() => goToRoute(navigation, item.route)} style={({ pressed }) => [
             styles.moduleCard,
             cardStyle,
             pressed && (item.route || item.submenu) && styles.pressed,
             !item.route && !item.submenu && styles.disabled
           ]}>
             <View style={[styles.moduleIcon, { backgroundColor: `${item.accent}18` }]}><Text style={[styles.moduleSymbol, { color: item.accent }]}>{item.symbol}</Text></View>
-            <View style={styles.grow}><View style={styles.moduleTitleRow}><Text style={styles.moduleTitle}>{item.title}</Text>{!item.route && !item.submenu ? <Text style={styles.planned}>EM BREVE</Text> : <Text style={styles.arrow}>→</Text>}</View><Text style={styles.moduleDescription}>{item.description}</Text></View>
+            <View style={styles.grow}><View style={styles.moduleTitleRow}><Text style={styles.moduleTitle}>{item.title}</Text>{!item.route && !item.submenu ? <Text style={styles.planned}>EM BREVE</Text> : webOnly ? <Text style={styles.planned}>🌐 WEB</Text> : <Text style={styles.arrow}>→</Text>}</View><Text style={styles.moduleDescription}>{item.description}</Text></View>
           </Pressable>
           );
         })}

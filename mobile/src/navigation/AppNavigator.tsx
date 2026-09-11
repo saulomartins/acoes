@@ -3,41 +3,21 @@ import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-
 import { Text } from '../ui/text';
 import * as Notifications from 'expo-notifications';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import ResponsiveShell from '../ui/ResponsiveShell';
 import Home from '../screens/Home';
-import Dashboard from '../screens/Dashboard';
-import UserStats from '../screens/UserStats';
-import BillingAnalytics from '../screens/BillingAnalytics';
 import Clearances from '../screens/Clearances';
 import ClearanceVerify from '../screens/ClearanceVerify';
 import Landing from '../screens/Landing';
 import Login from '../screens/Login';
 import Register from '../screens/Register';
-import Condominiums from '../screens/Condominiums';
-import Users from '../screens/Users';
 import Invoices from '../screens/Invoices';
-import BankIntegration from '../screens/BankIntegration';
-import BankIntegrationGuide from '../screens/BankIntegrationGuide';
-import UnitTypes from '../screens/UnitTypes';
-import UnitExtraCharges from '../screens/UnitExtraCharges';
-import UnitConsumption from '../screens/UnitConsumption';
-import BillingSettings from '../screens/BillingSettings';
-import Units from '../screens/Units';
 import Debts from '../screens/Debts';
 import AgreementHistory from '../screens/AgreementHistory';
 import Communications from '../screens/Communications';
 import Reports from '../screens/Reports';
 import Accountability from '../screens/Accountability';
 import MobileReleases from '../screens/MobileReleases';
-import PlatformPlans from '../screens/PlatformPlans';
-import PlatformRevenue from '../screens/PlatformRevenue';
-import AuditLog from '../screens/AuditLog';
-import Support from '../screens/Support';
-import RegulationArticles from '../screens/RegulationArticles';
 import Occurrences from '../screens/Occurrences';
-import InfractionNoticeIssue from '../screens/InfractionNoticeIssue';
 import InfractionNotices from '../screens/InfractionNotices';
 import Polls from '../screens/Polls';
 import LegalDocument from '../screens/LegalDocument';
@@ -47,9 +27,13 @@ import ForgotPassword from '../screens/ForgotPassword';
 import ResetPassword from '../screens/ResetPassword';
 import ForcePasswordChange from '../screens/ForcePasswordChange';
 import SelectProfile from '../screens/SelectProfile';
-import { AuthContext, storage, type FeatureKey } from '../context/AuthContext';
+import { AuthContext, storage } from '../context/AuthContext';
 import { apiRequest } from '../api/client';
 import { subscribeSystemTour } from '../services/tourEvents';
+import { Stack } from './stack';
+import { TOUR_STEPS, MANAGEMENT_ROUTES } from './routeRoles';
+import { withResponsiveShell, withRoleGuard } from './screenHelpers';
+import { ManagementStackScreens } from './ManagementStack';
 
 type RootStackParamList = {
   Landing: undefined;
@@ -98,63 +82,17 @@ type RootStackParamList = {
   TermsAcceptance: undefined;
 };
 
-const Stack = createNativeStackNavigator();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
 // A landing page de marketing só existe no build web (app.laremdia.com.br).
 // No app nativo instalado (Android/iOS) o usuário já decidiu usar o app —
 // a primeira tela deve ser sempre o Login, nunca a landing de vendas.
 const isWeb = Platform.OS === 'web';
 export const CURRENT_TOUR_VERSION='2026-08-17-1';
-type TourStep={route:keyof RootStackParamList;title:string;description:string;roles:string[];feature?:FeatureKey};
-const TOUR_STEPS:TourStep[]=[
-  {route:'Home',title:'Início',description:'Resumo das informações mais importantes e atalhos para as rotinas do condomínio.',roles:['admin_geral','sindico','subsindico','proprietario','inquilino']},
-  {route:'Dashboard',title:'Painel administrativo',description:'Indicadores financeiros e operacionais para acompanhar a situação do condomínio.',roles:['sindico','subsindico']},
-  {route:'UserStats',title:'Painel de usuários',description:'Cadastro, acesso e ocupação de cada condomínio — toque em um número para ver quem são.',roles:['admin_geral','sindico','subsindico'],feature:'painel_usuarios'},
-  {route:'BillingAnalytics',title:'Indicadores de boletos',description:'Recebidos, não pagos e cancelados por período, com os motivos de cancelamento.',roles:['sindico','subsindico'],feature:'indicadores_boletos'},
-  {route:'Condominiums',title:'Condomínios',description:'Cadastro e gestão de todos os condomínios atendidos pela plataforma.',roles:['admin_geral']},
-  {route:'Users',title:'Pessoas',description:'Cadastro e gestão de síndicos, subsíndicos, proprietários e inquilinos.',roles:['sindico','subsindico'],feature:'pessoas'},
-  {route:'Banks',title:'Cadastro de bancos',description:'Catálogo de bancos disponíveis para integração de cobranças.',roles:['admin_geral']},
-  {route:'BankConfigurations',title:'Configurações bancárias',description:'Credenciais e parâmetros de cada integração bancária.',roles:['admin_geral']},
-  {route:'BankLink',title:'Vincular banco ao condomínio',description:'Associação de uma integração bancária a um condomínio específico.',roles:['admin_geral']},
-  {route:'BankIntegrationGuide',title:'Guia de expansão bancária',description:'Referência para adicionar suporte a um novo banco na plataforma.',roles:['admin_geral']},
-  {route:'PlatformPlans',title:'Planos da plataforma',description:'Planos comerciais oferecidos aos condomínios clientes.',roles:['admin_geral']},
-  {route:'PlatformRevenue',title:'Faturamento da plataforma',description:'Receita da plataforma por condomínio e período.',roles:['admin_geral']},
-  {route:'AuditLog',title:'Auditoria',description:'Histórico de ações realizadas por administradores e síndicos no sistema.',roles:['admin_geral']},
-  {route:'Support',title:'Suporte',description:'Localize uma pessoa (síndico/subsíndico só no próprio condomínio; admin_geral em qualquer um) e resolva problemas de acesso: sessão travada, login bloqueado, senha e aceite de termos.',roles:['admin_geral','sindico','subsindico'],feature:'pessoas'},
-  {route:'UnitTypes',title:'Tipologias',description:'Configuração dos tipos de unidade e valores usados nas cobranças.',roles:['sindico','subsindico'],feature:'tipologias'},
-  {route:'Units',title:'Blocos e unidades',description:'Organização dos blocos, apartamentos e moradores vinculados.',roles:['sindico','subsindico'],feature:'blocos_unidades'},
-  {route:'Clearances',title:'Nada consta',description:'Emissão e verificação de certidão negativa de débitos da unidade.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'nada_consta'},
-  {route:'Invoices',title:'Gestão de cobranças',description:'Emissão e acompanhamento de boletos, Pix, pagamentos e valores em aberto.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'gestao_cobrancas'},
-  {route:'BillingSettings',title:'Configurar e enviar cobranças',description:'Regras de vencimento, multa, juros e emissão das cobranças mensais.',roles:['sindico','subsindico'],feature:'config_enviar_cobrancas'},
-  {route:'UnitExtraCharges',title:'Cobranças adicionais',description:'Valores extraordinários por unidade, com parcelas e acompanhamento.',roles:['sindico','subsindico'],feature:'cobrancas_adicionais'},
-  {route:'UnitConsumption',title:'Consumo (água/gás/energia)',description:'Tarifas e lançamento mensal de consumo por unidade, somado ao boleto da taxa condominial.',roles:['sindico','subsindico'],feature:'consumo_individualizado'},
-  {route:'Debts',title:'Gestão de débitos',description:'Consulta, negociação e acompanhamento dos débitos do condomínio.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'gestao_debitos'},
-  {route:'AgreementHistory',title:'Histórico de acordos',description:'Acordos, parcelas e pagamentos organizados em um único histórico.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'historico_acordos'},
-  {route:'Accountability',title:'Prestação de contas',description:'Receitas, despesas, relatórios mensais e comprovantes disponíveis com transparência.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'prestacao_contas'},
-  {route:'Communications',title:'Avisos e comunicação',description:'Comunicados da administração, notificações e confirmação de leitura.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'avisos_comunicacao'},
-  {route:'Reports',title:'Relatos e solicitações',description:'Canal para registrar pedidos, acompanhar respostas e resolver demandas.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'relatos_solicitacoes'},
-  {route:'Occurrences',title:'Regimento e ocorrências',description:'Registro e acompanhamento de ocorrências relacionadas às regras do condomínio.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'regimento_ocorrencias'},
-  {route:'RegulationArticles',title:'Artigos do regimento',description:'Consulta e manutenção das regras usadas na gestão de ocorrências.',roles:['sindico','subsindico'],feature:'regimento_ocorrencias'},
-  {route:'InfractionNoticeIssue',title:'Emitir notificação',description:'Abertura de notificação de infração a partir de uma ocorrência.',roles:['sindico','subsindico'],feature:'regimento_ocorrencias'},
-  {route:'InfractionNotices',title:'Notificações de infração',description:'Acompanhamento de notificações, ciência, defesa e situação de cada processo.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'regimento_ocorrencias'},
-  {route:'Polls',title:'Enquetes',description:'Consultas criadas pela gestão para participação dos moradores ativos.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'enquetes'},
-  {route:'SpaceReservations',title:'Reserva de espaços',description:'Calendário de disponibilidade e solicitações de reserva das áreas comuns.',roles:['sindico','subsindico','proprietario','inquilino'],feature:'reserva_espacos'},
-  {route:'MobileReleases',title:'Instalar aplicativo',description:'Central com a versão mais recente do app para Android e iOS.',roles:['admin_geral','sindico','subsindico','proprietario','inquilino']},
-];
 
 type InAppNotification = {
   title: string;
   body: string;
   screen?: 'Communications' | 'Reports' | 'Debts' | 'Occurrences' | 'InfractionNotices' | 'Invoices' | 'Polls' | 'SpaceReservations';
-};
-
-// HOC to wrap screens with ResponsiveShell
-const withResponsiveShell = (Component: React.ComponentType<any>, routeName: string) => {
-  return (props: any) => (
-    <ResponsiveShell activeRoute={routeName} navigation={props.navigation}>
-      <Component {...props} />
-    </ResponsiveShell>
-  );
 };
 
 // Telas fora do ResponsiveShell (login, termos, troca de perfil) não têm quem
@@ -181,40 +119,19 @@ const withSafeArea = (Component: React.ComponentType<any>) => {
 // tela diferente e desmontava/remontava a tela ativa, apagando qualquer
 // formulário em preenchimento. Pré-computar aqui mantém a mesma identidade de
 // função entre renders.
-const HomeScreen = withResponsiveShell(Home, 'Home');
-const DashboardScreen = withResponsiveShell(Dashboard, 'Dashboard');
-const UserStatsScreen = withResponsiveShell(UserStats, 'UserStats');
-const BillingAnalyticsScreen = withResponsiveShell(BillingAnalytics, 'BillingAnalytics');
-const ClearancesScreen = withResponsiveShell(Clearances, 'Clearances');
-const CondominiumsScreen = withResponsiveShell(Condominiums, 'Condominiums');
-const UsersScreen = withResponsiveShell(Users, 'Users');
-const BankIntegrationScreen = withResponsiveShell(BankIntegration, 'BankIntegration');
-const BankLinkScreen = withResponsiveShell(BankIntegration, 'BankLink');
-const BankConfigurationsScreen = withResponsiveShell(BankIntegration, 'BankConfigurations');
-const BanksScreen = withResponsiveShell(BankIntegration, 'Banks');
-const BankIntegrationGuideScreen = withResponsiveShell(BankIntegrationGuide, 'BankIntegrationGuide');
-const UnitTypesScreen = withResponsiveShell(UnitTypes, 'UnitTypes');
-const UnitExtraChargesScreen = withResponsiveShell(UnitExtraCharges, 'UnitExtraCharges');
-const UnitConsumptionScreen = withResponsiveShell(UnitConsumption, 'UnitConsumption');
-const UnitsScreen = withResponsiveShell(Units, 'Units');
-const InvoicesScreen = withResponsiveShell(Invoices, 'Invoices');
-const BillingSettingsScreen = withResponsiveShell(BillingSettings, 'BillingSettings');
-const DebtsScreen = withResponsiveShell(Debts, 'Debts');
-const AgreementHistoryScreen = withResponsiveShell(AgreementHistory, 'AgreementHistory');
-const CommunicationsScreen = withResponsiveShell(Communications, 'Communications');
-const ReportsScreen = withResponsiveShell(Reports, 'Reports');
-const AccountabilityScreen = withResponsiveShell(Accountability, 'Accountability');
-const MobileReleasesScreen = withResponsiveShell(MobileReleases, 'MobileReleases');
-const PlatformPlansScreen = withResponsiveShell(PlatformPlans, 'PlatformPlans');
-const PlatformRevenueScreen = withResponsiveShell(PlatformRevenue, 'PlatformRevenue');
-const AuditLogScreen = withResponsiveShell(AuditLog, 'AuditLog');
-const SupportScreen = withResponsiveShell(Support, 'Support');
-const RegulationArticlesScreen = withResponsiveShell(RegulationArticles, 'RegulationArticles');
-const OccurrencesScreen = withResponsiveShell(Occurrences, 'Occurrences');
-const InfractionNoticeIssueScreen = withResponsiveShell(InfractionNoticeIssue, 'InfractionNoticeIssue');
-const InfractionNoticesScreen = withResponsiveShell(InfractionNotices, 'InfractionNotices');
-const PollsScreen = withResponsiveShell(Polls, 'Polls');
-const SpaceReservationsScreen = withResponsiveShell(SpaceReservations, 'SpaceReservations');
+const HomeScreen = withRoleGuard(withResponsiveShell(Home, 'Home'), 'Home');
+const ClearancesScreen = withRoleGuard(withResponsiveShell(Clearances, 'Clearances'), 'Clearances');
+const InvoicesScreen = withRoleGuard(withResponsiveShell(Invoices, 'Invoices'), 'Invoices');
+const DebtsScreen = withRoleGuard(withResponsiveShell(Debts, 'Debts'), 'Debts');
+const AgreementHistoryScreen = withRoleGuard(withResponsiveShell(AgreementHistory, 'AgreementHistory'), 'AgreementHistory');
+const CommunicationsScreen = withRoleGuard(withResponsiveShell(Communications, 'Communications'), 'Communications');
+const ReportsScreen = withRoleGuard(withResponsiveShell(Reports, 'Reports'), 'Reports');
+const AccountabilityScreen = withRoleGuard(withResponsiveShell(Accountability, 'Accountability'), 'Accountability');
+const MobileReleasesScreen = withRoleGuard(withResponsiveShell(MobileReleases, 'MobileReleases'), 'MobileReleases');
+const OccurrencesScreen = withRoleGuard(withResponsiveShell(Occurrences, 'Occurrences'), 'Occurrences');
+const InfractionNoticesScreen = withRoleGuard(withResponsiveShell(InfractionNotices, 'InfractionNotices'), 'InfractionNotices');
+const PollsScreen = withRoleGuard(withResponsiveShell(Polls, 'Polls'), 'Polls');
+const SpaceReservationsScreen = withRoleGuard(withResponsiveShell(SpaceReservations, 'SpaceReservations'), 'SpaceReservations');
 
 // Pré-computadas pelo mesmo motivo das de cima: manter a identidade da função
 // estável entre renders para o React Navigation não remontar a tela ativa.
@@ -248,7 +165,7 @@ export default function AppNavigator() {
   // o perfil em "Entrar como", e não junto com o próprio login.
   const [deviceTourVersion,setDeviceTourVersion]=useState<string|null>(null);
   useEffect(()=>{let active=true;storage.get('tourSeenVersion').then(value=>{if(active)setDeviceTourVersion(value);});return()=>{active=false;};},[]);
-  const tourSteps=useMemo(()=>TOUR_STEPS.filter(step=>step.roles.includes(user?.role||'')&&(!step.feature||condominiumFeatures?.[step.feature]===true)),[condominiumFeatures,user?.role]);
+  const tourSteps=useMemo(()=>TOUR_STEPS.filter(step=>step.roles.includes(user?.role||'')&&(!step.feature||condominiumFeatures?.[step.feature]===true)&&(isWeb||!MANAGEMENT_ROUTES.has(step.route))),[condominiumFeatures,user?.role]);
   const openTourStep=useCallback((index:number)=>{const step=tourSteps[index];if(step&&navigationRef.isReady())navigationRef.navigate(step.route as any);},[tourSteps]);
   const startTour=useCallback(()=>{if(!tourSteps.length)return;setTourIndex(0);setTourActive(true);setTimeout(()=>openTourStep(0),0);},[openTourStep,tourSteps.length]);
   const completeTour=useCallback(async()=>{
@@ -336,40 +253,20 @@ export default function AppNavigator() {
           ) : userToken ? (
             <>
               <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="UserStats" component={UserStatsScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="BillingAnalytics" component={BillingAnalyticsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Clearances" component={ClearancesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="ClearanceVerify" component={ClearanceVerifyStandaloneScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="Condominiums" component={CondominiumsScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="Users" component={UsersScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="BankIntegration" component={BankIntegrationScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="BankLink" component={BankLinkScreen} initialParams={{ section: 'link' }} options={{ headerShown: false }} />
-              <Stack.Screen name="BankConfigurations" component={BankConfigurationsScreen} initialParams={{ section: 'configurations' }} options={{ headerShown: false }} />
-              <Stack.Screen name="Banks" component={BanksScreen} initialParams={{ section: 'banks' }} options={{ headerShown: false }} />
-              <Stack.Screen name="BankIntegrationGuide" component={BankIntegrationGuideScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="UnitTypes" component={UnitTypesScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="UnitExtraCharges" component={UnitExtraChargesScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="UnitConsumption" component={UnitConsumptionScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="Units" component={UnitsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Invoices" component={InvoicesScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="BillingSettings" component={BillingSettingsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Debts" component={DebtsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="AgreementHistory" component={AgreementHistoryScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Communications" component={CommunicationsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Reports" component={ReportsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Accountability" component={AccountabilityScreen} options={{ headerShown: false }} />
               <Stack.Screen name="MobileReleases" component={MobileReleasesScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="PlatformPlans" component={PlatformPlansScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="PlatformRevenue" component={PlatformRevenueScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="AuditLog" component={AuditLogScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="Support" component={SupportScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="RegulationArticles" component={RegulationArticlesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Occurrences" component={OccurrencesScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="InfractionNoticeIssue" component={InfractionNoticeIssueScreen} options={{ headerShown: false }} />
               <Stack.Screen name="InfractionNotices" component={InfractionNoticesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Polls" component={PollsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="SpaceReservations" component={SpaceReservationsScreen} options={{ headerShown: false }} />
+              {ManagementStackScreens()}
             </>
           ) : (
             <>

@@ -3,6 +3,7 @@
     "target": "ES2020",
     "jsx": "react-jsx",
     "moduleResolution": "bundler",
+    "moduleSuffixes": [".native", ""],
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "strict": true

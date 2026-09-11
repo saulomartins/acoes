@@ -14,7 +14,7 @@ router.use(requireFeature('blocos_unidades'));
 
 const scopedCondominiumId = (req: any) => req.user?.role === 'admin_geral' ? req.query.condominiumId || req.body?.condominiumId : req.user?.condominiumId;
 
-router.get('/', asyncHandler(async (req, res) => {
+router.get('/', authorize('admin_geral', 'sindico', 'subsindico'), asyncHandler(async (req, res) => {
   const condominiumId = scopedCondominiumId(req);
   if (!condominiumId) return res.status(400).json({ message: 'Selecione o condomínio.' });
   const [blocks, units] = await Promise.all([

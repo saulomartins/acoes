@@ -17,13 +17,12 @@ const validRoles: UserRole[] = ['admin_geral', 'sindico', 'subsindico', 'proprie
 const managerCreatedRoles: UserRole[] = ['subsindico', 'proprietario', 'inquilino'];
 
 router.use(authenticate);
-// GET / fica de fora do gate: é usada como diretório de pessoas por outras
-// funcionalidades já gateadas separadamente (ex.: busca de destinatário em
-// Avisos e comunicação, lista de cobrança em Config. e enviar cobranças).
-// Só as ações de gestão de cadastro (criar/editar/excluir/redefinir senha)
-// são de fato o módulo "Pessoas".
+// GET / devolve CPF/telefone/endereço de todas as pessoas do condomínio —
+// dado sensível (LGPD) demais para depender só do filtro client-side (manager)
+// das telas que a usam como diretório (Avisos, Config. e enviar cobranças).
+// authorize() aqui é a barreira real; o resto do módulo "Pessoas" já tinha isso.
 
-router.get('/', asyncHandler(async (req, res) => {
+router.get('/', authorize('admin_geral', 'sindico', 'subsindico'), asyncHandler(async (req, res) => {
   const condominiumId = req.user?.role === 'admin_geral' ? req.query.condominiumId : req.user?.condominiumId;
   const deletedOnly = req.query.deletedOnly === 'true';
 
