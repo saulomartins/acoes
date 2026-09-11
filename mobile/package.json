@@ -18,7 +18,9 @@
     "release:apk:resume": "node scripts/publish-apk.js --wait",
     "release:apk:check": "node scripts/publish-apk.js --check",
     "build:aab": "npx eas-cli@latest build --platform android --profile production",
-    "build:web": "expo export --platform web"
+    "build:web": "expo export --platform web",
+    "update:preview": "npx eas-cli@latest update --branch preview --message",
+    "update:production": "npx eas-cli@latest update --branch production --message"
   },
   "dependencies": {
     "@react-navigation/native": "^6.1.18",
@@ -34,6 +36,7 @@
     "expo-screen-capture": "~8.0.9",
     "expo-secure-store": "~15.0.8",
     "expo-sharing": "~14.0.8",
+    "expo-updates": "~29.0.20",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
