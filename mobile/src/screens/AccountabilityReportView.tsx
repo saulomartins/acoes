@@ -111,10 +111,13 @@ const styles=StyleSheet.create({
   // No celular data e valor saem do flex e viram largura fixa, dimensionada para
   // o maior conteúdo possível ("15/06/2026" e "R$ 12.345,67") na fonte reduzida.
   // Empresa e objetivo dividem o que sobra, em partes iguais.
-  colOriginCompact:{flex:1},
-  colAptoCompact:{flex:1},
-  colDataCompact:{flex:0,width:60},
-  colValorCompact:{flex:0,width:74},
+  // No navegador (react-native-web) o flexbox encolhe `flex:0`+`width` e Data/Valor
+  // sumiam: por isso grow/shrink/basis/minWidth explícitos, e minWidth:0 nas
+  // colunas de texto livre para elas cederem espaço em vez de empurrar as fixas.
+  colOriginCompact:{flexGrow:1,flexShrink:1,flexBasis:0,minWidth:0},
+  colAptoCompact:{flexGrow:1,flexShrink:1,flexBasis:0,minWidth:0},
+  colDataCompact:{flexGrow:0,flexShrink:0,flexBasis:64,width:64,minWidth:64},
+  colValorCompact:{flexGrow:0,flexShrink:0,flexBasis:78,width:78,minWidth:78},
   cellText:{fontSize:12,color:colors.ink},
   cellTextCompact:{fontSize:11},
   cellHead:{fontWeight:'900'},
