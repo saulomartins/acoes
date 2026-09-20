@@ -27,6 +27,7 @@ import ForgotPassword from '../screens/ForgotPassword';
 import ResetPassword from '../screens/ResetPassword';
 import ForcePasswordChange from '../screens/ForcePasswordChange';
 import SelectProfile from '../screens/SelectProfile';
+import NativeAccessBlocked from '../screens/NativeAccessBlocked';
 import { AuthContext, storage } from '../context/AuthContext';
 import { apiRequest } from '../api/client';
 import { subscribeSystemTour } from '../services/tourEvents';
@@ -43,6 +44,7 @@ type RootStackParamList = {
   ResetPassword: undefined;
   ForcePasswordChange: undefined;
   SelectProfile: undefined;
+  NativeAccessBlocked: undefined;
   Home: undefined;
   Dashboard: undefined;
   UserStats: undefined;
@@ -71,6 +73,7 @@ type RootStackParamList = {
   PlatformPlans: undefined;
   PlatformRevenue: undefined;
   AuditLog: undefined;
+  GoogleDriveIntegrationGuide: undefined;
   Support: undefined;
   RegulationArticles: undefined;
   Occurrences: undefined;
@@ -142,6 +145,7 @@ const ForgotPasswordScreen = withSafeArea(ForgotPassword);
 const ResetPasswordScreen = withSafeArea(ResetPassword);
 const LegalDocumentScreen = withSafeArea(LegalDocument);
 const SelectProfileScreen = withSafeArea(SelectProfile);
+const NativeAccessBlockedScreen = withSafeArea(NativeAccessBlocked);
 const TermsAcceptanceScreen = withSafeArea(TermsAcceptance);
 const ForcePasswordChangeScreen = withSafeArea(ForcePasswordChange);
 const ClearanceVerifyStandaloneScreen = withSafeArea(ClearanceVerify);
@@ -153,7 +157,7 @@ const resolveNotificationScreen = (payload: unknown): 'Communications' | 'Report
 };
 
 export default function AppNavigator() {
-  const { userToken, user, isLoading, condominiumFeatures, updateUser, needsProfileSelection } = useContext(AuthContext);
+  const { userToken, user, isLoading, condominiumFeatures, updateUser, needsProfileSelection, nativeAccessBlocked } = useContext(AuthContext);
   const [inAppNotification, setInAppNotification] = useState<InAppNotification | null>(null);
   const [tourActive,setTourActive]=useState(false);const [tourIndex,setTourIndex]=useState(0);const autoTourStarted=useRef(false);
   // Guarda "tour já visto" também neste aparelho (fora do objeto `user`), pois
@@ -198,7 +202,7 @@ export default function AppNavigator() {
   // deviceTourVersion complementa user.tourCompletedVersion: mesmo que a
   // confirmação do servidor tenha falhado numa sessão anterior, este aparelho
   // já registrou localmente que o tour foi concluído/pulado e não deve repetir.
-  useEffect(()=>{if(!userToken||!user||user.mustChangePassword||needsProfileSelection||user.termsAcceptedVersion!==CURRENT_TERMS_VERSION||user.tourCompletedVersion===CURRENT_TOUR_VERSION||deviceTourVersion===CURRENT_TOUR_VERSION||autoTourStarted.current)return;if(!['admin_geral','sindico','subsindico','proprietario','inquilino'].includes(user.role))return;autoTourStarted.current=true;const timer=setTimeout(startTour,500);return()=>clearTimeout(timer);},[startTour,user,userToken,needsProfileSelection,deviceTourVersion]);
+  useEffect(()=>{if(!userToken||!user||user.mustChangePassword||needsProfileSelection||nativeAccessBlocked||user.termsAcceptedVersion!==CURRENT_TERMS_VERSION||user.tourCompletedVersion===CURRENT_TOUR_VERSION||deviceTourVersion===CURRENT_TOUR_VERSION||autoTourStarted.current)return;if(!['admin_geral','sindico','subsindico','proprietario','inquilino'].includes(user.role))return;autoTourStarted.current=true;const timer=setTimeout(startTour,500);return()=>clearTimeout(timer);},[startTour,user,userToken,needsProfileSelection,nativeAccessBlocked,deviceTourVersion]);
 
   useEffect(() => {
     const receivedSubscription = Notifications.addNotificationReceivedListener((event) => {
@@ -239,7 +243,7 @@ export default function AppNavigator() {
 
   return (
     <View style={styles.container}>
-      <NavigationContainer ref={navigationRef} linking={{ prefixes: ['laremdia://', 'appcond://'], config: { screens: isWeb ? { Landing: '', Login: 'login', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?' } : { Login: '', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?' } } }}>
+      <NavigationContainer ref={navigationRef} linking={{ prefixes: ['laremdia://', 'appcond://'], config: { screens: isWeb ? { Landing: '', Login: 'login', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?', LegalDocument: 'legal/:document' } : { Login: '', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?' } } }}>
         <Stack.Navigator screenOptions={{ animation: 'fade', contentStyle: { backgroundColor: '#f5f7fb' } }}>
           {userToken && user?.mustChangePassword ? (
             <Stack.Screen name="ForcePasswordChange" component={ForcePasswordChangeScreen} options={{ headerShown: false }} />
@@ -250,6 +254,8 @@ export default function AppNavigator() {
             </>
           ) : userToken && needsProfileSelection ? (
             <Stack.Screen name="SelectProfile" component={SelectProfileScreen} options={{ headerShown: false }} />
+          ) : userToken && nativeAccessBlocked ? (
+            <Stack.Screen name="NativeAccessBlocked" component={NativeAccessBlockedScreen} options={{ headerShown: false }} />
           ) : userToken ? (
             <>
               <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />

@@ -18,7 +18,14 @@ export const localMinutesOfDay = (date: Date) => { const p = localDateParts(date
 // Brasil não observa horário de verão desde 2019 — sempre UTC-3. Meia-noite
 // local em UTC é, portanto, sempre 03:00 UTC do mesmo dia-calendário local.
 const BRAZIL_UTC_OFFSET_HOURS = 3;
-export const brazilMidnightUtc = (daysAgo = 0) => {
-  const today = localDateParts(new Date());
-  return new Date(Date.UTC(today.year, today.month - 1, today.day - daysAgo, BRAZIL_UTC_OFFSET_HOURS, 0, 0, 0));
+
+// Meia-noite local (dia-calendário de `date`, deslocado por `dayOffset` dias)
+// convertida para o instante UTC correspondente. Usada para "dia inteiro" em
+// reservas de espaço: dado qualquer instante dentro do dia desejado, produz o
+// início (dayOffset 0) e o fim (dayOffset 1) daquele dia local em UTC.
+export const localMidnightUtc = (date: Date, dayOffset = 0) => {
+  const parts = localDateParts(date);
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day + dayOffset, BRAZIL_UTC_OFFSET_HOURS, 0, 0, 0));
 };
+
+export const brazilMidnightUtc = (daysAgo = 0) => localMidnightUtc(new Date(), -daysAgo);

@@ -6,7 +6,7 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { query, withTransaction } from '../db';
 import { logAudit } from '../services/auditService';
 import { notifyUsers } from '../services/notificationService';
-import { localDateParts, localDayKey, localMinutesOfDay } from '../services/timezone';
+import { localDateParts, localDayKey, localMinutesOfDay, localMidnightUtc } from '../services/timezone';
 
 const router = Router();
 router.use(authenticate);
@@ -22,7 +22,7 @@ const notifyManagers=async(condominiumId:string,senderId:string,title:string,bod
 router.get('/',asyncHandler(async(req,res)=>{
   const condominiumId=req.user?.condominiumId;if(!condominiumId)return res.status(400).json({message:'Condomínio obrigatório.'});
   const isManager=manager(req.user?.role);
-  const spaces=await query(`select id,name,description,rules,capacity,available_from,available_until,active,created_at from reservable_spaces where condominium_id=$1 and ($2 or active=true) order by active desc,name`,[condominiumId,isManager]);
+  const spaces=await query(`select id,name,description,rules,capacity,available_from,available_until,reservation_mode,active,created_at from reservable_spaces where condominium_id=$1 and ($2 or active=true) order by active desc,name`,[condominiumId,isManager]);
   const reservations=await query(`select r.id,r.space_id,r.requested_by,r.starts_at,r.ends_at,r.purpose,r.status,r.review_note,r.created_at,s.name space_name,coalesce(u.full_name,u.username) requested_by_name,b.name || ' / ' || un.number unit_label from space_reservations r join reservable_spaces s on s.id=r.space_id join users u on u.id=r.requested_by left join units un on un.id=u.unit_id left join blocks b on b.id=un.block_id where r.condominium_id=$1 and ($2 or r.requested_by=$3) order by r.starts_at desc`,[condominiumId,isManager,req.user?.id]);
   return res.json({spaces:spaces.rows,reservations:reservations.rows});
 }));
@@ -37,9 +37,9 @@ router.get('/availability',asyncHandler(async(req,res)=>{
 }));
 
 router.post('/spaces',authorize('sindico','subsindico'),asyncHandler(async(req,res)=>{
-  const name=String(req.body?.name||'').trim(),description=String(req.body?.description||'').trim(),rules=String(req.body?.rules||'').trim();const capacity=req.body?.capacity?Number(req.body.capacity):null;const availableFrom=String(req.body?.availableFrom||'08:00'),availableUntil=String(req.body?.availableUntil||'23:00');
+  const name=String(req.body?.name||'').trim(),description=String(req.body?.description||'').trim(),rules=String(req.body?.rules||'').trim();const capacity=req.body?.capacity?Number(req.body.capacity):null;const availableFrom=String(req.body?.availableFrom||'08:00'),availableUntil=String(req.body?.availableUntil||'23:00');const reservationMode=req.body?.reservationMode==='dia_inteiro'?'dia_inteiro':'horario';
   if(name.length<2||name.length>120)return res.status(400).json({message:'O nome deve ter entre 2 e 120 caracteres.'});if(description.length>1000||rules.length>3000)return res.status(400).json({message:'Descrição ou regras excedem o limite.'});if(capacity!==null&&(!Number.isInteger(capacity)||capacity<1))return res.status(400).json({message:'Capacidade inválida.'});if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(availableFrom)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(availableUntil)||availableUntil<=availableFrom)return res.status(400).json({message:'Informe um horário permitido válido.'});
-  const result=await query<any>(`insert into reservable_spaces(id,condominium_id,name,description,rules,capacity,available_from,available_until,created_by) values($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,[randomUUID(),req.user?.condominiumId,name,description||null,rules||null,capacity,availableFrom,availableUntil,req.user?.id]);await logAudit(req,'reserva_espacos','space_created',`Cadastrou o espaço ${name}`,{entityId:result.rows[0].id});return res.status(201).json({space:result.rows[0]});
+  const result=await query<any>(`insert into reservable_spaces(id,condominium_id,name,description,rules,capacity,available_from,available_until,reservation_mode,created_by) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,[randomUUID(),req.user?.condominiumId,name,description||null,rules||null,capacity,availableFrom,availableUntil,reservationMode,req.user?.id]);await logAudit(req,'reserva_espacos','space_created',`Cadastrou o espaço ${name}`,{entityId:result.rows[0].id});return res.status(201).json({space:result.rows[0]});
 }));
 
 router.post('/blocks',authorize('sindico','subsindico'),asyncHandler(async(req,res)=>{
@@ -56,7 +56,9 @@ router.delete('/blocks/:id',authorize('sindico','subsindico'),asyncHandler(async
 router.patch('/spaces/:id',authorize('sindico','subsindico'),asyncHandler(async(req,res)=>{
   const active=typeof req.body?.active==='boolean'?req.body.active:null;const name=req.body?.name===undefined?null:String(req.body.name).trim();
   if(name!==null&&(name.length<2||name.length>120))return res.status(400).json({message:'Nome inválido.'});
-  const result=await query<any>(`update reservable_spaces set name=coalesce($1,name),description=case when $2::boolean then $3 else description end,rules=case when $4::boolean then $5 else rules end,capacity=case when $6::boolean then $7 else capacity end,active=coalesce($8,active),updated_at=now() where id=$9 and condominium_id=$10 returning *`,[name,req.body?.description!==undefined,req.body?.description||null,req.body?.rules!==undefined,req.body?.rules||null,req.body?.capacity!==undefined,req.body?.capacity||null,active,req.params.id,req.user?.condominiumId]);if(!result.rows[0])return res.status(404).json({message:'Espaço não encontrado.'});await logAudit(req,'reserva_espacos','space_updated',`Atualizou o espaço ${result.rows[0].name}`,{entityId:req.params.id});return res.json({space:result.rows[0]});
+  const reservationMode=req.body?.reservationMode===undefined?null:req.body.reservationMode;
+  if(reservationMode!==null&&reservationMode!=='dia_inteiro'&&reservationMode!=='horario')return res.status(400).json({message:'Tipo de reserva inválido.'});
+  const result=await query<any>(`update reservable_spaces set name=coalesce($1,name),description=case when $2::boolean then $3 else description end,rules=case when $4::boolean then $5 else rules end,capacity=case when $6::boolean then $7 else capacity end,active=coalesce($8,active),reservation_mode=coalesce($9,reservation_mode),updated_at=now() where id=$10 and condominium_id=$11 returning *`,[name,req.body?.description!==undefined,req.body?.description||null,req.body?.rules!==undefined,req.body?.rules||null,req.body?.capacity!==undefined,req.body?.capacity||null,active,reservationMode,req.params.id,req.user?.condominiumId]);if(!result.rows[0])return res.status(404).json({message:'Espaço não encontrado.'});await logAudit(req,'reserva_espacos','space_updated',`Atualizou o espaço ${result.rows[0].name}`,{entityId:req.params.id});return res.json({space:result.rows[0]});
 }));
 
 router.patch('/spaces/:id/schedule',authorize('sindico','subsindico'),asyncHandler(async(req,res)=>{
@@ -67,8 +69,21 @@ router.patch('/spaces/:id/schedule',authorize('sindico','subsindico'),asyncHandl
 
 router.post('/reservations',authorize('proprietario','inquilino'),asyncHandler(async(req,res)=>{
   const condominiumId=req.user!.condominiumId!;if(!(await activeResident(req.user!.id,condominiumId)))return res.status(403).json({message:'Somente moradores ativos vinculados a uma unidade podem reservar.'});
-  const spaceId=String(req.body?.spaceId||''),startsAt=new Date(req.body?.startsAt),endsAt=new Date(req.body?.endsAt),purpose=String(req.body?.purpose||'').trim();if(!spaceId||Number.isNaN(startsAt.getTime())||Number.isNaN(endsAt.getTime())||startsAt<=new Date()||endsAt<=startsAt)return res.status(400).json({message:'Informe um período futuro válido.'});if(endsAt.getTime()-startsAt.getTime()>24*60*60*1000)return res.status(400).json({message:'A reserva não pode ultrapassar 24 horas.'});if(purpose.length>500)return res.status(400).json({message:'A finalidade deve ter no máximo 500 caracteres.'});
-  const schedule=await query<any>(`select available_from::text,available_until::text from reservable_spaces where id=$1 and condominium_id=$2 and active=true`,[spaceId,condominiumId]);if(!schedule.rows[0])return res.status(404).json({message:'Espaço indisponível.'});const toMinutes=(value:string)=>{const [hour,minute]=value.slice(0,5).split(':').map(Number);return hour*60+minute;};if(localDayKey(startsAt)!==localDayKey(endsAt)||localMinutesOfDay(startsAt)<toMinutes(schedule.rows[0].available_from)||localMinutesOfDay(endsAt)>toMinutes(schedule.rows[0].available_until))return res.status(400).json({message:`Este espaço pode ser reservado somente entre ${schedule.rows[0].available_from.slice(0,5)} e ${schedule.rows[0].available_until.slice(0,5)}, no mesmo dia.`});
+  const spaceId=String(req.body?.spaceId||''),rawStartsAt=new Date(req.body?.startsAt),purpose=String(req.body?.purpose||'').trim();if(!spaceId||Number.isNaN(rawStartsAt.getTime()))return res.status(400).json({message:'Informe um período futuro válido.'});if(purpose.length>500)return res.status(400).json({message:'A finalidade deve ter no máximo 500 caracteres.'});
+  const schedule=await query<any>(`select available_from::text,available_until::text,reservation_mode from reservable_spaces where id=$1 and condominium_id=$2 and active=true`,[spaceId,condominiumId]);if(!schedule.rows[0])return res.status(404).json({message:'Espaço indisponível.'});
+  let startsAt:Date,endsAt:Date;
+  if(schedule.rows[0].reservation_mode==='dia_inteiro'){
+    // Dia inteiro: o cliente só identifica o dia (via startsAt); o intervalo
+    // reservado é sempre o dia local inteiro, calculado no servidor — nunca
+    // o que o cliente mandar em endsAt.
+    startsAt=localMidnightUtc(rawStartsAt);endsAt=localMidnightUtc(rawStartsAt,1);
+    if(endsAt<=new Date())return res.status(400).json({message:'Escolha um dia futuro.'});
+  }else{
+    endsAt=new Date(req.body?.endsAt);startsAt=rawStartsAt;
+    if(Number.isNaN(endsAt.getTime())||startsAt<=new Date()||endsAt<=startsAt)return res.status(400).json({message:'Informe um período futuro válido.'});
+    if(endsAt.getTime()-startsAt.getTime()>24*60*60*1000)return res.status(400).json({message:'A reserva não pode ultrapassar 24 horas.'});
+    const toMinutes=(value:string)=>{const [hour,minute]=value.slice(0,5).split(':').map(Number);return hour*60+minute;};if(localDayKey(startsAt)!==localDayKey(endsAt)||localMinutesOfDay(startsAt)<toMinutes(schedule.rows[0].available_from)||localMinutesOfDay(endsAt)>toMinutes(schedule.rows[0].available_until))return res.status(400).json({message:`Este espaço pode ser reservado somente entre ${schedule.rows[0].available_from.slice(0,5)} e ${schedule.rows[0].available_until.slice(0,5)}, no mesmo dia.`});
+  }
   const reservation=await withTransaction(async client=>{await client.query(`select pg_advisory_xact_lock(hashtext($1))`,[spaceId]);const space=await client.query<any>(`select id,name from reservable_spaces where id=$1 and condominium_id=$2 and active=true`,[spaceId,condominiumId]);if(!space.rows[0])throw Object.assign(new Error('Espaço indisponível.'),{status:404});const conflict=await client.query(`select id from space_reservations where space_id=$1 and status in ('pending','approved') and starts_at<$3 and ends_at>$2 union all select id from space_schedule_blocks where space_id=$1 and starts_at<$3 and ends_at>$2 limit 1`,[spaceId,startsAt,endsAt]);if(conflict.rows[0])throw Object.assign(new Error('Este horário está ocupado, bloqueado ou aguardando aprovação.'),{status:409});const created=await client.query<any>(`insert into space_reservations(id,condominium_id,space_id,requested_by,starts_at,ends_at,purpose) values($1,$2,$3,$4,$5,$6,$7) returning *`,[randomUUID(),condominiumId,spaceId,req.user?.id,startsAt,endsAt,purpose||null]);return {...created.rows[0],space_name:space.rows[0].name};}).catch((error:any)=>{if(error.status)return null;throw error;});
   if(!reservation){const conflict=await query(`select 1 from reservable_spaces where id=$1 and condominium_id=$2 and active=true`,[spaceId,condominiumId]);return res.status(conflict.rows[0]?409:404).json({message:conflict.rows[0]?'Este horário já está ocupado ou aguardando aprovação.':'Espaço indisponível.'});}
   await notifyManagers(condominiumId,req.user!.id,'Nova solicitação de reserva',`${req.user?.fullName||req.user?.username} solicitou o espaço ${reservation.space_name}.`);await logAudit(req,'reserva_espacos','reservation_requested','Solicitou uma reserva',{entityId:reservation.id});return res.status(201).json({reservation});

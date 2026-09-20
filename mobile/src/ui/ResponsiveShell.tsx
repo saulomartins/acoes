@@ -34,6 +34,7 @@ const items: Item[] = [
   { label: 'Planos da plataforma', route: 'PlatformPlans', symbol: '◆', roles: ['admin_geral'] },
   { label: 'Faturamento da plataforma', route: 'PlatformRevenue', symbol: '$', roles: ['admin_geral'] },
   { label: 'Auditoria', route: 'AuditLog', symbol: '🛡', roles: ['admin_geral'] },
+  { label: 'Integração com Google Drive', route: 'GoogleDriveIntegrationGuide', symbol: '📁', roles: ['admin_geral'] },
   { label: 'Suporte', route: 'Support', symbol: '🛠', roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'pessoas' },
   { label: 'Tipologias', route: 'UnitTypes', symbol: '▧', roles: ['sindico', 'subsindico'], feature: 'tipologias' },
   { label: 'Blocos e unidades', route: 'Units', symbol: '▦', roles: ['sindico', 'subsindico'], feature: 'blocos_unidades' },
@@ -67,7 +68,7 @@ const noticeRoutes = ['Communications', 'Reports'];
 const bankRoutes = ['Banks', 'BankConfigurations', 'BankLink', 'BankIntegration', 'BankIntegrationGuide'];
 const regulationRoutes = ['RegulationArticles', 'Occurrences', 'InfractionNoticeIssue', 'InfractionNotices'];
 const participationRoutes = ['Polls', 'SpaceReservations'];
-const platformRoutes = ['Condominiums', 'PlatformPlans', 'PlatformRevenue', 'AuditLog'];
+const platformRoutes = ['Condominiums', 'PlatformPlans', 'PlatformRevenue', 'AuditLog', 'GoogleDriveIntegrationGuide'];
 
 export default function ResponsiveShell({ activeRoute, navigation, children }: { activeRoute: string; navigation: any; children: React.ReactNode }) {
   const { atLeastTablet: desktop, isDesktop: isWide, isTablet } = useBreakpoint();

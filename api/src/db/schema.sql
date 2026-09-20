@@ -235,6 +235,10 @@ create table if not exists reservable_spaces (
   capacity integer check (capacity is null or capacity > 0),
   available_from time not null default '08:00',
   available_until time not null default '23:00',
+  -- 'horario': morador escolhe um intervalo dentro de available_from/until.
+  -- 'dia_inteiro': a reserva ocupa o dia local inteiro (00:00-24:00), sem
+  -- horário — available_from/until ficam sem uso para esses espaços.
+  reservation_mode text not null default 'horario' check (reservation_mode in ('dia_inteiro','horario')),
   active boolean not null default true,
   created_by uuid not null references users(id) on delete restrict,
   created_at timestamptz not null default now(),
@@ -243,6 +247,7 @@ create table if not exists reservable_spaces (
 );
 alter table reservable_spaces add column if not exists available_from time not null default '08:00';
 alter table reservable_spaces add column if not exists available_until time not null default '23:00';
+alter table reservable_spaces add column if not exists reservation_mode text not null default 'horario' check (reservation_mode in ('dia_inteiro','horario'));
 
 create table if not exists space_reservations (
   id uuid primary key default gen_random_uuid(),

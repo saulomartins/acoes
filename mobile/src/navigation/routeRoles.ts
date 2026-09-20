@@ -20,6 +20,7 @@ export const TOUR_STEPS: TourStep[] = [
   { route: 'PlatformPlans', title: 'Planos da plataforma', description: 'Planos comerciais oferecidos aos condomínios clientes.', roles: ['admin_geral'] },
   { route: 'PlatformRevenue', title: 'Faturamento da plataforma', description: 'Receita da plataforma por condomínio e período.', roles: ['admin_geral'] },
   { route: 'AuditLog', title: 'Auditoria', description: 'Histórico de ações realizadas por administradores e síndicos no sistema.', roles: ['admin_geral'] },
+  { route: 'GoogleDriveIntegrationGuide', title: 'Integração com Google Drive', description: 'Passo a passo para ativar, num condomínio, o envio de comprovantes e anexos para uma pasta do Google Drive.', roles: ['admin_geral'] },
   { route: 'Support', title: 'Suporte', description: 'Localize uma pessoa (síndico/subsíndico só no próprio condomínio; admin_geral em qualquer um) e resolva problemas de acesso: sessão travada, login bloqueado, senha e aceite de termos.', roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'pessoas' },
   { route: 'UnitTypes', title: 'Tipologias', description: 'Configuração dos tipos de unidade e valores usados nas cobranças.', roles: ['sindico', 'subsindico'], feature: 'tipologias' },
   { route: 'Units', title: 'Blocos e unidades', description: 'Organização dos blocos, apartamentos e moradores vinculados.', roles: ['sindico', 'subsindico'], feature: 'blocos_unidades' },

@@ -8,6 +8,7 @@ import Condominiums from '../screens/Condominiums';
 import Users from '../screens/Users';
 import BankIntegration from '../screens/BankIntegration';
 import BankIntegrationGuide from '../screens/BankIntegrationGuide';
+import GoogleDriveIntegrationGuide from '../screens/GoogleDriveIntegrationGuide';
 import UnitTypes from '../screens/UnitTypes';
 import UnitExtraCharges from '../screens/UnitExtraCharges';
 import UnitConsumption from '../screens/UnitConsumption';
@@ -42,6 +43,7 @@ const BillingSettingsScreen = withRoleGuard(withResponsiveShell(BillingSettings,
 const PlatformPlansScreen = withRoleGuard(withResponsiveShell(PlatformPlans, 'PlatformPlans'), 'PlatformPlans');
 const PlatformRevenueScreen = withRoleGuard(withResponsiveShell(PlatformRevenue, 'PlatformRevenue'), 'PlatformRevenue');
 const AuditLogScreen = withRoleGuard(withResponsiveShell(AuditLog, 'AuditLog'), 'AuditLog');
+const GoogleDriveIntegrationGuideScreen = withRoleGuard(withResponsiveShell(GoogleDriveIntegrationGuide, 'GoogleDriveIntegrationGuide'), 'GoogleDriveIntegrationGuide');
 const SupportScreen = withRoleGuard(withResponsiveShell(Support, 'Support'), 'Support');
 const RegulationArticlesScreen = withRoleGuard(withResponsiveShell(RegulationArticles, 'RegulationArticles'), 'RegulationArticles');
 const InfractionNoticeIssueScreen = withRoleGuard(withResponsiveShell(InfractionNoticeIssue, 'InfractionNoticeIssue'), 'InfractionNoticeIssue');
@@ -67,6 +69,7 @@ export function ManagementStackScreens() {
       <Stack.Screen name="PlatformPlans" component={PlatformPlansScreen} options={{ headerShown: false }} />
       <Stack.Screen name="PlatformRevenue" component={PlatformRevenueScreen} options={{ headerShown: false }} />
       <Stack.Screen name="AuditLog" component={AuditLogScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="GoogleDriveIntegrationGuide" component={GoogleDriveIntegrationGuideScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Support" component={SupportScreen} options={{ headerShown: false }} />
       <Stack.Screen name="RegulationArticles" component={RegulationArticlesScreen} options={{ headerShown: false }} />
       <Stack.Screen name="InfractionNoticeIssue" component={InfractionNoticeIssueScreen} options={{ headerShown: false }} />

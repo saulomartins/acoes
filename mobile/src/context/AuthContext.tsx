@@ -53,13 +53,20 @@ type AuthContextType = {
   // casos nada deve ser escondido por funcionalidade, só por papel.
   condominiumFeatures: Record<FeatureKey, boolean> | null;
   // Sempre tem ao menos o perfil padrão quando autenticado. Um seletor de
-  // perfil só faz sentido exibir quando profiles.length > 1.
+  // perfil só faz sentido exibir quando profiles.length > 1. No app nativo já
+  // vem filtrado para só proprietário/inquilino (ver RESIDENT_ROLES) — o app
+  // é exclusivo para moradores, síndico/subsíndico só existem na versão web.
   profiles: Profile[];
   // true logo após um login explícito (usuário/senha) quando a pessoa tem
   // mais de um perfil — AppNavigator usa isso pra mostrar a tela "Entrar
   // como" antes do painel. Nunca fica true numa retomada silenciosa de
   // sessão (reabrir o app), só em signIn().
   needsProfileSelection: boolean;
+  // true no app nativo quando este login não tem nenhum perfil de morador
+  // (proprietário/inquilino) para entrar — só síndico/subsíndico/admin, que
+  // só existem na versão web. AppNavigator mostra uma tela bloqueando o
+  // acesso em vez do painel.
+  nativeAccessBlocked: boolean;
   signIn: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   signUp: (username: string, password: string) => Promise<void>;
@@ -134,11 +141,19 @@ const requestAuth = async (path: '/auth/login' | '/auth/register', username: str
   return data;
 };
 
+// O app nativo (Android/iOS) é exclusivo para moradores — síndico e
+// subsíndico só existem na versão web (app.laremdia.com.br). Filtrar aqui
+// garante que nenhuma tela de seleção/troca de perfil no app chegue a listar
+// esses papéis, mesmo que o login tenha perfis de gestão cadastrados.
+const RESIDENT_ROLES: UserRole[] = ['proprietario', 'inquilino'];
+const isNative = Platform.OS !== 'web';
+
 const fetchProfiles = async (token: string): Promise<Profile[]> => {
   const response = await fetch(`${API_BASE_URL}/auth/profiles`, { headers: { Authorization: `Bearer ${token}` } });
   if (!response.ok) return [];
   const data = (await response.json().catch(() => null)) as { profiles?: Profile[] } | null;
-  return data?.profiles ?? [];
+  const list = data?.profiles ?? [];
+  return isNative ? list.filter(profile => RESIDENT_ROLES.includes(profile.role)) : list;
 };
 
 const switchProfileRequest = async (refreshToken: string, profileId: string | null) => {
@@ -170,6 +185,7 @@ export const AuthContext = createContext<AuthContextType>({
   condominiumFeatures: null,
   profiles: [],
   needsProfileSelection: false,
+  nativeAccessBlocked: false,
   signIn: async () => {},
   signOut: async () => {},
   signUp: async () => {},
@@ -187,7 +203,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [pushError, setPushError] = useState<string | null>(null);
   const [condominiumFeatures, setCondominiumFeatures] = useState<Record<FeatureKey, boolean> | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [profilesLoaded, setProfilesLoaded] = useState(false);
   const [needsProfileSelection, setNeedsProfileSelection] = useState(false);
+  const [nativeAccessBlocked, setNativeAccessBlocked] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -285,14 +303,41 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (!userToken || !user) {
       setProfiles([]);
+      setProfilesLoaded(false);
       return;
     }
     let active = true;
     fetchProfiles(userToken)
-      .then(list => { if (active) setProfiles(list); })
-      .catch(() => { if (active) setProfiles([]); });
+      .then(list => { if (active) { setProfiles(list); setProfilesLoaded(true); } })
+      .catch(() => { if (active) { setProfiles([]); setProfilesLoaded(true); } });
     return () => { active = false; };
   }, [userToken, user?.id]);
+
+  // No app nativo, o perfil ativo nunca pode ficar em síndico/subsíndico/admin
+  // (isso é o que fazia aparecer opções de gestão no menu — o menu já filtra
+  // por user.role, então a garantia real é aqui). Cobre tanto o login quanto
+  // a retomada silenciosa de sessão (reabrir o app): se há exatamente um
+  // perfil de morador, troca sozinho; se há mais de um, mostra "Entrar como"
+  // (só com opções de morador, já filtradas em fetchProfiles); se não há
+  // nenhum, bloqueia o acesso — essa conta só existe na versão web.
+  useEffect(() => {
+    if (!isNative || !profilesLoaded || !user || needsProfileSelection) return;
+    if (RESIDENT_ROLES.includes(user.role)) {
+      setNativeAccessBlocked(false);
+      return;
+    }
+    if (profiles.length === 0) {
+      setNativeAccessBlocked(true);
+      return;
+    }
+    setNativeAccessBlocked(false);
+    if (profiles.length === 1) {
+      switchProfile(profiles[0].id).catch(() => {});
+    } else {
+      setNeedsProfileSelection(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profilesLoaded, user?.id, user?.role, profiles, needsProfileSelection]);
 
   const applyAuthResponse = async (response: AuthResponse) => {
     await saveAuth(response);
@@ -392,13 +437,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUserToken(null);
       setUser(null);
       setNeedsProfileSelection(false);
+      setNativeAccessBlocked(false);
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, userToken, isLoading, authError, pushStatus, pushError, condominiumFeatures, profiles, needsProfileSelection, signIn, signOut, signUp, updateUser, switchProfile, selectProfile }}>
+    <AuthContext.Provider value={{ user, userToken, isLoading, authError, pushStatus, pushError, condominiumFeatures, profiles, needsProfileSelection, nativeAccessBlocked, signIn, signOut, signUp, updateUser, switchProfile, selectProfile }}>
       {children}
     </AuthContext.Provider>
   );
