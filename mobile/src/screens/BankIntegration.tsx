@@ -31,6 +31,8 @@ const defaults:Record<string,{baseUrl:string;tokenPath:string;scopes:string}> = 
   outro: { baseUrl:'', tokenPath:'', scopes:'' },
 };
 
+const B=({children}:{children:React.ReactNode})=><Text style={{fontWeight:'700'}}>{children}</Text>;
+
 export default function BankIntegration({ navigation, route }:any) {
   const section = route?.params?.section || 'configurations';
   const { userToken } = useContext(AuthContext);
@@ -51,6 +53,7 @@ export default function BankIntegration({ navigation, route }:any) {
   const [syncMode,setSyncMode]=useState<'all'|'from_period'>('all');
   const [syncStartPeriod,setSyncStartPeriod]=useState('');
   const [loading,setLoading]=useState(false); const [error,setError]=useState(''); const [notice,setNotice]=useState('');
+  const [guideOpen,setGuideOpen]=useState(false);
   const [testingId,setTestingId]=useState<string|null>(null);
   const [testResults,setTestResults]=useState<Record<string,{ok:boolean;message:string}>>({});
 
@@ -127,6 +130,28 @@ export default function BankIntegration({ navigation, route }:any) {
     </View>
     {error?<Text style={s.error}>{error}</Text>:null}{notice?<Text style={s.success}>{notice}</Text>:null}
 
+    <Panel>
+      <Pressable onPress={()=>setGuideOpen(v=>!v)}><Text style={s.heading}>{guideOpen?'▾':'▸'} Como configurar a integração bancária (passo a passo)</Text></Pressable>
+      {guideOpen?<View>
+        <Text style={s.meta}>São três peças: a <B>aplicação no banco</B>, a <B>configuração</B> aqui em "Configurações" e o <B>vínculo</B> ao condomínio em "Vincular banco". Erro em qualquer uma quebra boleto ou extrato.</Text>
+        <Text style={s.label}>1. Aplicação no banco (Banco Inter)</Text>
+        <Text style={s.meta}>Internet Banking Empresas → Integrar → Nova Integração. Marque <B>todos os escopos de uma vez</B> (<B>boleto-cobranca.write</B>, <B>boleto-cobranca.read</B> e <B>extrato.read</B>): o Inter em geral não deixa acrescentar depois. Copie o <B>Client ID</B> e o <B>Client Secret</B> na hora e guarde em local seguro (<B>o Inter não mostra o secret de novo</B>) e baixe o <B>certificado (.crt)</B> e a <B>chave (.key)</B>.</Text>
+        <Text style={s.label}>Onde conseguir o valor de cada campo</Text>
+        <Text style={s.meta}><B>Client ID</B> e <B>Client Secret</B>: gerados pelo banco quando a aplicação/integração é criada (no Inter: Integrar → Nova Integração). O Secret aparece <B>uma única vez</B>; se perdeu, gere um novo no painel do banco e informe aqui. Para trocar depois, edite a configuração e <B>preencha os dois campos juntos</B>.{'\n'}<B>Caminho do certificado</B> e <B>da chave</B>: o certificado (.crt) e a chave (.key) são baixados no painel do banco ao criar a aplicação. Depois de copiados para o servidor (passo 2), o valor do campo é o caminho onde ficaram, ex.: <B>/data/certs/nome.crt</B> e <B>/data/certs/nome.key</B>. Sempre o par da <B>mesma aplicação</B>.{'\n'}<B>URL base da API</B>: endereço da API do banco, publicado na documentação do desenvolvedor. Banco Inter: <B>https://cdpj.partners.bancointer.com.br</B>{'\n'}<B>Endpoint de autenticação</B>: caminho do token OAuth, também na documentação do banco. Banco Inter: <B>/oauth/v2/token</B>{'\n'}<B>Escopos da API</B>: permissões pedidas ao banco, separadas por espaço, e precisam estar <B>habilitadas na aplicação</B>. Banco Inter: <B>boleto-cobranca.write boleto-cobranca.read</B> (cobrança) e <B>extrato.read</B> (extrato e saldo).{'\n'}<B>Outros bancos</B> (Banco do Brasil, Bradesco): pegue esses valores no portal do desenvolvedor do próprio banco. O cadastro aceita, mas o sistema só emite boleto e lê extrato do <B>Inter</B> por enquanto.</Text>
+        <Text style={s.label}>2. Certificado e chave no servidor</Text>
+        <Text style={s.meta}>Os arquivos <B>não vão pelo app nem pelo Git</B>. Devem ser copiados para o volume <B>/data/certs/</B> do servidor de produção (Railway, serviço <B>acoes</B>) via <B>railway ssh</B>. Passo a passo no arquivo externals/TUTORIAL_INTEGRACAO_BANCARIA.md. Use um <B>nome diferente para cada aplicação</B> e não sobrescreva arquivos em uso.</Text>
+        <Text style={s.label}>3. Configuração (aba Configurações)</Text>
+        <Text style={s.meta}><B>Caminho do certificado e da chave</B>: sempre <B>absolutos em produção</B>, por exemplo <B>/data/certs/inter-unificado.crt</B> (o formato ./certs/... só existe no computador de desenvolvimento). <B>Escopos</B>: exatamente os habilitados no banco. <B>Client Secret vazio na edição mantém o secret antigo</B>: se você trocar o Client ID, informe também o novo Client Secret. Evite várias configurações com nomes parecidos; desative as antigas.</Text>
+        <Text style={s.label}>4. Vínculo (aba Vincular banco)</Text>
+        <Text style={s.meta}>Marque <B>Cobrança (boletos)</B> e/ou <B>Extrato bancário</B>, escolha o condomínio e <B>confira o Client ID</B> da configuração antes de salvar. <B>Sem vínculo de extrato</B>, a Prestação de contas não traz despesas nem saldo. O período de busca de boletos "a partir de um mês" <B>exclui permanentemente</B> boletos anteriores já importados.</Text>
+        <Text style={s.label}>5. Teste</Text>
+        <Text style={s.meta}>Use <B>Testar conexão</B> na configuração; depois, em Prestação de contas, <B>Preencher dados do mês</B> e <B>Baixar extrato em PDF</B>.</Text>
+        <Text style={s.label}>Erros comuns</Text>
+        <Text style={s.meta}><B>"Nenhuma integração bancária de extrato configurada"</B>: falta o vínculo de extrato (passo 4).{'\n'}<B>"Certificado do Banco Inter não encontrado"</B>: caminho errado ou arquivo fora de /data/certs (passos 2 e 3).{'\n'}<B>"requested scope is not registered for this client"</B>: escopo não habilitado no banco, escopo digitado diferente, ou Client ID trocado sem informar o novo Client Secret.{'\n'}<B>"Integração Banco Inter desabilitada ou incompleta"</B>: configuração inativa ou campo obrigatório vazio.</Text>
+        <Text style={s.small}>Só o <B>Banco Inter</B> tem adaptador operacional. Outros bancos podem ser cadastrados e vinculados, mas não emitem boleto nem leem extrato até o adaptador ser desenvolvido.</Text>
+      </View>:null}
+    </Panel>
+
     {section==='banks'?<View ref={registerSection('banks')} style={[isActive('banks')&&s.tourHighlight]}><Panel><Text style={s.heading}>Cadastro de bancos</Text><Text style={s.meta}>Bancos cadastrados ficam disponíveis para criar configurações e realizar vínculos.</Text><TextField label="Nome do banco" value={newBankName} onChangeText={setNewBankName} placeholder="Ex.: Banco Inter"/><AppButton title="Cadastrar banco" onPress={createBank} disabled={loading||!newBankName.trim()}/><CardGrid columns={{mobile:1,tablet:2,desktop:3}}>{providers.map(item=><View key={item.id} style={s.option}><Text style={s.optionText}>{item.name}</Text><Text style={s.small}>{item.operational?'Integração operacional':item.adapterKey?'Adaptador pendente':'Banco cadastrado — adaptador pendente'}</Text></View>)}</CardGrid></Panel></View>:null}
 
     {section==='configurations'?<><View ref={registerSection('configForm')} style={[isActive('configForm')&&s.tourHighlight]}><Panel><Text style={s.heading}>{editingId?'Editar configuração':'Nova configuração bancária'}</Text>
@@ -137,8 +162,8 @@ export default function BankIntegration({ navigation, route }:any) {
         <TextField label="Nome da configuração" value={name} onChangeText={setName} placeholder="Ex.: Templum - Banco Inter"/>
         <TextField label="Client ID" hint="Chave da aplicação fornecida pelo banco." value={clientId} onChangeText={setClientId} placeholder="Client ID / chave da aplicação" autoCapitalize="none"/>
         <TextField label="Client Secret" hint={editingId?'Deixe vazio para manter o segredo atual.':undefined} value={clientSecret} onChangeText={setClientSecret} placeholder={editingId?'Novo Client Secret (vazio mantém o atual)':'Client Secret'} secureTextEntry autoCapitalize="none"/>
-        {provider==='inter'?<TextField label="Caminho do certificado" value={certPath} onChangeText={setCertPath} placeholder="./certs/inter.crt"/>:null}
-        {provider==='inter'?<TextField label="Caminho da chave privada" value={keyPath} onChangeText={setKeyPath} placeholder="./certs/inter.key"/>:null}
+        {provider==='inter'?<TextField label="Caminho do certificado" hint="Em produção use o caminho absoluto, ex.: /data/certs/inter.crt" value={certPath} onChangeText={setCertPath} placeholder="./certs/inter.crt"/>:null}
+        {provider==='inter'?<TextField label="Caminho da chave privada" hint="Em produção use o caminho absoluto, ex.: /data/certs/inter.key" value={keyPath} onChangeText={setKeyPath} placeholder="./certs/inter.key"/>:null}
         <TextField label="URL base da API" value={baseUrl} onChangeText={setBaseUrl} placeholder="https://..." autoCapitalize="none"/>
         <TextField label="Endpoint de autenticação" value={tokenPath} onChangeText={setTokenPath} placeholder="/oauth/v2/token" autoCapitalize="none"/>
         <TextField label="Escopos da API" value={scopes} onChangeText={setScopes} placeholder="boleto-cobranca.write boleto-cobranca.read" autoCapitalize="none"/>

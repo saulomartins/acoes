@@ -904,3 +904,102 @@ travada / "invalid or expired token" / precisar resetar senha ou destravar
 login, o caminho é a tela **Suporte** — pelo síndico/subsíndico daquele
 condomínio, se possível, senão por `admin_geral`. SQL direto no banco só
 deve ser usado se a ferramenta não cobrir o caso.
+
+## Publicação 1.4.0 de 13/09/2026
+
+Publicada a partir da working tree do `master` (ainda não commitada no
+momento deste registro — `railway up` sobe o diretório local direto, sem
+depender de git push).
+
+- API: `railway up --service acoes --environment production` publicou o
+  deployment `b43be1f8-ceba-428e-a9c8-ea68d200ecff`, status `SUCCESS`; logs
+  de inicialização limpos.
+- Banco: passo 3 executado (`mkdir -p dist/db && cp src/db/schema.sql
+  dist/db/schema.sql && node dist/scripts/setupDatabase.js`), resultado
+  `Schema applied successfully`. Mudança: nova coluna
+  `reservable_spaces.reservation_mode` (`dia_inteiro`/`horario`), idempotente
+  e sem operação destrutiva.
+- Web: build local (`EXPO_PUBLIC_API_URL=https://acoes-production.up.railway.app
+  npx expo export --platform web`), conferido antes de publicar: bundle
+  contém `acoes-production.up.railway.app`, zero ocorrências de
+  `localhost:3000`. Deployment Cloudflare `c763e3c1.lar-em-dia.pages.dev`;
+  domínio `gestaolaremdia.com` HTTP 200 servindo o bundle
+  `AppEntry-57f66ca73e49cdb020fc3df18cda297d.js`.
+- Smoke test: `POST /auth/login` em produção com usuário inexistente
+  devolveu HTTP 401 (não 500) e `access-control-allow-origin:
+  https://gestaolaremdia.com`.
+- Android: versão `1.4.0`, versionCode `32` (auto-incrementado pelo EAS),
+  perfil `production-apk`, pipeline `npm run release:apk` completo sem
+  intervenção manual (desta vez `releases:seed-android` **não** estourou
+  memória — mesma falha não-determinística documentada nas publicações
+  anteriores). Build EAS `915efc97-756f-466a-8ff6-a83f79318fe6`. Arquivo
+  `releases/lar-em-dia-1.4.0-build-32-production.apk` (72.682.221 bytes).
+  SHA-256: `DE24DE8DC7DAAF9FA355CBF50D4C885BB7E88C83F2A8508C803ED8F6A845F7C4`.
+  Assinatura APK Scheme v2 validada com `apksigner`; mesmo signer RSA 2048
+  bits das versões anteriores (chave pública SHA-256
+  `2dd2dd1a3b0b3024...`). Publicado na central "Instalar aplicativo" via
+  `releases:seed-android`.
+
+### O que mudou nesta versão
+
+- **App nativo restrito a moradores.** Síndico/subsíndico/admin_geral não
+  conseguem mais ficar com um desses perfis ativo no app Android/iOS — a
+  seleção de perfil (`AuthContext.tsx`) filtra pra só
+  proprietário/inquilino; se o login não tiver nenhum perfil de morador, uma
+  tela nova (`NativeAccessBlocked.tsx`) explica que o acesso de gestão é só
+  na versão web. Objetivo: parar de mostrar opções de gestão (síndico/
+  subsíndico) na seleção de perfil do app nativo.
+- **Reserva de espaços com modo "dia inteiro" ou "horário" por ambiente.**
+  Nova coluna `reservable_spaces.reservation_mode`. Síndico/subsíndico
+  escolhe o modo ao cadastrar o espaço; morador é guiado automaticamente
+  pro fluxo certo (calendário com um único botão "dia inteiro" vs. grade de
+  horários de 1h). `POST /space-reservations/reservations` recalcula o
+  intervalo no servidor pra `dia_inteiro` (nunca confia no horário que o
+  cliente mandar).
+- **Guia interno "Integração com Google Drive"** (`admin_geral`, menu
+  Plataforma) — não existia nenhuma documentação de como ativar isso por
+  condomínio; agora tem passo a passo (compartilhar a pasta com
+  `laremdia.condominio@gmail.com` como Editor, colar o link em Condomínios,
+  testar, salvar) e os erros mais comuns.
+- **Política de Privacidade e Termos ganharam URL pública**
+  (`gestaolaremdia.com/legal/privacy` e `/legal/terms`, via
+  `LegalDocument: 'legal/:document'` no `linking.config` do
+  `AppNavigator.tsx`). Antes só existiam dentro do fluxo autenticado/
+  cadastro — sem link direto, uma exigência de publicação na Play Store
+  (política de privacidade acessível publicamente) não era atendida.
+  Motivado por: usuário quer publicar o app na Play Store.
+
+### Play Store: conta criada pelo usuário em 13/09/2026, AAB já gerado
+
+Usuário criou a conta de desenvolvedor no Google Play Console em
+13/09/2026. Ainda **não** foi feita nenhuma ação dentro do Play Console
+(criar o app, subir o AAB, preencher ficha/segurança de dados) — nada disso
+tem acesso automatizado ainda (sem chave de serviço/EAS Submit configurada),
+então são passos manuais do usuário, com esta sessão preparando o material.
+
+- **AAB gerado**: perfil `production` do `eas.json`. Build EAS
+  `bec1e5c8-191c-4257-b3a6-fba750790734`, versão `1.4.0`, versionCode `33`
+  (auto-incrementado a partir do `32` do APK anterior — mesmo código-fonte,
+  formato diferente). Arquivo salvo em
+  `releases/lar-em-dia-1.4.0-build-33-production.aab` (51.412.723 bytes).
+  SHA-256: `203CF0307D9B6F9DE7FB33787D5910304609C5CF36AC5C3C1D8A76F42C961EAE`.
+  Atenção: a URL de artefato do EAS (`expo.dev/artifacts/eas/...`) não é o
+  binário direto — o corpo da resposta é uma segunda URL
+  (`api.expo.dev/v2/artifacts/eas/...`) que precisa ser buscada de novo pra
+  baixar o arquivo de verdade. Isso não afeta a assinatura: é o mesmo
+  keystore remoto (Build Credentials `hOI5MMwmV9`) usado no APK.
+- **Ficha da loja e formulário de segurança de dados**: rascunho preparado
+  como artifact HTML (descrição curta/completa em pt-BR focada no morador,
+  já que o app nativo não tem mais telas de gestão; categoria sugerida
+  "Estilo de vida", não "Casa e decoração"; tabela de dados coletados
+  baseada nas colunas reais de `users`/anexos/`device_tokens`). Publicado
+  fora do repositório (artifact Claude), o usuário tem o link salvo na
+  conversa.
+- **Pendente, só o usuário pode fazer**: dentro do Play Console — criar o
+  app, colar a ficha, subir o AAB acima, e configurar o teste fechado
+  (mínimo 12 testadores por 14 dias antes de liberar em produção geral,
+  exigência do Google pra contas novas).
+- **Pendente, esta sessão ajuda quando o usuário pedir**: configurar o EAS
+  Submit (precisa de chave de serviço criada em Configuração > Acesso à API
+  do Play Console, só depois que o app já existir lá) pra automatizar
+  envios futuros em vez de upload manual.
