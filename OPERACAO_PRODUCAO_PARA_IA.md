@@ -1003,3 +1003,49 @@ então são passos manuais do usuário, com esta sessão preparando o material.
   Submit (precisa de chave de serviço criada em Configuração > Acesso à API
   do Play Console, só depois que o app já existir lá) pra automatizar
   envios futuros em vez de upload manual.
+
+## Publicação de 23/09/2026 — cobrança da plataforma via Pix (Mercado Pago)
+
+Publicada a partir do `master` (commits `12de4e2` e `49bdfd3`, já no remoto).
+
+- API: `railway up` → deployment `94b129a7-cdf5-4395-b1ed-0fb46733083e`, `SUCCESS`.
+  O job de boot falhou uma vez com `column ... does not exist` (esperado: a API
+  nova sobe antes da migração; o job captura o erro e não gera nada).
+- Banco: passo 3 executado logo depois, `Schema applied successfully`. Mudanças
+  aditivas em `platform_invoices` (Pix, vencimento, cancelamento/estorno,
+  recibo), em `platform_plans` (tipo `included_overage`) e a troca da
+  unique `(condominium_id, reference_month)` por um índice único parcial
+  (uma fatura ABERTA por condomínio/mês). Faturas antigas ganham vencimento
+  retroativo já com os lembretes marcados como enviados (sem e-mail retroativo).
+- Web: build com `EXPO_PUBLIC_API_URL` de produção, bundle sem `localhost:3000`;
+  Cloudflare Pages `4a7b92f3.lar-em-dia.pages.dev`; `gestaolaremdia.com` 200
+  servindo `AppEntry-41a07d302601e8d5df918f6df7bd6425.js`.
+- Variáveis novas no Railway (só nomes, nunca valores): `MERCADOPAGO_ACCESS_TOKEN`,
+  `MERCADOPAGO_WEBHOOK_SECRET`, `API_PUBLIC_URL`, `PLATFORM_RECEIPT_OWNER_NAME`,
+  `PLATFORM_RECEIPT_OWNER_CPF`, `PLATFORM_RECEIPT_OWNER_CITY`.
+- Smoke: `/health` 200; webhook com segredo errado 404; `/platform-plans/invoices`
+  e `/condominiums/platform-invoice` sem login 401; CORS ok.
+
+### O que mudou
+- Fatura da plataforma agora é gerada pelo job diário (9h e no boot) e pelo
+  botão "Gerar faturas do mês" do admin geral — não mais no login do síndico.
+  Vencimento = geração + 10 dias; Pix (API de Orders `v1/orders`) vale 30 dias.
+- Pagamento confirmado por webhook (opcional; tópico `order`, URL
+  `/webhooks/mercadopago/<segredo>`, cadastrado no painel do Mercado Pago —
+  a API de Orders NÃO aceita `notification_url` no corpo), por reconciliação a
+  cada 15 min e pelo botão "Verificar" do painel. Pago = `status=processed` +
+  `status_detail=accredited` (vem da documentação; AINDA NÃO validado com um
+  pagamento real — conferir no primeiro).
+- Painel "Recebimentos da plataforma" (admin geral): verificar, marcar como paga
+  (manual), reenviar recibo, gerar Pix, cancelar/corrigir e reemitir (com motivo,
+  cancela o Pix no Mercado Pago e avisa o síndico) e estornar (só registra).
+- Lembretes de fatura da plataforma (3 dias antes / em atraso) e de boleto de
+  morador por e-mail; plano "base + incluídos + excedente" (`included_overage`).
+
+### Pendências conhecidas
+- Webhook de produção ainda não cadastrado no painel do Mercado Pago (a
+  reconciliação a cada 15 min cobre).
+- Os planos Essencial/Intermediário/Completo foram criados só no banco LOCAL:
+  cadastrar em produção pela tela "Planos da plataforma".
+- Único condomínio com plano em produção (Templum) só começa a ser cobrado em
+  2026-10-22.
