@@ -31,5 +31,17 @@ const runDailyChecks = async () => {
 // ficado fora do ar no horário programado) e depois diariamente às 9h.
 export const startBillingReminderScheduler = () => {
   cron.schedule('0 9 * * *', runDailyChecks, { timezone: 'America/Sao_Paulo' });
+  // Sem depender do webhook do Mercado Pago: a cada 15 minutos confere os Pix
+  // de faturas da plataforma ainda em aberto (poucas consultas — só as
+  // pendentes) e confirma os pagos, com o recibo. O webhook, quando
+  // cadastrado, só adianta essa confirmação.
+  cron.schedule('*/15 * * * *', async () => {
+    try {
+      const reconciled = await reconcilePlatformInvoices();
+      if (reconciled.paid) console.log(`Faturas da plataforma: ${reconciled.paid} pagamento(s) confirmado(s) na reconciliação.`);
+    } catch (error) {
+      console.error('Falha na reconciliação das faturas da plataforma', error);
+    }
+  }, { timezone: 'America/Sao_Paulo' });
   runDailyChecks();
 };
