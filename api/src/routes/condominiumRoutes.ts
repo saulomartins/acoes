@@ -8,6 +8,8 @@ import { getInterAccessToken, type InterIntegrationConfig } from '../services/in
 import { sendWhatsAppTemplateMessage } from '../services/whatsappService';
 import { extractDriveFolderId, getDriveFolderMeta } from '../services/googleDriveService';
 import { FEATURE_CATALOG, FEATURE_KEYS, NEW_CONDOMINIUM_FEATURE_DEFAULTS, dependentsOf, isFeatureKey, type FeatureKey } from '../services/featureCatalog';
+import { getOpenPlatformInvoice } from '../services/platformInvoiceService';
+import { countActiveUsers, computeIncludedOverage, computePlanAmountCents, type ActiveUserMetric, type PlatformPlan } from '../services/platformPlanService';
 
 const router = Router();
 const digits = (value: unknown) => String(value ?? '').replace(/\D/g, '');
@@ -57,19 +59,42 @@ const mapInterIntegration = (row: InterIntegrationRow): InterIntegrationConfig =
 // proprietário acompanha uma unidade alugada a um inquilino. NÃO é exclusivo
 // com morar na própria unidade — a mesma pessoa pode morar na sua unidade E
 // monitorar outra, então esse número nunca é subtraído de registeredOwners.
-const EFFECTIVE_ROLE = `(case
-  when u.role='sindico' or exists(select 1 from user_profiles up where up.user_id=u.id and up.role='sindico' and up.condominium_id=u.condominium_id) then 'sindico'
-  when u.role='subsindico' or exists(select 1 from user_profiles up where up.user_id=u.id and up.role='subsindico' and up.condominium_id=u.condominium_id) then 'subsindico'
-  else u.role
+// Versões parametrizadas por alias — precisamos delas de novo mais abaixo
+// (alias `t`) pra achar o inquilino de uma unidade a partir da linha do
+// proprietário (alias `u`).
+const effectiveRoleSql = (alias: string) => `(case
+  when ${alias}.role='sindico' or exists(select 1 from user_profiles up where up.user_id=${alias}.id and up.role='sindico' and up.condominium_id=${alias}.condominium_id) then 'sindico'
+  when ${alias}.role='subsindico' or exists(select 1 from user_profiles up where up.user_id=${alias}.id and up.role='subsindico' and up.condominium_id=${alias}.condominium_id) then 'subsindico'
+  else ${alias}.role
 end)`;
-const MONITORS_ELSEWHERE = `exists (select 1 from unit_ownerships oo where oo.owner_user_id=u.id and oo.ended_at is null and oo.unit_id is distinct from u.unit_id)`;
+const monitorsElsewhereSql = (alias: string) => `exists (select 1 from unit_ownerships oo where oo.owner_user_id=${alias}.id and oo.ended_at is null and oo.unit_id is distinct from ${alias}.unit_id)`;
 // "Logou no sistema": existe pelo menos uma sessão (refresh_tokens) já criada
 // pra esse usuário — refresh_tokens nunca é apagada, só marcada como
 // revogada, e uma linha só nasce em login()/refresh()/switchProfile()
 // (authService.ts), todos exigindo autenticação prévia bem-sucedida. Por
 // isso é diferente de `login_enabled` (Ativos/Inativos, que é permissão de
 // acessar, não uso de fato).
-const LOGGED_IN = `exists(select 1 from refresh_tokens rt where rt.user_id=u.id)`;
+const loggedInSql = (alias: string) => `exists(select 1 from refresh_tokens rt where rt.user_id=${alias}.id)`;
+const EFFECTIVE_ROLE = effectiveRoleSql('u');
+const MONITORS_ELSEWHERE = monitorsElsewhereSql('u');
+const LOGGED_IN = loggedInSql('u');
+// Proprietário com "Unidade alugada a terceiros" marcado (unit_rented_to_tenant)
+// cuja unidade (mesmo u.unit_id) tem um inquilino cadastrado, ativo
+// (login_enabled) e que já logou pelo menos uma vez. Usado pra não contar
+// esse proprietário em "nunca logaram": quem de fato usa o sistema pela
+// unidade é o inquilino, não o proprietário que só acompanha o boleto —
+// esse proprietário vira um indicador à parte (ver bucket
+// 'owners_never_logged_in_tenant_active' abaixo), em vez de somar ao número
+// que sugere descuido/abandono do acesso.
+const OWNER_HAS_ACTIVE_LOGGED_IN_TENANT = `exists (
+  select 1 from users t
+  where t.condominium_id = u.condominium_id
+    and t.deleted_at is null
+    and t.unit_id = u.unit_id
+    and t.login_enabled
+    and ${effectiveRoleSql('t')} = 'inquilino'
+    and ${loggedInSql('t')}
+)`;
 
 // "Pessoa" para fins do Painel de usuários: o mesmo CPF/CNPJ pode ter mais de
 // uma linha em `users` no MESMO condomínio — ex.: cadastrado uma vez como
@@ -97,7 +122,8 @@ const PERSON_CTE = `
         when 'proprietario' then 2 when 'inquilino' then 3 else 4
       end as role_priority,
       ${LOGGED_IN} as row_logged_in,
-      ${MONITORS_ELSEWHERE} as row_monitors_elsewhere
+      ${MONITORS_ELSEWHERE} as row_monitors_elsewhere,
+      case when ${EFFECTIVE_ROLE}='proprietario' and u.unit_rented_to_tenant then ${OWNER_HAS_ACTIVE_LOGGED_IN_TENANT} else false end as row_owner_tenant_active_logged_in
     from users u
     where u.deleted_at is null
   )
@@ -107,7 +133,8 @@ const PERSON_CTE = `
     bool_or(login_enabled) over w as person_active,
     bool_or(row_logged_in) over w as person_logged_in,
     bool_or(row_role='proprietario' and unit_rented_to_tenant) over w as person_owner_rented,
-    bool_or(row_role='proprietario' and row_monitors_elsewhere) over w as person_monitors_elsewhere
+    bool_or(row_role='proprietario' and row_monitors_elsewhere) over w as person_monitors_elsewhere,
+    bool_or(row_owner_tenant_active_logged_in) over w as person_owner_tenant_active_logged_in
   from row_info
   window w as (partition by condominium_id, person_key)
   order by condominium_id, person_key, role_priority asc
@@ -122,12 +149,19 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
     real_tenant_residents: number; owner_residents: number;
     monitor_only_owners: number; sindico: Array<{ id: string; fullName: string }>; subsindico: Array<{ id: string; fullName: string }>;
     total_units: number; units_with_resident: number;
+    owners_never_logged_in_tenant_active: number;
+    raw_registered_users: number; raw_login_enabled_users: number;
   }>(
     `with person as (${PERSON_CTE})
      select c.id as condominium_id, c.name,
        count(p.rep_id)::int as registered_users,
        count(*) filter (where p.person_active)::int as active_users,
        count(*) filter (where p.person_logged_in)::int as logged_in_users,
+       -- Proprietário que nunca logou mas cuja unidade tem inquilino ativo
+       -- que já logou sai daqui e vira o indicador
+       -- owners_never_logged_in_tenant_active abaixo (ver
+       -- OWNER_HAS_ACTIVE_LOGGED_IN_TENANT).
+       count(*) filter (where p.person_role='proprietario' and not p.person_logged_in and p.person_owner_tenant_active_logged_in)::int as owners_never_logged_in_tenant_active,
        count(*) filter (where p.person_role='proprietario')::int as registered_owners,
        count(*) filter (where p.person_role='inquilino')::int as registered_tenants,
        count(*) filter (where p.person_role='inquilino' or (p.person_role='proprietario' and p.person_owner_rented))::int as real_tenant_residents,
@@ -142,7 +176,15 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
        -- PERSON_CTE de propósito (a aba "Excluídos" de Pessoas já trata como
        -- lista à parte, sem colapsar por CPF) — contagem simples de linhas,
        -- igual ao que a aba já mostra.
-       (select count(*) from users du where du.condominium_id = c.id and du.deleted_at is not null)::int as deleted_users
+       (select count(*) from users du where du.condominium_id = c.id and du.deleted_at is not null)::int as deleted_users,
+       -- Mesma contagem "crua" (sem colapsar por pessoa/CPF) usada de
+       -- verdade na cobrança da plataforma (countActiveUsers em
+       -- platformPlanService.ts) — usada abaixo pra bater "uso do plano"
+       -- com o número que vai pra fatura, e não com registeredUsers/
+       -- activeUsers acima (que colapsam duplicidade de CPF, então podem
+       -- vir menores que o que a plataforma de fato cobra).
+       (select count(*) from users u2 where u2.condominium_id = c.id and u2.deleted_at is null)::int as raw_registered_users,
+       (select count(*) from users u2 where u2.condominium_id = c.id and u2.deleted_at is null and u2.login_enabled = true)::int as raw_login_enabled_users
      from condominiums c
      left join person p on p.condominium_id = c.id
      where ($1::uuid is null or c.id = $1)
@@ -150,31 +192,89 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
      order by c.name`,
     [condominiumId],
   );
+
+  // Plano de cobrança vinculado a cada condomínio (mesma fonte que
+  // platformPlanRoutes.ts /overview usa) — carregado à parte, em bloco, em
+  // vez de subquery por condomínio, e cruzado em JS pelo Map abaixo.
+  const [subs, plans, tiers] = await Promise.all([
+    query<{ condominium_id: string; plan_id: string }>(`select condominium_id, plan_id from condominium_plan_subscriptions where ended_at is null`),
+    query<{
+      id: string; name: string; plan_type: string; active_user_metric: ActiveUserMetric;
+      included_quantity: number | null; base_price_cents: number | null; overage_price_cents: number | null;
+      price_per_active_user_cents: number | null; minimum_price_cents: number;
+    }>(`select id, name, plan_type, active_user_metric, included_quantity, base_price_cents, overage_price_cents,
+               price_per_active_user_cents, minimum_price_cents
+        from platform_plans`),
+    query<{ plan_id: string; min_active_users: number; max_active_users: number | null; price_cents: number }>(`select plan_id, min_active_users, max_active_users, price_cents from platform_plan_tiers order by min_active_users asc`),
+  ]);
+  const planIdByCondominium = new Map(subs.rows.map(row => [row.condominium_id, row.plan_id]));
+  const planById = new Map(plans.rows.map(plan => [plan.id, plan]));
+  const tiersByPlan = new Map<string, typeof tiers.rows>();
+  for (const tier of tiers.rows) {
+    const list = tiersByPlan.get(tier.plan_id) || [];
+    list.push(tier);
+    tiersByPlan.set(tier.plan_id, list);
+  }
+
   return res.json({
-    condominiums: result.rows.map(row => ({
-      condominiumId: row.condominium_id,
-      name: row.name,
-      registeredUsers: row.registered_users,
-      activeUsers: row.active_users,
-      inactiveUsers: row.registered_users - row.active_users,
-      loggedInUsers: row.logged_in_users,
-      neverLoggedIn: row.registered_users - row.logged_in_users,
-      deletedUsers: row.deleted_users,
-      registeredOwners: row.registered_owners,
-      registeredTenants: row.registered_tenants,
-      realTenantResidents: row.real_tenant_residents,
-      ownerResidents: row.owner_residents,
-      ownersMonitoringElsewhere: row.monitor_only_owners,
-      sindico: row.sindico,
-      subsindico: row.subsindico,
-      totalUnits: row.total_units,
-      unitsWithResident: row.units_with_resident,
-      unitsWithoutResident: row.total_units - row.units_with_resident,
-    })),
+    condominiums: result.rows.map(row => {
+      const plan = planById.get(planIdByCondominium.get(row.condominium_id) || '');
+      // Mesma regra usada em GET /condominiums/plan-usage: só existe teto
+      // pra plano 'faixa fechada' cuja última faixa tem max_active_users
+      // definido — 'por usuário ativo' e faixa fechada com topo aberto
+      // nunca têm o que exceder.
+      const planActiveUsers = plan ? (plan.active_user_metric === 'login_enabled' ? row.raw_login_enabled_users : row.raw_registered_users) : null;
+      const planLimit = plan && plan.plan_type === 'tiered_bracket'
+        ? (tiersByPlan.get(plan.id) || []).slice().sort((a, b) => b.min_active_users - a.min_active_users)[0]?.max_active_users ?? null
+        : null;
+      // Ver comentário equivalente em GET /condominiums/plan-usage: excedente
+      // aqui é cobrança extra automática, não um teto que "estourou".
+      const overage = plan && plan.plan_type === 'included_overage' ? computeIncludedOverage(plan, planActiveUsers ?? 0) : null;
+      // "Até o momento o valor está em R$X" — mesma conta da fatura de
+      // verdade, vale pros três tipos de plano.
+      const planAmountCents = plan ? computePlanAmountCents(plan as PlatformPlan, tiersByPlan.get(plan.id) || [], planActiveUsers ?? 0) : null;
+
+      return {
+        condominiumId: row.condominium_id,
+        name: row.name,
+        registeredUsers: row.registered_users,
+        activeUsers: row.active_users,
+        inactiveUsers: row.registered_users - row.active_users,
+        loggedInUsers: row.logged_in_users,
+        // Não inclui quem cai em ownersNeverLoggedInTenantActive: esses
+        // proprietários têm indicador próprio, porque quem de fato usa o
+        // sistema pela unidade é o inquilino ativo, não o proprietário.
+        neverLoggedIn: row.registered_users - row.logged_in_users - row.owners_never_logged_in_tenant_active,
+        ownersNeverLoggedInTenantActive: row.owners_never_logged_in_tenant_active,
+        deletedUsers: row.deleted_users,
+        registeredOwners: row.registered_owners,
+        registeredTenants: row.registered_tenants,
+        realTenantResidents: row.real_tenant_residents,
+        ownerResidents: row.owner_residents,
+        ownersMonitoringElsewhere: row.monitor_only_owners,
+        sindico: row.sindico,
+        subsindico: row.subsindico,
+        totalUnits: row.total_units,
+        unitsWithResident: row.units_with_resident,
+        unitsWithoutResident: row.total_units - row.units_with_resident,
+        planName: plan?.name ?? null,
+        planType: plan?.plan_type ?? null,
+        planActiveUserMetric: plan?.active_user_metric ?? null,
+        planActiveUsers,
+        planLimit,
+        planExceeded: planLimit !== null && (planActiveUsers ?? 0) > planLimit,
+        planIncludedQuantity: plan?.included_quantity ?? null,
+        planBasePriceCents: plan?.base_price_cents ?? null,
+        planOveragePriceCents: plan?.overage_price_cents ?? null,
+        planOverageUnits: overage?.overageUnits ?? null,
+        planOverageAmountCents: overage?.overageAmountCents ?? null,
+        planEstimatedMonthlyAmountCents: planAmountCents,
+      };
+    }),
   });
 }));
 
-type UserStatsBucket = 'registered' | 'active' | 'inactive' | 'logged_in' | 'never_logged_in' | 'deleted' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
+type UserStatsBucket = 'registered' | 'active' | 'inactive' | 'logged_in' | 'never_logged_in' | 'owners_never_logged_in_tenant_active' | 'deleted' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
 const USER_STATS_BUCKET_WHERE: Record<UserStatsBucket, string> = {
   // Nunca usado — bucket 'deleted' retorna antes de chegar aqui (ver
   // /user-stats/members), só existe pra satisfazer o Record exaustivo.
@@ -183,7 +283,10 @@ const USER_STATS_BUCKET_WHERE: Record<UserStatsBucket, string> = {
   active: `p.person_active`,
   inactive: `not p.person_active`,
   logged_in: `p.person_logged_in`,
-  never_logged_in: `not p.person_logged_in`,
+  // Exclui o proprietário coberto por owners_never_logged_in_tenant_active
+  // abaixo — mesmo critério usado na contagem de /user-stats.
+  never_logged_in: `not p.person_logged_in and not (p.person_role='proprietario' and p.person_owner_tenant_active_logged_in)`,
+  owners_never_logged_in_tenant_active: `p.person_role='proprietario' and not p.person_logged_in and p.person_owner_tenant_active_logged_in`,
   registered_owners: `p.person_role='proprietario'`,
   registered_tenants: `p.person_role='inquilino'`,
   real_tenant_residents: `(p.person_role='inquilino' or (p.person_role='proprietario' and p.person_owner_rented))`,
@@ -248,6 +351,84 @@ router.get('/user-stats/members', authorize('admin_geral', 'sindico', 'subsindic
       unit: row.unit,
     })),
   });
+}));
+
+// Uso do plano de cobrança da plataforma, para o cadastro de pessoas avisar
+// síndico/subsíndico quando estão perto de (ou já) estourar a faixa
+// contratada. Só existe teto pra plano 'faixa fechada' cuja última faixa
+// tem max_active_users definido — 'por usuário ativo' escala o preço com o
+// uso, sem teto algum, então nunca "excede" (limit vem null e o front não
+// mostra alerta). Mesma métrica de usuário ativo (login_enabled/registered)
+// usada na cobrança de verdade (platformInvoiceService.ts), pra o número
+// batido aqui ser exatamente o que vai pra fatura do condomínio.
+router.get('/plan-usage', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.role === 'admin_geral' ? (String(req.query.condominiumId || '') || null) : req.user?.condominiumId;
+  if (!condominiumId) return res.json({ hasPlan: false });
+
+  const subscription = await query<{ plan_id: string }>(
+    `select plan_id from condominium_plan_subscriptions where condominium_id=$1 and ended_at is null limit 1`,
+    [condominiumId],
+  );
+  if (!subscription.rows.length) return res.json({ hasPlan: false });
+
+  const planResult = await query<{
+    id: string; name: string; plan_type: string; active_user_metric: ActiveUserMetric;
+    included_quantity: number | null; base_price_cents: number | null; overage_price_cents: number | null;
+    price_per_active_user_cents: number | null; minimum_price_cents: number;
+  }>(
+    `select id, name, plan_type, active_user_metric, included_quantity, base_price_cents, overage_price_cents,
+            price_per_active_user_cents, minimum_price_cents
+     from platform_plans where id=$1`,
+    [subscription.rows[0].plan_id],
+  );
+  const plan = planResult.rows[0];
+  if (!plan) return res.json({ hasPlan: false });
+
+  const activeUsers = await countActiveUsers(condominiumId, plan.active_user_metric);
+  const tiers = await query<{ plan_id: string; min_active_users: number; max_active_users: number | null; price_cents: number }>(
+    `select plan_id, min_active_users, max_active_users, price_cents from platform_plan_tiers where plan_id=$1 order by min_active_users asc`,
+    [plan.id],
+  );
+
+  let limit: number | null = null;
+  if (plan.plan_type === 'tiered_bracket') {
+    limit = tiers.rows.slice().sort((a, b) => b.min_active_users - a.min_active_users)[0]?.max_active_users ?? null;
+  }
+
+  // Plano 'included_overage' (base + incluídos + excedente): passar do
+  // incluído não é erro, é cobrança extra automática — por isso não usa o
+  // par limit/exceeded acima (que é um teto de verdade, "não cabe no
+  // plano"). O front mostra esse caso com tom neutro/informativo.
+  const overage = plan.plan_type === 'included_overage' ? computeIncludedOverage(plan, activeUsers) : null;
+  // Valor estimado do mês corrente, pra "até o momento o valor está R$X" —
+  // mesma conta usada de verdade na fatura (computePlanAmountCents), vale
+  // pros três tipos de plano, não só included_overage.
+  const estimatedMonthlyAmountCents = computePlanAmountCents(plan as PlatformPlan, tiers.rows, activeUsers);
+
+  return res.json({
+    hasPlan: true,
+    planName: plan.name,
+    planType: plan.plan_type,
+    activeUserMetric: plan.active_user_metric,
+    activeUsers,
+    limit,
+    exceeded: limit !== null && activeUsers > limit,
+    includedQuantity: plan.included_quantity,
+    basePriceCents: plan.base_price_cents,
+    overagePriceCents: plan.overage_price_cents,
+    overageUnits: overage?.overageUnits ?? null,
+    overageAmountCents: overage?.overageAmountCents ?? null,
+    estimatedMonthlyAmountCents,
+  });
+}));
+
+// Fatura da plataforma em aberto do condomínio do síndico/subsíndico (com o
+// Pix pra pagar). Sem requireFeature de propósito: é cobrança da plataforma,
+// não um módulo que o admin liga/desliga por condomínio.
+router.get('/platform-invoice', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.condominiumId;
+  if (!condominiumId) return res.json({ invoice: null });
+  return res.json({ invoice: await getOpenPlatformInvoice(condominiumId) });
 }));
 
 router.get('/', authorize('admin_geral'), asyncHandler(async (_req, res) => {

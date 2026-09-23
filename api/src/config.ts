@@ -51,6 +51,30 @@ export const config = {
     clientSecret: process.env.GOOGLE_DRIVE_CLIENT_SECRET || '',
     refreshToken: process.env.GOOGLE_DRIVE_REFRESH_TOKEN || '',
   },
+  // Cobrança da fatura da plataforma via Pix, conta pessoa física do dono
+  // da plataforma (sem split/marketplace — o valor cai direto nessa
+  // conta). Sem accessToken configurado, checkAndSendPlatformInvoice pula a
+  // criação da cobrança e o e-mail sai só informativo (mesmo padrão do
+  // e-mail sem SMTP/Resend).
+  mercadoPago: {
+    accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN || '',
+    webhookSecret: process.env.MERCADOPAGO_WEBHOOK_SECRET || '',
+  },
+  // URL pública da própria API (não a do app web) — usada só pra montar a
+  // notification_url que o Mercado Pago chama quando um pagamento muda de
+  // status. Em produção é a URL do Railway; em dev local o MP não consegue
+  // alcançar localhost, então o webhook simplesmente não dispara (o
+  // pagamento ainda pode ser conferido manualmente via GET /v1/payments).
+  apiPublicUrl: process.env.API_PUBLIC_URL || 'http://localhost:3000',
+  // Identificação de quem emite o recibo por e-mail (pessoa física, dono da
+  // plataforma) — como a conta é PF, sem nota fiscal automática, esse
+  // recibo é o documento que o síndico anexa na prestação de contas do
+  // condomínio. Nunca versionar CPF real — preencher só no .env.
+  platformReceipt: {
+    ownerName: process.env.PLATFORM_RECEIPT_OWNER_NAME || '',
+    ownerCpf: process.env.PLATFORM_RECEIPT_OWNER_CPF || '',
+    ownerCity: process.env.PLATFORM_RECEIPT_OWNER_CITY || '',
+  },
 };
 
 if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET) {

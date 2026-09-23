@@ -9,7 +9,7 @@ import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
 
-type PlanType = 'per_active_user' | 'tiered_bracket';
+type PlanType = 'per_active_user' | 'tiered_bracket' | 'included_overage';
 type ActiveUserMetric = 'login_enabled' | 'registered';
 
 type PlanTier = { id?: string; min_active_users: number; max_active_users: number | null; price_cents: number };
@@ -23,6 +23,10 @@ type PlatformPlan = {
   active: boolean;
   active_user_metric: ActiveUserMetric;
   tiers: PlanTier[];
+  // Só usados por plan_type='included_overage'.
+  included_quantity: number | null;
+  base_price_cents: number | null;
+  overage_price_cents: number | null;
 };
 
 type TierForm = { minActiveUsers: string; maxActiveUsers: string; price: string };
@@ -49,6 +53,9 @@ export default function PlatformPlans() {
   const [planType, setPlanType] = useState<PlanType>('per_active_user');
   const [pricePerActiveUser, setPricePerActiveUser] = useState('');
   const [minimumPrice, setMinimumPrice] = useState('');
+  const [includedQuantity, setIncludedQuantity] = useState('');
+  const [basePrice, setBasePrice] = useState('');
+  const [overagePrice, setOveragePrice] = useState('');
   const [tiers, setTiers] = useState<TierForm[]>([emptyTier()]);
   const [active, setActive] = useState(true);
   const [activeUserMetric, setActiveUserMetric] = useState<ActiveUserMetric>('registered');
@@ -77,6 +84,9 @@ export default function PlatformPlans() {
     setPlanType('per_active_user');
     setPricePerActiveUser('');
     setMinimumPrice('');
+    setIncludedQuantity('');
+    setBasePrice('');
+    setOveragePrice('');
     setTiers([emptyTier()]);
     setActive(true);
     setActiveUserMetric('registered');
@@ -90,6 +100,9 @@ export default function PlatformPlans() {
     setPlanType(plan.plan_type);
     setPricePerActiveUser(plan.price_per_active_user_cents ? formatCurrency(plan.price_per_active_user_cents) : '');
     setMinimumPrice(plan.minimum_price_cents ? formatCurrency(plan.minimum_price_cents) : '');
+    setIncludedQuantity(plan.included_quantity !== null && plan.included_quantity !== undefined ? String(plan.included_quantity) : '');
+    setBasePrice(plan.base_price_cents ? formatCurrency(plan.base_price_cents) : '');
+    setOveragePrice(plan.overage_price_cents ? formatCurrency(plan.overage_price_cents) : '');
     setActive(plan.active);
     setActiveUserMetric(plan.active_user_metric);
     setTiers(
@@ -124,7 +137,9 @@ export default function PlatformPlans() {
     name.trim().length >= 2 &&
     (planType === 'per_active_user'
       ? currencyToCents(pricePerActiveUser) > 0
-      : tiers.every((tier) => tier.minActiveUsers !== '' && currencyToCents(tier.price) > 0));
+      : planType === 'included_overage'
+        ? includedQuantity !== '' && Number.isInteger(Number(includedQuantity)) && Number(includedQuantity) >= 0 && currencyToCents(basePrice) > 0
+        : tiers.every((tier) => tier.minActiveUsers !== '' && currencyToCents(tier.price) > 0));
 
   const save = async () => {
     if (!userToken || !isValid) return;
@@ -136,6 +151,10 @@ export default function PlatformPlans() {
       if (planType === 'per_active_user') {
         body.pricePerActiveUserCents = currencyToCents(pricePerActiveUser);
         body.minimumPriceCents = currencyToCents(minimumPrice);
+      } else if (planType === 'included_overage') {
+        body.includedQuantity = Number(includedQuantity);
+        body.basePriceCents = currencyToCents(basePrice);
+        body.overagePriceCents = currencyToCents(overagePrice);
       } else {
         body.tiers = tiers.map((tier) => ({
           minActiveUsers: Number(tier.minActiveUsers),
@@ -166,12 +185,16 @@ export default function PlatformPlans() {
       const withMinimum = plan.minimum_price_cents > 0 ? `${base} (mínimo ${formatCurrency(plan.minimum_price_cents)})` : base;
       return `${withMinimum} · ${metric}`;
     }
+    if (plan.plan_type === 'included_overage') {
+      const overageLabel = plan.overage_price_cents ? `${formatCurrency(plan.overage_price_cents)} por excedente` : 'sem cobrança de excedente';
+      return `${formatCurrency(plan.base_price_cents || 0)}/mês · até ${plan.included_quantity ?? 0} incluídos · ${overageLabel} · ${metric}`;
+    }
     return `${plan.tiers.length} faixa${plan.tiers.length === 1 ? '' : 's'} · ${metric}`;
   };
 
   const tourSteps: TourStep[] = [
-    { key: 'form', title: 'Cadastrar ou editar plano', description: '"Por usuário ativo" cobra um valor fixo multiplicado pela quantidade de usuários ativos do condomínio, com um valor mínimo mensal opcional pra garantir um piso mesmo com poucos usuários. "Faixa fechada" cobra um valor mensal fixo conforme a faixa de usuários ativos — as faixas precisam ser contínuas, sem sobreposição nem lacuna (ex.: 0–50 seguida exatamente de 51–100). O "Critério de usuário ativo" também é configurável: "Usuário cadastrado" conta todo cadastro do condomínio não excluído; "Login habilitado" conta só quem também tem o acesso liberado no sistema. Desmarcar "Plano ativo" impede vincular o plano a novos condomínios, mas não desvincula quem já está usando.' },
-    { key: 'list', title: 'Planos cadastrados', description: 'Cada card mostra o tipo do plano (por usuário ativo ou faixa fechada), um resumo do valor cobrado e o critério de usuário ativo configurado. Planos inativos aparecem marcados como "Inativo" e não podem ser vinculados a condomínios em "Faturamento da plataforma". Toque em "Editar" pra carregar o plano no formulário acima e ajustar preço, faixas ou critério.' },
+    { key: 'form', title: 'Cadastrar ou editar plano', description: '"Por usuário ativo" cobra um valor fixo multiplicado pela quantidade de usuários ativos do condomínio, com um valor mínimo mensal opcional pra garantir um piso mesmo com poucos usuários. "Faixa fechada" cobra um valor mensal fixo conforme a faixa de usuários ativos — as faixas precisam ser contínuas, sem sobreposição nem lacuna (ex.: 0–50 seguida exatamente de 51–100). "Base + incluídos + excedente" cobra um preço fixo mensal que já cobre até uma quantidade de usuários ativos incluída no preço; cada usuário além disso é cobrado à parte, por um valor fixo por usuário excedente (0 = sem cobrança de excedente, plano vira efetivamente um teto suave). O "Critério de usuário ativo" também é configurável, vale pros três tipos: "Usuário cadastrado" conta todo cadastro do condomínio não excluído; "Login habilitado" conta só quem também tem o acesso liberado no sistema (cadastrado E ativo). Desmarcar "Plano ativo" impede vincular o plano a novos condomínios, mas não desvincula quem já está usando.' },
+    { key: 'list', title: 'Planos cadastrados', description: 'Cada card mostra o tipo do plano, um resumo do valor cobrado e o critério de usuário ativo configurado. Planos inativos aparecem marcados como "Inativo" e não podem ser vinculados a condomínios em "Faturamento da plataforma". Toque em "Editar" pra carregar o plano no formulário acima e ajustar preço, faixas/incluídos ou critério.' },
   ];
 
   return (
@@ -181,7 +204,7 @@ export default function PlatformPlans() {
         <View style={styles.grow}>
           <Text style={styles.eyebrow}>Modelo de negocio</Text>
           <Text style={styles.title}>Planos da plataforma</Text>
-          <Text style={styles.subtitle}>Cadastre como a plataforma cobra cada condominio: por usuário ativo ou por faixa fechada de usuários ativos.</Text>
+          <Text style={styles.subtitle}>Cadastre como a plataforma cobra cada condominio: por usuário ativo, por faixa fechada, ou base mensal com usuários incluídos e excedente.</Text>
         </View>
         <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
       </View>
@@ -202,6 +225,9 @@ export default function PlatformPlans() {
           </Pressable>
           <Pressable onPress={() => setPlanType('tiered_bracket')} style={[styles.typeOption, planType === 'tiered_bracket' && styles.typeOptionActive]}>
             <Text style={[styles.typeOptionText, planType === 'tiered_bracket' && styles.typeOptionTextActive]}>Faixa fechada</Text>
+          </Pressable>
+          <Pressable onPress={() => setPlanType('included_overage')} style={[styles.typeOption, planType === 'included_overage' && styles.typeOptionActive]}>
+            <Text style={[styles.typeOptionText, planType === 'included_overage' && styles.typeOptionTextActive]}>Base + incluídos + excedente</Text>
           </Pressable>
         </View>
 
@@ -227,6 +253,18 @@ export default function PlatformPlans() {
             </View>
             <View>
               <TextField label="Valor mínimo mensal" hint="Opcional. Cobrado quando o cálculo por usuário fica abaixo deste valor." placeholder="Opcional" value={minimumPrice} onChangeText={(value) => setMinimumPrice(maskCurrency(value))} keyboardType="number-pad" />
+            </View>
+          </FormGrid>
+        ) : planType === 'included_overage' ? (
+          <FormGrid columns={{ mobile: 1, tablet: 3, desktop: 3 }}>
+            <View>
+              <TextField label="Preço base mensal" required placeholder="Ex.: R$ 99,00" value={basePrice} onChangeText={(value) => setBasePrice(maskCurrency(value))} keyboardType="number-pad" />
+            </View>
+            <View>
+              <TextField label="Usuários incluídos no preço base" required hint="Ex.: 40" placeholder="Ex.: 40" value={includedQuantity} onChangeText={(value) => setIncludedQuantity(value.replace(/\D/g, ''))} keyboardType="number-pad" />
+            </View>
+            <View>
+              <TextField label="Preço por usuário excedente" hint="Cobrado por usuário acima do incluído. 0 = sem cobrança de excedente." placeholder="Ex.: R$ 5,00" value={overagePrice} onChangeText={(value) => setOveragePrice(maskCurrency(value))} keyboardType="number-pad" />
             </View>
           </FormGrid>
         ) : (
@@ -289,7 +327,7 @@ export default function PlatformPlans() {
                     <Text style={styles.editText}>Editar</Text>
                   </Pressable>
                 </View>
-                <Text style={styles.cardBadge}>{plan.plan_type === 'per_active_user' ? 'Por usuário ativo' : 'Faixa fechada'}</Text>
+                <Text style={styles.cardBadge}>{plan.plan_type === 'per_active_user' ? 'Por usuário ativo' : plan.plan_type === 'included_overage' ? 'Base + incluídos + excedente' : 'Faixa fechada'}</Text>
                 <Text style={styles.cardLine}>{planSummary(plan)}</Text>
                 {!plan.active ? <Text style={styles.cardInactive}>Inativo</Text> : null}
               </View>

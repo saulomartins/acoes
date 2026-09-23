@@ -44,6 +44,8 @@ export default function PlatformRevenue() {
   const [statusPickerCondominiumId, setStatusPickerCondominiumId] = useState('');
   const [billingDateEditingId, setBillingDateEditingId] = useState('');
   const [billingDateDraft, setBillingDateDraft] = useState('');
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileMessage, setReconcileMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!userToken) return;
@@ -67,6 +69,25 @@ export default function PlatformRevenue() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Consulta no Mercado Pago o status dos Pix pendentes e confirma os já pagos
+  // (mesma rotina do job diário e do login do síndico), sem esperar o webhook.
+  const reconcilePayments = async () => {
+    if (!userToken) return;
+    setReconciling(true);
+    setReconcileMessage(null);
+    try {
+      const result = await apiRequest<{ checked: number; paid: number }>('/platform-plans/invoices/reconcile', userToken, { method: 'POST' });
+      setReconcileMessage(result.checked === 0
+        ? 'Nenhuma fatura com Pix pendente para verificar.'
+        : `${result.checked} fatura(s) verificada(s) — ${result.paid} pagamento(s) confirmado(s).`);
+      await load();
+    } catch (e) {
+      setReconcileMessage(e instanceof Error ? e.message : 'Falha ao verificar pagamentos.');
+    } finally {
+      setReconciling(false);
+    }
+  };
 
   const planOptions = plans.map((plan) => ({ value: plan.id, label: plan.name }));
 
@@ -136,7 +157,7 @@ export default function PlatformRevenue() {
 
   const tourSteps: TourStep[] = [
     { key: 'total', title: 'Total projetado por mês', description: 'Soma o valor mensal projetado de todos os condomínios com status "Ativo" e um plano vinculado, calculado a partir da quantidade atual de usuários ativos de cada um. Condomínios "Suspenso" ou "Cancelado" continuam aparecendo na lista abaixo, mas não entram nesse total.' },
-    { key: 'list', title: 'Condomínios e planos vinculados', description: 'Cada linha é um condomínio. Toque na bolinha de status (verde = Ativo, amarelo = Suspenso, vermelho = Cancelado) pra trocar a situação dele na plataforma. Toque no botão de plano à direita pra vincular ou trocar o plano (só fica habilitado quando existe ao menos um plano ativo cadastrado). Com um plano vinculado, "Cobrança a partir de..." deixa ajustar a data de início da cobrança. A última fatura emitida (mês, valor e status) aparece quando existir, e o valor no canto direito de cada linha mostra quanto esse condomínio contribui pro total projetado.' },
+    { key: 'list', title: 'Condomínios e planos vinculados', description: 'Cada linha é um condomínio. Toque na bolinha de status (verde = Ativo, amarelo = Suspenso, vermelho = Cancelado) pra trocar a situação dele na plataforma. Toque no botão de plano à direita pra vincular ou trocar o plano (só fica habilitado quando existe ao menos um plano ativo cadastrado). Com um plano vinculado, "Cobrança a partir de..." deixa ajustar a data de início da cobrança. A última fatura emitida (mês, valor e status) aparece quando existir — "Verificar pagamentos" consulta no Mercado Pago os Pix pendentes e marca como paga (e envia o recibo) o que já foi pago, sem esperar o webhook, e o valor no canto direito de cada linha mostra quanto esse condomínio contribui pro total projetado.' },
   ];
 
   return (
@@ -148,8 +169,10 @@ export default function PlatformRevenue() {
           <Text style={styles.title}>Faturamento da plataforma</Text>
           <Text style={styles.subtitle}>Veja quanto cada condominio geraria por mes com o plano vinculado, com base nos usuários ativos cadastrados. Condomínios suspensos ou cancelados não entram na projeção.</Text>
         </View>
+        <Pressable onPress={reconcilePayments} disabled={reconciling} style={[styles.tourButton, reconciling && { opacity: 0.6 }]}><Text style={styles.tourButtonText}>{reconciling ? 'Verificando...' : 'Verificar pagamentos'}</Text></Pressable>
         <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
       </View>
+      {reconcileMessage ? <Text style={styles.lastInvoiceText}>{reconcileMessage}</Text> : null}
 
       <View ref={registerSection('total')} style={[isActive('total') && styles.tourHighlight]}>
       <Panel>

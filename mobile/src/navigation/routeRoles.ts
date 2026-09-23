@@ -19,6 +19,7 @@ export const TOUR_STEPS: TourStep[] = [
   { route: 'BankIntegrationGuide', title: 'Guia de expansão bancária', description: 'Referência para adicionar suporte a um novo banco na plataforma.', roles: ['admin_geral'] },
   { route: 'PlatformPlans', title: 'Planos da plataforma', description: 'Planos comerciais oferecidos aos condomínios clientes.', roles: ['admin_geral'] },
   { route: 'PlatformRevenue', title: 'Faturamento da plataforma', description: 'Receita da plataforma por condomínio e período.', roles: ['admin_geral'] },
+  { route: 'PlatformReceipts', title: 'Recebimentos da plataforma', description: 'Faturas cobradas dos condomínios, pagamentos via Pix e confirmações.', roles: ['admin_geral'] },
   { route: 'AuditLog', title: 'Auditoria', description: 'Histórico de ações realizadas por administradores e síndicos no sistema.', roles: ['admin_geral'] },
   { route: 'GoogleDriveIntegrationGuide', title: 'Integração com Google Drive', description: 'Passo a passo para ativar, num condomínio, o envio de comprovantes e anexos para uma pasta do Google Drive.', roles: ['admin_geral'] },
   { route: 'Support', title: 'Suporte', description: 'Localize uma pessoa (síndico/subsíndico só no próprio condomínio; admin_geral em qualquer um) e resolva problemas de acesso: sessão travada, login bloqueado, senha e aceite de termos.', roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'pessoas' },

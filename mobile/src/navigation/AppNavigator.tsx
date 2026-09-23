@@ -72,6 +72,7 @@ type RootStackParamList = {
   MobileReleases: undefined;
   PlatformPlans: undefined;
   PlatformRevenue: undefined;
+  PlatformReceipts: undefined;
   AuditLog: undefined;
   GoogleDriveIntegrationGuide: undefined;
   Support: undefined;

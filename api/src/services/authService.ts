@@ -5,7 +5,6 @@ import { config } from '../config';
 import { query, withTransaction } from '../db';
 import type { AccessTokenPayload, AuthenticatedUser, UserRole } from '../types';
 import { sendPasswordResetEmail } from './emailService';
-import { checkAndSendPlatformInvoice } from './platformInvoiceService';
 
 type DbUser = {
   id: string;
@@ -223,12 +222,6 @@ export const login = async (identifier: string, password: string) => {
     user = nonAdmin[0];
   }
   if (!user) return null;
-
-  if ((user.role === 'sindico' || user.role === 'subsindico') && user.condominium_id) {
-    // Verificação sob demanda da fatura da plataforma: dispara no login, sem
-    // bloquear a resposta nem derrubar o login se e-mail/push falharem.
-    checkAndSendPlatformInvoice(user.condominium_id).catch(error => console.warn('platform invoice check failed', error));
-  }
 
   return createSession(publicUser(user));
 };

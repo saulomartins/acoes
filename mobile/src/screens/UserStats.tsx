@@ -20,6 +20,7 @@ type CondominiumUserStats = {
   inactiveUsers: number;
   loggedInUsers: number;
   neverLoggedIn: number;
+  ownersNeverLoggedInTenantActive: number;
   deletedUsers: number;
   registeredOwners: number;
   registeredTenants: number;
@@ -31,15 +32,29 @@ type CondominiumUserStats = {
   totalUnits: number;
   unitsWithResident: number;
   unitsWithoutResident: number;
+  planName: string | null;
+  planType: 'per_active_user' | 'tiered_bracket' | 'included_overage' | null;
+  planActiveUserMetric: 'login_enabled' | 'registered' | null;
+  planActiveUsers: number | null;
+  planLimit: number | null;
+  planExceeded: boolean;
+  // Só preenchidos quando planType='included_overage'.
+  planIncludedQuantity: number | null;
+  planBasePriceCents: number | null;
+  planOveragePriceCents: number | null;
+  planOverageUnits: number | null;
+  planOverageAmountCents: number | null;
+  planEstimatedMonthlyAmountCents: number | null;
 };
 
-type Bucket = 'registered' | 'active' | 'inactive' | 'logged_in' | 'never_logged_in' | 'deleted' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
+type Bucket = 'registered' | 'active' | 'inactive' | 'logged_in' | 'never_logged_in' | 'owners_never_logged_in_tenant_active' | 'deleted' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
 const BUCKET_LABEL: Record<Bucket, string> = {
   registered: 'Cadastrados',
   active: 'Ativos',
   inactive: 'Inativos',
   logged_in: 'Já logaram no sistema',
   never_logged_in: 'Nunca logaram',
+  owners_never_logged_in_tenant_active: 'Proprietários que nunca logaram (inquilino ativo já logou)',
   deleted: 'Excluídos logicamente',
   registered_owners: 'Proprietários (cadastrados)',
   registered_tenants: 'Inquilinos (cadastrados)',
@@ -49,6 +64,9 @@ const BUCKET_LABEL: Record<Bucket, string> = {
   sindico: 'Síndico',
   subsindico: 'Subsíndico',
 };
+
+const planMetricLabel = (metric: 'login_enabled' | 'registered' | null) => metric === 'login_enabled' ? 'login habilitado' : 'cadastrado';
+const formatCurrency = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 type Member = { id: string; fullName: string; role: string; isExtra: boolean; unit: string };
 const roleLabel = (role: string) => role === 'sindico' ? 'Síndico' : role === 'subsindico' ? 'Subsíndico' : role === 'proprietario' ? 'Proprietário' : role === 'inquilino' ? 'Inquilino' : role;
@@ -121,7 +139,7 @@ export default function UserStats() {
   const condominiumOptions = [{ value: '', label: 'Todos os condomínios', description: `${condoOptions.length} condomínio(s)` }, ...condoOptions.map(item => ({ value: item.id, label: item.name }))];
 
   const tourSteps: TourStep[] = [
-    { key: 'summary', title: 'Usuários por condomínio', description: 'Cadastro mostra o papel de cada pessoa (proprietário, inquilino, síndico ou subsíndico) — a soma dos quatro sempre bate com o total de cadastrados, mostrado na linha de conferência. Síndico e subsíndico têm prioridade: quem tem papel principal de proprietário mas também um perfil adicional de síndico/subsíndico é contado só como síndico/subsíndico, nunca como proprietário — a lista de nomes ao tocar no número mostra "(perfil adicional)" nesse caso. A mesma prioridade vale quando é o mesmo CPF/CNPJ cadastrado em duas contas separadas no condomínio (ex.: uma vez como síndico sem unidade, outra como proprietário de uma unidade própria) — contam como uma pessoa só, síndico/subsíndico, em vez de aparecer duas vezes. Ativos/Inativos divide o total cadastrado pelo acesso ao app estar habilitado ou não — já "Já logaram no sistema" / "Nunca logaram" mostra quem de fato chegou a entrar no app pelo menos uma vez, independente do acesso estar habilitado hoje. "Excluídos logicamente" é diferente de "Inativo": inativo é login travado mas o cadastro segue contando normalmente no total acima; excluído logicamente saiu de vez da lista de cadastrados (mesmo critério da aba "Excluídos" de Pessoas), por isso esse número fica fora da soma de "Cadastro" e "Acesso ao app" — é reversível em Pessoas. "Unidades / apartamentos" mostra o total de unidades cadastradas no condomínio (independente de morador) e como elas se dividem entre com e sem morador ativo no momento — soma sempre bate com o total. "Proprietários que também monitoram outra unidade" mostra quem tem posse ativa (unit_ownerships) de uma unidade diferente da própria — normalmente uma unidade alugada a um inquilino; isso não é exclusivo com morar na própria unidade, então esse número não é subtraído do total de proprietários. "Quem mora de fato na unidade" é diferente de "cadastrado": proprietário e inquilino cadastrados indicam o responsável financeiro; já "inquilino morando de fato" e "proprietário morando na própria unidade" refletem quem realmente ocupa o imóvel, com base no campo opcional "Unidade alugada a terceiros" preenchido em Pessoas quando o proprietário responsável financeiro aluga a unidade a alguém não cadastrado no sistema. Toque em qualquer número para ver os nomes e apartamentos correspondentes (a contagem de unidades não é clicável). A tela atualiza sozinha a cada 30 segundos.' },
+    { key: 'summary', title: 'Usuários por condomínio', description: 'Cadastro mostra o papel de cada pessoa (proprietário, inquilino, síndico ou subsíndico) — a soma dos quatro sempre bate com o total de cadastrados, mostrado na linha de conferência. Síndico e subsíndico têm prioridade: quem tem papel principal de proprietário mas também um perfil adicional de síndico/subsíndico é contado só como síndico/subsíndico, nunca como proprietário — a lista de nomes ao tocar no número mostra "(perfil adicional)" nesse caso. A mesma prioridade vale quando é o mesmo CPF/CNPJ cadastrado em duas contas separadas no condomínio (ex.: uma vez como síndico sem unidade, outra como proprietário de uma unidade própria) — contam como uma pessoa só, síndico/subsíndico, em vez de aparecer duas vezes. Ativos/Inativos divide o total cadastrado pelo acesso ao app estar habilitado ou não — já "Já logaram no sistema" / "Nunca logaram" mostra quem de fato chegou a entrar no app pelo menos uma vez, independente do acesso estar habilitado hoje. Um proprietário que nunca logou mas cuja unidade tem "Unidade alugada a terceiros" marcado e o inquilino cadastrado, ativo, já logou não entra em "Nunca logaram" — ele aparece à parte em "Proprietários que nunca logaram, mas o inquilino ativo já logou", porque quem de fato usa o sistema pela unidade é o inquilino, não o proprietário que só acompanha o boleto. "Excluídos logicamente" é diferente de "Inativo": inativo é login travado mas o cadastro segue contando normalmente no total acima; excluído logicamente saiu de vez da lista de cadastrados (mesmo critério da aba "Excluídos" de Pessoas), por isso esse número fica fora da soma de "Cadastro" e "Acesso ao app" — é reversível em Pessoas. "Unidades / apartamentos" mostra o total de unidades cadastradas no condomínio (independente de morador) e como elas se dividem entre com e sem morador ativo no momento — soma sempre bate com o total. "Proprietários que também monitoram outra unidade" mostra quem tem posse ativa (unit_ownerships) de uma unidade diferente da própria — normalmente uma unidade alugada a um inquilino; isso não é exclusivo com morar na própria unidade, então esse número não é subtraído do total de proprietários. "Quem mora de fato na unidade" é diferente de "cadastrado": proprietário e inquilino cadastrados indicam o responsável financeiro; já "inquilino morando de fato" e "proprietário morando na própria unidade" refletem quem realmente ocupa o imóvel, com base no campo opcional "Unidade alugada a terceiros" preenchido em Pessoas quando o proprietário responsável financeiro aluga a unidade a alguém não cadastrado no sistema. "Uso do plano da plataforma" compara o total de usuários ativos do condomínio (mesma contagem usada de verdade na fatura da plataforma — critério "cadastrado" ou "login habilitado" conforme o plano contratado, em Planos da plataforma) com o plano contratado. Em plano de faixa fechada com a última faixa tendo um "Até" definido, passar do limite mostra aviso vermelho "excedeu" (plano "por usuário ativo", ou faixa fechada com a última faixa em aberto, não tem teto, então nunca "excede"). Em plano "base + incluídos + excedente" (ex.: Essencial/Intermediário/Completo da proposta comercial), passar da quantidade incluída não é erro: aparece em âmbar, com o preço base, quantos usuários excedentes e o custo mensal estimado com o excedente — cobrado automaticamente, nada é bloqueado nos dois casos. Toque em qualquer número para ver os nomes e apartamentos correspondentes (a contagem de unidades e o uso do plano não são clicáveis). A tela atualiza sozinha a cada 30 segundos.' },
   ];
 
   return (
@@ -199,6 +217,14 @@ export default function UserStats() {
               </Pressable>
             </View>
 
+            <Text style={s.groupLabel}>Proprietários que nunca logaram, mas o inquilino ativo já logou</Text>
+            <View style={[s.summaryRow, compact && s.summaryRowMobile]}>
+              <Pressable style={[s.summary, s.summaryMonitor, compact && s.summaryMobile]} onPress={() => openDetail(item.condominiumId, item.name, 'owners_never_logged_in_tenant_active')}>
+                <Text {...summaryValueProps} style={[s.summaryValue, s.monitorText]}>{item.ownersNeverLoggedInTenantActive}</Text>
+                <Text {...summaryLabelProps} style={s.summaryLabel}>proprietário{item.ownersNeverLoggedInTenantActive === 1 ? '' : 's'} com "Unidade alugada a terceiros" marcado e nunca logou, mas o inquilino ativo da própria unidade já logou — não entra em "nunca logaram" acima</Text>
+              </Pressable>
+            </View>
+
             <Text style={s.groupLabel}>Excluídos logicamente</Text>
             <View style={[s.summaryRow, compact && s.summaryRowMobile]}>
               <Pressable style={[s.summary, s.summaryMonitor, compact && s.summaryMobile]} onPress={() => openDetail(item.condominiumId, item.name, 'deleted')}>
@@ -242,6 +268,51 @@ export default function UserStats() {
                 <Text {...summaryLabelProps} style={s.summaryLabel}>proprietário{item.ownerResidents === 1 ? '' : 's'} morando na própria unidade</Text>
               </Pressable>
             </View>
+
+            {item.planName ? (
+              <>
+                <Text style={s.groupLabel}>Uso do plano da plataforma</Text>
+                <Text style={s.planHeadline}>
+                  Plano contratado: <Text style={s.planHeadlineName}>{item.planName}</Text>
+                  {item.planType === 'included_overage'
+                    ? ` — ${formatCurrency(item.planBasePriceCents || 0)}/mês inclui até ${item.planIncludedQuantity} usuário${item.planIncludedQuantity === 1 ? '' : 's'} (${planMetricLabel(item.planActiveUserMetric)}); usuário excedente: ${formatCurrency(item.planOveragePriceCents || 0)} cada`
+                    : ''}
+                </Text>
+                {item.planEstimatedMonthlyAmountCents != null ? (
+                  <Text style={[s.planHeadline, (item.planOverageUnits || 0) > 0 && s.monitorText]}>
+                    Até o momento, o valor do mês está em <Text style={s.planHeadlineName}>{formatCurrency(item.planEstimatedMonthlyAmountCents)}</Text>
+                    {(item.planOverageUnits || 0) > 0
+                      ? ` (${formatCurrency(item.planBasePriceCents || 0)} do plano + ${item.planOverageUnits} excedente${item.planOverageUnits === 1 ? '' : 's'} × ${formatCurrency(item.planOveragePriceCents || 0)} = ${formatCurrency(item.planOverageAmountCents || 0)})`
+                      : ''}
+                  </Text>
+                ) : null}
+                <View style={[s.summaryRow, compact && s.summaryRowMobile]}>
+                  {item.planType === 'included_overage' && item.planIncludedQuantity != null ? (
+                    <View style={[s.summary, (item.planOverageUnits || 0) > 0 ? s.summaryMonitor : s.summaryActive, compact && s.summaryMobile]}>
+                      <Text {...summaryValueProps} style={[s.summaryValue, (item.planOverageUnits || 0) > 0 ? s.monitorText : s.activeText]}>
+                        {item.planActiveUsers} / {item.planIncludedQuantity}
+                      </Text>
+                      <Text {...summaryLabelProps} style={s.summaryLabel}>
+                        usuário{item.planActiveUsers === 1 ? '' : 's'} ({planMetricLabel(item.planActiveUserMetric)}) incluídos no plano
+                        {(item.planOverageUnits || 0) > 0 ? ' — passou do incluído' : ' — dentro do incluído'}
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={[s.summary, item.planExceeded ? s.summaryExceeded : item.planLimit != null ? s.summaryActive : undefined, compact && s.summaryMobile]}>
+                      <Text {...summaryValueProps} style={[s.summaryValue, item.planExceeded && s.exceededText]}>
+                        {item.planLimit != null ? `${item.planActiveUsers} / ${item.planLimit}` : item.planActiveUsers}
+                      </Text>
+                      <Text {...summaryLabelProps} style={s.summaryLabel}>
+                        {item.planExceeded ? '⚠ ' : ''}usuário{item.planActiveUsers === 1 ? '' : 's'} ({planMetricLabel(item.planActiveUserMetric)}) no plano "{item.planName}"
+                        {item.planLimit != null
+                          ? (item.planExceeded ? ` — excedeu o total permitido em ${(item.planActiveUsers || 0) - item.planLimit}` : ' — dentro do total permitido pelo plano')
+                          : ' — este plano não tem limite de usuários'}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </>
+            ) : null}
           </Panel>
         ))}
       </View>
@@ -285,6 +356,8 @@ const s = StyleSheet.create({
   error: { color: colors.red, marginVertical: 10 },
   condoName: { fontSize: 18, fontWeight: '900', color: colors.ink },
   groupLabel: { color: colors.muted, fontWeight: '800', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 18, marginBottom: 4 },
+  planHeadline: { color: colors.ink, fontSize: 15, fontWeight: '700', marginBottom: 8 },
+  planHeadlineName: { fontWeight: '900', color: colors.primaryDark },
   summaryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 8 },
   summaryRowMobile: { flexDirection: 'column', gap: 8 },
   summary: { flex: 1, minWidth: 160, borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.surface, padding: 16 },
@@ -292,10 +365,12 @@ const s = StyleSheet.create({
   summaryActive: { borderColor: '#a8ddd0', backgroundColor: colors.softGreen },
   summaryInactive: { borderColor: colors.border, backgroundColor: '#f2f4f7' },
   summaryMonitor: { borderColor: '#f0d9a8', backgroundColor: '#fdf7ea' },
+  summaryExceeded: { borderColor: colors.red, backgroundColor: '#fbeaea' },
   summaryValue: { fontSize: 20, fontWeight: '900', color: colors.ink },
   activeText: { color: colors.green },
   inactiveText: { color: colors.muted },
   monitorText: { color: colors.amber },
+  exceededText: { color: colors.red },
   summaryLabel: { color: colors.muted, fontSize: 13, marginTop: 4 },
   checksum: { color: colors.muted, fontSize: 12, marginTop: 8 },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: 20 },

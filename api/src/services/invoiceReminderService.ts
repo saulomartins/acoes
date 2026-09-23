@@ -1,5 +1,6 @@
 import { query } from '../db';
 import { notifyUsers } from './notificationService';
+import { sendInvoiceDueSoonEmail, sendInvoiceOverdueEmail } from './emailService';
 
 const money = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 // due_date pode chegar como Date (padrão do driver pg para colunas `date`)
@@ -40,11 +41,17 @@ export const notifyNewInvoice = async (invoice: { id: string; condominiumId: str
 // cobranças e ainda disparava push de cobrança para quem não recebeu boleto
 // nenhum. Esses ficam no card "Aguardando o banco", que é o lugar deles.
 export const transitionOverdueInvoices = async (): Promise<number> => {
-  const result = await query<{ id: string; condominium_id: string; user_id: string; amount_cents: number; due_date: string }>(
-    `update invoices set status='overdue'::invoice_status
-     where status='issued'::invoice_status
-       and due_date < current_date and deleted_at is null
-     returning id, condominium_id, user_id, amount_cents, due_date`,
+  const result = await query<{
+    id: string; condominium_id: string; user_id: string; amount_cents: number; due_date: string;
+    email: string | null; full_name: string | null; username: string; condominium_name: string | null;
+  }>(
+    `update invoices i set status='overdue'::invoice_status
+     from users u, condominiums c
+     where i.status='issued'::invoice_status
+       and i.due_date < current_date and i.deleted_at is null
+       and u.id = i.user_id and c.id = i.condominium_id
+     returning i.id, i.condominium_id, i.user_id, i.amount_cents, i.due_date,
+       u.email, u.full_name, u.username, c.name as condominium_name`,
   );
   for (const invoice of result.rows) {
     try {
@@ -58,6 +65,13 @@ export const transitionOverdueInvoices = async (): Promise<number> => {
     } catch (error) {
       console.error('transitionOverdueInvoices notify failed', { invoiceId: invoice.id, error });
     }
+    if (invoice.email) {
+      try {
+        await sendInvoiceOverdueEmail(invoice.email, invoice.full_name || invoice.username, invoice.condominium_name || '', money(invoice.amount_cents), formatDateBr(invoice.due_date));
+      } catch (error) {
+        console.error('transitionOverdueInvoices email failed', { invoiceId: invoice.id, error });
+      }
+    }
   }
   return result.rows.length;
 };
@@ -66,12 +80,18 @@ export const transitionOverdueInvoices = async (): Promise<number> => {
 // (não faz sentido num lazy-recompute por GET, já que precisa avisar mesmo
 // que ninguém abra o app naquele dia). due_soon_notified_at é o dedupe.
 export const notifyDueSoonInvoices = async (): Promise<number> => {
-  const result = await query<{ id: string; condominium_id: string; user_id: string; amount_cents: number; due_date: string }>(
-    `update invoices set due_soon_notified_at=now()
-     where status in ('pending_provider'::invoice_status,'issued'::invoice_status)
-       and due_date = current_date + interval '3 days'
-       and due_soon_notified_at is null and deleted_at is null
-     returning id, condominium_id, user_id, amount_cents, due_date`,
+  const result = await query<{
+    id: string; condominium_id: string; user_id: string; amount_cents: number; due_date: string;
+    email: string | null; full_name: string | null; username: string; condominium_name: string | null;
+  }>(
+    `update invoices i set due_soon_notified_at=now()
+     from users u, condominiums c
+     where i.status in ('pending_provider'::invoice_status,'issued'::invoice_status)
+       and i.due_date = current_date + interval '3 days'
+       and i.due_soon_notified_at is null and i.deleted_at is null
+       and u.id = i.user_id and c.id = i.condominium_id
+     returning i.id, i.condominium_id, i.user_id, i.amount_cents, i.due_date,
+       u.email, u.full_name, u.username, c.name as condominium_name`,
   );
   for (const invoice of result.rows) {
     try {
@@ -84,6 +104,13 @@ export const notifyDueSoonInvoices = async (): Promise<number> => {
       });
     } catch (error) {
       console.error('notifyDueSoonInvoices notify failed', { invoiceId: invoice.id, error });
+    }
+    if (invoice.email) {
+      try {
+        await sendInvoiceDueSoonEmail(invoice.email, invoice.full_name || invoice.username, invoice.condominium_name || '', money(invoice.amount_cents), formatDateBr(invoice.due_date));
+      } catch (error) {
+        console.error('notifyDueSoonInvoices email failed', { invoiceId: invoice.id, error });
+      }
     }
   }
   return result.rows.length;

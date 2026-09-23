@@ -47,6 +47,29 @@ type Condominium = {
   address: string | null;
 };
 
+// Uso do plano de cobrança da plataforma (GET /condominiums/plan-usage) —
+// hasPlan:false quando o condomínio não tem plano vinculado (nada a
+// mostrar). limit vem null quando o plano não tem teto de usuários (plano
+// "por usuário ativo", ou faixa fechada cuja última faixa é "sem limite") —
+// nesse caso não há o que exceder.
+type PlanUsage = {
+  hasPlan: boolean;
+  planName?: string;
+  planType?: 'per_active_user' | 'tiered_bracket' | 'included_overage';
+  activeUserMetric?: 'login_enabled' | 'registered';
+  activeUsers?: number;
+  limit?: number | null;
+  exceeded?: boolean;
+  // Só preenchidos quando planType='included_overage' — excedente aqui é
+  // cobrança extra automática, não um teto (por isso não usa limit/exceeded).
+  includedQuantity?: number | null;
+  basePriceCents?: number | null;
+  overagePriceCents?: number | null;
+  overageUnits?: number | null;
+  overageAmountCents?: number | null;
+  estimatedMonthlyAmountCents?: number | null;
+};
+
 type CondominiumResponse = {
   condominiums: Condominium[];
 };
@@ -64,6 +87,7 @@ const roles: Array<{ value: UserRole; label: string }> = [
 ];
 
 const roleLabel = (role: UserRole) => roles.find((item) => item.value === role)?.label || role;
+const planMetricLabel = (metric?: 'login_enabled' | 'registered') => metric === 'login_enabled' ? 'login habilitado' : 'cadastrado';
 
 const onlyDigits = (value: string) => value.replace(/\D/g, '');
 const formatCurrency = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -148,6 +172,7 @@ export default function Users({ navigation }: any) {
   const [filterName, setFilterName] = useState('');
   const [filterCpf, setFilterCpf] = useState('');
   const [filterUnitTypeId, setFilterUnitTypeId] = useState('');
+  const [planUsage, setPlanUsage] = useState<PlanUsage | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -261,6 +286,14 @@ export default function Users({ navigation }: any) {
         const unitsResponse = await apiRequest<{ units: ManagedUnit[] }>('/units', userToken);
         setManagedUnits(unitsResponse.units);
         await loadUnitTypes();
+        // Falha aqui não pode derrubar o carregamento da lista de pessoas
+        // (o essencial da tela) — só o aviso de uso do plano fica ausente.
+        try {
+          const usage = await apiRequest<PlanUsage>('/condominiums/plan-usage', userToken);
+          setPlanUsage(usage);
+        } catch {
+          setPlanUsage(null);
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Falha ao carregar usuarios');
@@ -655,6 +688,7 @@ export default function Users({ navigation }: any) {
     { key: 'list', title: 'Ativos e excluídos', description: 'As abas "Ativos"/"Excluídos" alternam a lista. Em cada card dá pra editar, resetar a senha individualmente, excluir logicamente (bloqueia o login mas mantém o cadastro — reversível na aba "Excluídos" com "Reativar") ou excluir fisicamente (apaga o cadastro pra sempre, sem volta). Aqui você só gerencia cadastros de síndico e subsíndico.' },
   ];
   const managerTourSteps: TourStep[] = [
+    { key: 'planUsage', title: 'Uso do plano', description: 'Mostra quantos usuários ativos o condomínio já tem contra o plano de cobrança contratado com a plataforma — critério "cadastrado" ou "login habilitado", conforme o plano. Em plano de faixa fechada com teto definido, passar do limite mostra aviso vermelho "excedeu" — fale com a administração da plataforma nesse caso. Em plano "base + incluídos + excedente" (ex.: Essencial/Intermediário/Completo), passar da quantidade incluída não é erro: aparece em âmbar, com quantos usuários excedentes e quanto isso soma no mês, cobrado automaticamente — nada trava. Plano "por usuário ativo" não tem teto nem incluído, então não mostra esse aviso. Nada disso bloqueia novos cadastros.' },
     { key: 'form', title: 'Cadastrar morador ou subsíndico', description: 'Escolha o perfil (Subsíndico, Proprietário ou Inquilino), a unidade/apartamento (obrigatória para moradores) e marque se a pessoa é representante da unidade. Se não for isenta de boleto, defina o dia preferido de vencimento (10 ou 20). Preencha o endereço de cobrança do boleto — o CEP autocompleta rua, bairro, cidade e UF. A senha inicial é gerada automaticamente (apartamento + 4 primeiros dígitos do CPF) e mostrada uma única vez depois de salvar. Ao editar alguém, o painel "Perfis desta pessoa" permite conceder ou remover perfis adicionais (ex.: um subsíndico que também é proprietário).' },
     { key: 'filters', title: 'Filtrar moradores', description: 'Filtre por nome, CPF ou tipologia do apartamento — inclusive "Sem tipologia", útil pra achar quem ainda não tem uma taxa condominial configurada.' },
     { key: 'reset', title: 'Reset de senha em massa', description: 'Gera uma nova senha inicial pela regra padrão (apartamento + 4 primeiros dígitos do CPF). "Resetar todos os moradores" afeta todo mundo do condomínio de uma vez; ou marque pessoas específicas nos cards da lista e use "Resetar selecionados".' },
@@ -681,6 +715,59 @@ export default function Users({ navigation }: any) {
         </View>
         <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
       </View>
+
+      {(user?.role === 'sindico' || user?.role === 'subsindico') && planUsage?.hasPlan ? (
+        <View ref={registerSection('planUsage')} style={[isActive('planUsage') && styles.tourHighlight]}>
+        <Panel>
+          <Text style={styles.planUsageTitle}>Uso do plano · {planUsage.planName}</Text>
+          {planUsage.planType === 'included_overage' && planUsage.includedQuantity != null ? (
+            <Text style={styles.planUsageLine}>
+              {formatCurrency(planUsage.basePriceCents || 0)}/mês inclui até {planUsage.includedQuantity} usuário{planUsage.includedQuantity === 1 ? '' : 's'} ({planMetricLabel(planUsage.activeUserMetric)}); usuário excedente: {formatCurrency(planUsage.overagePriceCents || 0)} cada
+            </Text>
+          ) : null}
+          {planUsage.estimatedMonthlyAmountCents != null ? (
+            <Text style={[styles.planUsageLine, (planUsage.overageUnits || 0) > 0 && styles.planUsageLineOverage]}>
+              Até o momento, o valor do mês está em <Text style={{ fontWeight: '900' }}>{formatCurrency(planUsage.estimatedMonthlyAmountCents)}</Text>
+              {(planUsage.overageUnits || 0) > 0
+                ? ` (${formatCurrency(planUsage.basePriceCents || 0)} do plano + ${planUsage.overageUnits} excedente${planUsage.overageUnits === 1 ? '' : 's'} × ${formatCurrency(planUsage.overagePriceCents || 0)} = ${formatCurrency(planUsage.overageAmountCents || 0)})`
+                : ''}
+            </Text>
+          ) : null}
+          {planUsage.planType === 'tiered_bracket' && planUsage.limit != null ? (
+            <>
+              <View style={styles.planUsageBarTrack}>
+                <View style={[
+                  styles.planUsageBarFill,
+                  planUsage.exceeded ? styles.planUsageBarFillExceeded : styles.planUsageBarFillOk,
+                  { width: `${Math.min(100, Math.round(((planUsage.activeUsers || 0) / planUsage.limit) * 100))}%` },
+                ]} />
+              </View>
+              <Text style={[styles.planUsageLine, planUsage.exceeded && styles.planUsageLineExceeded]}>
+                {planUsage.exceeded ? '⚠ ' : '✓ '}
+                {planUsage.activeUsers} de {planUsage.limit} usuário{planUsage.limit === 1 ? '' : 's'} ({planMetricLabel(planUsage.activeUserMetric)}) permitidos pelo plano
+                {planUsage.exceeded ? ` — excedeu em ${(planUsage.activeUsers || 0) - planUsage.limit}` : ''}
+              </Text>
+            </>
+          ) : planUsage.planType === 'included_overage' && planUsage.includedQuantity != null ? (
+            <>
+              <View style={styles.planUsageBarTrack}>
+                <View style={[
+                  styles.planUsageBarFill,
+                  (planUsage.overageUnits || 0) > 0 ? styles.planUsageBarFillOverage : styles.planUsageBarFillOk,
+                  { width: `${Math.min(100, Math.round(((planUsage.activeUsers || 0) / Math.max(1, planUsage.includedQuantity)) * 100))}%` },
+                ]} />
+              </View>
+              <Text style={[styles.planUsageLine, (planUsage.overageUnits || 0) > 0 && styles.planUsageLineOverage]}>
+                {planUsage.activeUsers} de {planUsage.includedQuantity} usuário{planUsage.includedQuantity === 1 ? '' : 's'} ({planMetricLabel(planUsage.activeUserMetric)}) incluídos no plano
+                {(planUsage.overageUnits || 0) > 0 ? ' — passou do incluído' : ' — dentro do incluído'}
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.planUsageLine}>{planUsage.activeUsers} usuário{planUsage.activeUsers === 1 ? '' : 's'} ({planMetricLabel(planUsage.activeUserMetric)}) · este plano não tem limite de usuários</Text>
+          )}
+        </Panel>
+        </View>
+      ) : null}
 
       <View ref={registerSection('form')} style={[isActive('form') && styles.tourHighlight]}>
       <Panel>
@@ -1091,6 +1178,17 @@ const styles = StyleSheet.create({
   title: { color: colors.ink, fontSize: 28, fontWeight: '900' },
   subtitle: { color: colors.muted, fontSize: 17, lineHeight: 22, marginTop: 6, marginBottom: 18 },
   panelTitle: { color: colors.ink, fontSize: 19, fontWeight: '800', marginBottom: 12 },
+  planUsageTitle: { color: colors.ink, fontSize: 16, fontWeight: '800', marginBottom: 10 },
+  planUsageBarTrack: { height: 8, borderRadius: 4, backgroundColor: colors.border, overflow: 'hidden', marginBottom: 8 },
+  planUsageBarFill: { height: '100%', borderRadius: 4 },
+  planUsageBarFillOk: { backgroundColor: colors.green },
+  planUsageBarFillExceeded: { backgroundColor: colors.red },
+  // Excedente do plano 'base + incluídos' é cobrança extra automática, não
+  // um teto estourado — usa a cor de aviso (âmbar), não a de erro (vermelho).
+  planUsageBarFillOverage: { backgroundColor: colors.amber },
+  planUsageLine: { color: colors.muted, fontSize: 14, fontWeight: '700' },
+  planUsageLineExceeded: { color: colors.red, fontWeight: '900' },
+  planUsageLineOverage: { color: colors.amber, fontWeight: '900' },
   formTitleRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
   cancelEdit: { borderRadius: 8, backgroundColor: '#f2f4f7', paddingHorizontal: 10, paddingVertical: 7 },
   cancelEditText: { color: colors.muted, fontSize: 14, fontWeight: '900' },

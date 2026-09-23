@@ -989,6 +989,21 @@ alter table platform_plans add column if not exists
   active_user_metric text not null default 'registered'
   check (active_user_metric in ('login_enabled','registered'));
 
+-- Terceiro modelo de cobrança: preço base mensal cobre até
+-- included_quantity usuários ativos (mesmo critério de active_user_metric
+-- acima); cada usuário além disso é cobrado a overage_price_cents. Ex.:
+-- "Essencial" da proposta comercial — R$99/mês, até 40 incluídos, R$5 por
+-- excedente. Diferente de 'tiered_bracket' (platform_plan_tiers): lá o
+-- preço muda em degraus fixos por faixa; aqui é um único preço base mais
+-- uma tarifa linear sobre o excedente, sem faixas. Os três campos abaixo só
+-- valem pra plan_type='included_overage' — ficam null pros outros tipos.
+alter table platform_plans drop constraint if exists platform_plans_plan_type_check;
+alter table platform_plans add constraint platform_plans_plan_type_check
+  check (plan_type in ('per_active_user','tiered_bracket','included_overage'));
+alter table platform_plans add column if not exists included_quantity integer check (included_quantity is null or included_quantity >= 0);
+alter table platform_plans add column if not exists base_price_cents integer check (base_price_cents is null or base_price_cents >= 0);
+alter table platform_plans add column if not exists overage_price_cents integer check (overage_price_cents is null or overage_price_cents >= 0);
+
 create table if not exists platform_plan_tiers (
   id uuid primary key default gen_random_uuid(),
   plan_id uuid not null references platform_plans(id) on delete cascade,
@@ -1044,6 +1059,54 @@ create table if not exists platform_invoices (
   created_at timestamptz not null default now(),
   unique (condominium_id, reference_month)
 );
+
+-- Cobrança Pix da fatura via Mercado Pago (conta pessoa física do dono da
+-- plataforma, sem split — o valor cai direto na conta dele). pix_payment_id
+-- guarda o id da order (API de Orders, v1/orders) retornado pelo Mercado
+-- Pago; o webhook usa esse id pra reconsultar o status oficial na API
+-- (nunca confia no corpo do webhook em si). Sem MERCADOPAGO_ACCESS_TOKEN
+-- configurado, esses campos ficam vazios e o e-mail da fatura sai só
+-- informativo, como já era antes.
+alter table platform_invoices add column if not exists pix_payment_id text;
+alter table platform_invoices add column if not exists pix_copy_paste text;
+alter table platform_invoices add column if not exists pix_qr_code_base64 text;
+alter table platform_invoices add column if not exists pix_expires_at timestamptz;
+-- Marca quando o e-mail de recibo (pós-pagamento) foi enviado — como a
+-- conta é pessoa física, sem nota fiscal automática, esse recibo por
+-- e-mail é o documento que o síndico anexa na prestação de contas.
+alter table platform_invoices add column if not exists receipt_sent_at timestamptz;
+-- Como o pagamento foi confirmado: 'pix_mercadopago' (webhook/reconciliação)
+-- ou 'manual' (admin geral marcou como recebido no painel de Recebimentos —
+-- ex.: pagou por fora). manual_note/confirmed_by registram quem e por quê.
+alter table platform_invoices add column if not exists payment_method text check (payment_method is null or payment_method in ('pix_mercadopago','manual'));
+alter table platform_invoices add column if not exists manual_note text;
+alter table platform_invoices add column if not exists confirmed_by uuid references users(id) on delete set null;
+-- Tratamento de fatura indevida (painel do admin geral): cancelamento com
+-- motivo, estorno de fatura já paga (registro — o reembolso é feito no
+-- Mercado Pago) e alerta de pagamento que chegou depois do cancelamento.
+alter table platform_invoices drop constraint if exists platform_invoices_status_check;
+alter table platform_invoices add constraint platform_invoices_status_check check (status in ('pending','sent','paid','canceled','refunded'));
+alter table platform_invoices add column if not exists cancel_reason text;
+alter table platform_invoices add column if not exists canceled_at timestamptz;
+alter table platform_invoices add column if not exists canceled_by uuid references users(id) on delete set null;
+alter table platform_invoices add column if not exists refund_note text;
+alter table platform_invoices add column if not exists refunded_at timestamptz;
+alter table platform_invoices add column if not exists paid_after_canceled_at timestamptz;
+-- Uma fatura ABERTA por condomínio/mês (antes: uma fatura por mês, ponto).
+-- Cancelada/estornada libera o mês pra reemitir uma fatura corrigida.
+alter table platform_invoices drop constraint if exists platform_invoices_condominium_id_reference_month_key;
+create unique index if not exists platform_invoices_open_month_idx on platform_invoices(condominium_id, reference_month) where status not in ('canceled','refunded');
+-- Vencimento da fatura e marcadores dos lembretes por e-mail (cada um sai no
+-- máximo uma vez por fatura, igual due_soon_notified_at em invoices).
+alter table platform_invoices add column if not exists due_date date;
+alter table platform_invoices add column if not exists due_soon_notified_at timestamptz;
+alter table platform_invoices add column if not exists overdue_notified_at timestamptz;
+-- Faturas emitidas antes de existir vencimento: 10 dias após a criação. Já
+-- nascem com os lembretes marcados como enviados, pra o deploy não disparar
+-- e-mail de "em atraso" retroativo pra fatura antiga.
+update platform_invoices set due_date = ((created_at at time zone 'America/Sao_Paulo')::date + 10),
+  due_soon_notified_at = now(), overdue_notified_at = now()
+where due_date is null;
 
 -- Cobranças adicionais esporádicas por unidade (ex.: tag de portaria):
 -- somam à taxa condominial normal no lote mensal enquanto houver parcela

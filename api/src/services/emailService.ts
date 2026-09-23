@@ -107,13 +107,68 @@ const formatMonthLabel = (referenceMonth: Date) =>
   referenceMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 const formatCurrencyBRL = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+// Detalhe do plano vinculado ao condomínio no momento da fatura — usado só
+// pra montar a explicação de "por que esse valor" no e-mail abaixo. Um tipo
+// por vez (union), igual ao plan_type de platform_plans.
+export type PlatformInvoicePlanDetail =
+  | { type: 'per_active_user'; priceCentsPerUser: number; minimumPriceCents: number }
+  | { type: 'tiered_bracket'; tierMin: number; tierMax: number | null }
+  | { type: 'included_overage'; includedQuantity: number; basePriceCents: number; overagePriceCents: number; overageUnits: number; overageAmountCents: number };
+
+// Linhas de detalhamento do valor cobrado, específicas de cada tipo de
+// plano — é aqui que o e-mail explica por que o total pode ser diferente
+// do preço "de tabela" do plano (excedente sobre a quantidade incluída,
+// valor mínimo mensal aplicado etc.), em vez de só mostrar um número seco.
+const planDetailRows = (detail: PlatformInvoicePlanDetail, activeUsers: number): string => {
+  if (detail.type === 'included_overage') {
+    const overageRow = detail.overageUnits > 0
+      ? `<br/>Usuários excedentes: <strong>${detail.overageUnits}</strong> × ${escapeHtml(formatCurrencyBRL(detail.overagePriceCents))} = <strong>${escapeHtml(formatCurrencyBRL(detail.overageAmountCents))}</strong>`
+      : `<br/><span style="color:#0f927f">Dentro dos ${detail.includedQuantity} usuário${detail.includedQuantity === 1 ? '' : 's'} incluído${detail.includedQuantity === 1 ? '' : 's'} — sem cobrança de excedente este mês.</span>`;
+    return `Valor base do plano: <strong>${escapeHtml(formatCurrencyBRL(detail.basePriceCents))}</strong>
+      (até ${detail.includedQuantity} usuário${detail.includedQuantity === 1 ? '' : 's'} incluído${detail.includedQuantity === 1 ? '' : 's'})${overageRow}`;
+  }
+  if (detail.type === 'per_active_user') {
+    const linearTotal = detail.priceCentsPerUser * activeUsers;
+    const floorApplied = linearTotal < detail.minimumPriceCents;
+    const floorRow = floorApplied
+      ? `<br/><span style="color:#d89a2b">Valor mínimo mensal aplicado — o cálculo por usuário ficaria em ${escapeHtml(formatCurrencyBRL(linearTotal))}, abaixo do mínimo de ${escapeHtml(formatCurrencyBRL(detail.minimumPriceCents))}.</span>`
+      : '';
+    return `Preço por usuário ativo: <strong>${escapeHtml(formatCurrencyBRL(detail.priceCentsPerUser))}</strong>${floorRow}`;
+  }
+  const rangeLabel = detail.tierMax === null ? `a partir de ${detail.tierMin}` : `${detail.tierMin} a ${detail.tierMax}`;
+  return `Faixa contratada: <strong>${rangeLabel} usuários ativos</strong> — valor fixo desta faixa.`;
+};
+
+// Cobrança Pix já criada no Mercado Pago pra essa fatura (ver
+// mercadoPagoService.ts) — ausente quando MERCADOPAGO_ACCESS_TOKEN não
+// está configurado, ou quando a criação da cobrança falhou; nesses casos o
+// e-mail sai só informativo, sem bloco de pagamento (nunca falha o envio
+// do aviso da fatura por causa disso).
+export type PlatformInvoicePix = { copyPaste: string; expiresAt: string | null };
+
+const pixBlockHtml = (pix?: PlatformInvoicePix | null) => {
+  if (!pix?.copyPaste) return '';
+  const expiryLine = pix.expiresAt
+    ? `<p style="color:#6f7e8d;font-size:13px;margin-top:-6px">Válido até ${escapeHtml(new Date(pix.expiresAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }))}.</p>`
+    : '';
+  return `
+      <p style="font-weight:bold;margin-bottom:6px">Pagar agora com Pix</p>
+      <p style="background:#f5f7fb;border-radius:8px;padding:14px 16px;font-family:monospace;font-size:12px;word-break:break-all">${escapeHtml(pix.copyPaste)}</p>
+      ${expiryLine}
+      <p style="color:#6f7e8d;font-size:13px">Copie o código acima e cole na opção "Pix Copia e Cola" do seu banco.</p>`;
+};
+
 export const sendPlatformInvoiceEmail = (
   to: string,
   name: string,
   condominiumName: string,
+  planName: string,
+  planDetail: PlatformInvoicePlanDetail,
   referenceMonth: Date,
   amountCents: number,
   activeUsers: number,
+  pix?: PlatformInvoicePix | null,
+  dueDate?: Date | null,
 ) => sendEmail({
   to,
   subject: `Fatura da plataforma — ${formatMonthLabel(referenceMonth)}`,
@@ -124,10 +179,156 @@ export const sendPlatformInvoiceEmail = (
       <p>A fatura de <strong>${escapeHtml(formatMonthLabel(referenceMonth))}</strong> do condomínio
       <strong>${escapeHtml(condominiumName || '')}</strong> já está disponível.</p>
       <p style="background:#f5f7fb;border-radius:8px;padding:14px 16px">
-        Usuários ativos cobrados: <strong>${activeUsers}</strong><br/>
-        Valor: <strong>${escapeHtml(formatCurrencyBRL(amountCents))}</strong>
+        Plano contratado: <strong>${escapeHtml(planName)}</strong><br/>
+        ${planDetailRows(planDetail, activeUsers)}<br/>
+        Usuários ativos cobrados: <strong>${activeUsers}</strong>
       </p>
+      <p style="background:#eaf1fb;border-radius:8px;padding:14px 16px;font-size:16px">
+        Valor total do mês: <strong>${escapeHtml(formatCurrencyBRL(amountCents))}</strong>
+        ${dueDate ? `<br/><span style="font-size:14px">Vencimento: <strong>${escapeHtml(dueDate.toLocaleDateString('pt-BR', { timeZone: 'UTC' }))}</strong></span>` : ''}
+      </p>
+      ${pixBlockHtml(pix)}
       <p style="color:#6f7e8d;font-size:13px">Este valor se refere à assinatura da plataforma pelo condomínio, não a taxas condominiais dos moradores.</p>
+    </div></body></html>`,
+});
+
+// Lembretes da fatura da plataforma (job diário): "vence em 3 dias" e "em
+// atraso", cada um no máximo uma vez por fatura. Reenvia o Pix se existir.
+export const sendPlatformInvoiceReminderEmail = (
+  to: string,
+  name: string,
+  condominiumName: string,
+  referenceMonth: Date,
+  amountCents: number,
+  dueDate: Date,
+  kind: 'due_soon' | 'overdue',
+  pix?: PlatformInvoicePix | null,
+) => {
+  const dueLabel = dueDate.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+  const overdue = kind === 'overdue';
+  return sendEmail({
+    to,
+    subject: overdue ? `Fatura da plataforma em atraso — ${formatMonthLabel(referenceMonth)}` : `Fatura da plataforma vence em 3 dias — ${formatMonthLabel(referenceMonth)}`,
+    html: `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#17283e;line-height:1.5">
+      <div style="max-width:560px;margin:auto;padding:28px;border:1px solid #e4e9ee;border-radius:12px">
+        <h2 style="margin-top:0">${overdue ? 'Fatura da plataforma em atraso' : 'Sua fatura vence em 3 dias'}</h2>
+        <p>Olá, ${escapeHtml(name)}.</p>
+        <p>A fatura de <strong>${escapeHtml(formatMonthLabel(referenceMonth))}</strong> do condomínio <strong>${escapeHtml(condominiumName || '')}</strong>
+        ${overdue ? `venceu em <strong>${escapeHtml(dueLabel)}</strong> e ainda não foi paga.` : `vence em <strong>${escapeHtml(dueLabel)}</strong>.`}</p>
+        <p style="background:${overdue ? '#fbeaea' : '#eaf1fb'};border-radius:8px;padding:14px 16px;font-size:16px">
+          Valor: <strong>${escapeHtml(formatCurrencyBRL(amountCents))}</strong>
+        </p>
+        ${pixBlockHtml(pix)}
+        <p style="color:#6f7e8d;font-size:13px">Se você já pagou, desconsidere este aviso — a confirmação pode levar alguns instantes.</p>
+      </div></body></html>`,
+  });
+};
+
+// Aviso de fatura da plataforma cancelada pelo admin geral (fatura indevida
+// ou substituída por uma corrigida) — o Pix antigo deixa de valer.
+export const sendPlatformInvoiceCanceledEmail = (
+  to: string,
+  name: string,
+  condominiumName: string,
+  referenceMonth: Date,
+  amountCents: number,
+  reason: string,
+  replaced: boolean,
+) => sendEmail({
+  to,
+  subject: `Fatura da plataforma cancelada — ${formatMonthLabel(referenceMonth)}`,
+  html: `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#17283e;line-height:1.5">
+    <div style="max-width:560px;margin:auto;padding:28px;border:1px solid #e4e9ee;border-radius:12px">
+      <h2 style="margin-top:0">Fatura da plataforma cancelada</h2>
+      <p>Olá, ${escapeHtml(name)}.</p>
+      <p>A fatura de <strong>${escapeHtml(formatMonthLabel(referenceMonth))}</strong> (${escapeHtml(formatCurrencyBRL(amountCents))}) do condomínio
+      <strong>${escapeHtml(condominiumName || '')}</strong> foi cancelada pela administração da plataforma.</p>
+      <p style="background:#f5f7fb;border-radius:8px;padding:14px 16px">Motivo: ${escapeHtml(reason)}</p>
+      <p><strong>Desconsidere o Pix desta fatura</strong> — o código antigo não vale mais.${replaced ? ' Uma nova fatura, com novo Pix, foi enviada em seguida por e-mail.' : ''}</p>
+      <p style="color:#6f7e8d;font-size:13px">Se você já pagou esta fatura, responda este e-mail para a administração providenciar o reembolso.</p>
+    </div></body></html>`,
+});
+
+// Enviado pelo webhook do Mercado Pago (mercadoPagoWebhookRoutes.ts) quando
+// o Pix da fatura é confirmado. Como a conta que recebe é pessoa física
+// (sem CNPJ, sem nota fiscal automática — ver config.platformReceipt), este
+// e-mail funciona como o recibo de verdade: o síndico anexa isso na
+// prestação de contas do condomínio. Se PLATFORM_RECEIPT_OWNER_* não
+// estiver preenchido no .env, o e-mail sai sem essa identificação — melhor
+// avisar que o pagamento foi recebido, mesmo incompleto, do que não avisar.
+export const sendPlatformInvoiceReceiptEmail = (
+  to: string,
+  name: string,
+  condominiumName: string,
+  referenceMonth: Date,
+  amountCents: number,
+) => {
+  const owner = config.platformReceipt;
+  const today = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const identification = owner.ownerName
+    ? `<p>Eu, <strong>${escapeHtml(owner.ownerName)}</strong>${owner.ownerCpf ? `, CPF ${escapeHtml(owner.ownerCpf)}` : ''},
+       declaro ter recebido de <strong>${escapeHtml(condominiumName || '')}</strong> a quantia de
+       <strong>${escapeHtml(formatCurrencyBRL(amountCents))}</strong> referente à assinatura da plataforma Lar em Dia,
+       competência de <strong>${escapeHtml(formatMonthLabel(referenceMonth))}</strong>.</p>
+       <p>${escapeHtml(owner.ownerCity || '')}${owner.ownerCity ? ', ' : ''}${escapeHtml(today)}.</p>`
+    : `<p>Recebemos o pagamento de <strong>${escapeHtml(formatCurrencyBRL(amountCents))}</strong> referente à assinatura
+       da plataforma Lar em Dia de <strong>${escapeHtml(condominiumName || '')}</strong>, competência de
+       <strong>${escapeHtml(formatMonthLabel(referenceMonth))}</strong>.</p>`;
+  return sendEmail({
+    to,
+    subject: `Recibo — Fatura da plataforma paga (${formatMonthLabel(referenceMonth)})`,
+    html: `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#17283e;line-height:1.5">
+      <div style="max-width:560px;margin:auto;padding:28px;border:1px solid #e4e9ee;border-radius:12px">
+        <h2 style="margin-top:0">Recibo de pagamento</h2>
+        <p>Olá, ${escapeHtml(name)}.</p>
+        <p>Seu pagamento via Pix foi confirmado. Este e-mail serve como recibo — guarde-o para a prestação de contas do condomínio.</p>
+        <div style="background:#f5f7fb;border-radius:8px;padding:16px 18px">${identification}</div>
+        <p style="color:#6f7e8d;font-size:13px">Este valor se refere à assinatura da plataforma pelo condomínio, não a taxas condominiais dos moradores.</p>
+      </div></body></html>`,
+  });
+};
+
+const loginUrl = () => {
+  const baseUrl = config.webUrl.trim();
+  return baseUrl.endsWith('://') ? `${baseUrl}login` : `${baseUrl.replace(/\/$/, '')}/login`;
+};
+
+// Os dois e-mails abaixo são disparados pelo job diário de lembrete de
+// boleto (billingReminderScheduler.ts / invoiceReminderService.ts), cada um
+// no máximo uma vez por boleto: "vence em 3 dias" é marcado por
+// due_soon_notified_at, "vencido" pela própria transição de status
+// issued/pending_provider -> overdue, que só acontece uma vez.
+export const sendInvoiceDueSoonEmail = (to: string, name: string, condominiumName: string, amountLabel: string, dueDateLabel: string) => sendEmail({
+  to,
+  subject: `Boleto vence em 3 dias — ${condominiumName || 'Lar em Dia'}`,
+  html: `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#17283e;line-height:1.5">
+    <div style="max-width:560px;margin:auto;padding:28px;border:1px solid #e4e9ee;border-radius:12px">
+      <h2 style="margin-top:0">Seu boleto vence em 3 dias</h2>
+      <p>Olá, ${escapeHtml(name)}.</p>
+      <p>O boleto do condomínio <strong>${escapeHtml(condominiumName || '')}</strong> vence em breve:</p>
+      <p style="background:#f5f7fb;border-radius:8px;padding:14px 16px">
+        Valor: <strong>${escapeHtml(amountLabel)}</strong><br/>
+        Vencimento: <strong>${escapeHtml(dueDateLabel)}</strong>
+      </p>
+      <p><a href="${loginUrl()}" style="display:inline-block;background:#255eab;color:white;text-decoration:none;padding:13px 20px;border-radius:8px;font-weight:bold">Ver meu boleto</a></p>
+      <p style="color:#6f7e8d;font-size:13px">Pague até a data de vencimento para evitar juros e multa.</p>
+    </div></body></html>`,
+});
+
+export const sendInvoiceOverdueEmail = (to: string, name: string, condominiumName: string, amountLabel: string, dueDateLabel: string) => sendEmail({
+  to,
+  subject: `Boleto vencido — ${condominiumName || 'Lar em Dia'}`,
+  html: `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#17283e;line-height:1.5">
+    <div style="max-width:560px;margin:auto;padding:28px;border:1px solid #e4e9ee;border-radius:12px">
+      <h2 style="margin-top:0">Seu boleto está vencido</h2>
+      <p>Olá, ${escapeHtml(name)}.</p>
+      <p>O boleto do condomínio <strong>${escapeHtml(condominiumName || '')}</strong> está em atraso:</p>
+      <p style="background:#f5f7fb;border-radius:8px;padding:14px 16px">
+        Valor original: <strong>${escapeHtml(amountLabel)}</strong><br/>
+        Venceu em: <strong>${escapeHtml(dueDateLabel)}</strong>
+      </p>
+      <p><a href="${loginUrl()}" style="display:inline-block;background:#255eab;color:white;text-decoration:none;padding:13px 20px;border-radius:8px;font-weight:bold">Regularizar agora</a></p>
+      <p style="color:#6f7e8d;font-size:13px">Podem incidir juros e multa conforme o regulamento do condomínio.</p>
     </div></body></html>`,
 });
 

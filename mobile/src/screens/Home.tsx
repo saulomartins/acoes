@@ -1,5 +1,6 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Image, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { Text } from '../ui/text';
 import { AuthContext } from '../context/AuthContext';
 import { colors, layout } from '../ui/theme';
@@ -50,6 +51,7 @@ const buildMenuStructure = (): MenuItem[] => [
   { title: 'Gestão de bancos', shortTitle: 'Bancos', description: 'Conexões bancárias e vínculos com condomínios.', route: 'BankConfigurations', symbol: '↔', accent: '#ff7a24', roles: ['admin_geral'] },
   { title: 'Planos da plataforma', shortTitle: 'Planos', description: 'Cadastre os planos de cobrança da plataforma aos condomínios.', route: 'PlatformPlans', symbol: '◆', accent: colors.lilac, roles: ['admin_geral'] },
   { title: 'Faturamento da plataforma', shortTitle: 'Faturamento', description: 'Projeção de receita por condomínio, unidades ativas e plano vinculado.', route: 'PlatformRevenue', symbol: '$', accent: colors.green, roles: ['admin_geral'] },
+  { title: 'Recebimentos da plataforma', shortTitle: 'Recebimentos', description: 'Faturas cobradas dos condomínios, pagamentos via Pix e confirmações.', route: 'PlatformReceipts', symbol: '✓', accent: colors.teal, roles: ['admin_geral'] },
   { title: 'Auditoria', shortTitle: 'Auditoria', description: 'Ações de síndicos e subsíndicos por condomínio.', route: 'AuditLog', symbol: '🛡', accent: colors.primary, roles: ['admin_geral'] },
   { title: 'Suporte', shortTitle: 'Suporte', description: 'Localize uma pessoa e corrija problemas de acesso: sessão travada, login bloqueado, senha e aceite de termos.', route: 'Support', symbol: '🛠', accent: colors.primary, roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'pessoas' },
   { title: 'Tipologias', shortTitle: 'Tipologias', description: 'Tipos de apartamento e valores mensais de cobrança.', route: 'UnitTypes', symbol: '▧', accent: colors.amber, roles: ['sindico', 'subsindico'], feature: 'tipologias' },
@@ -111,6 +113,8 @@ const buildMenuStructure = (): MenuItem[] => [
 
 const modules = buildMenuStructure();
 
+const formatCurrency = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
 const roleLabels: Record<string, string> = {
   admin_geral: 'Administrador geral',
   sindico: 'Síndico',
@@ -120,7 +124,7 @@ const roleLabels: Record<string, string> = {
 };
 
 const tourSteps: TourStep[] = [
-  { key: 'profile', title: 'Seu perfil', description: 'Mostra o cargo com que você está logado (Síndico, Subsíndico, Proprietário, Inquilino ou Administrador geral) — é esse cargo que define quais áreas aparecem no "Acesso rápido" logo abaixo e o que você pode fazer em cada uma.' },
+  { key: 'profile', title: 'Seu perfil', description: 'Mostra o cargo com que você está logado (Síndico, Subsíndico, Proprietário, Inquilino ou Administrador geral) — é esse cargo que define quais áreas aparecem no "Acesso rápido" logo abaixo e o que você pode fazer em cada uma. Síndico/subsíndico também veem, ao lado, o plano de cobrança da plataforma contratado pelo condomínio e quanto o mês está dando até agora — inclusive quantos usuários excedentes e o quanto isso já soma, quando o plano é do tipo "base + incluídos" (quando a funcionalidade "Painel de usuários" está ativa). Toque no card pra ver o detalhamento completo.' },
   { key: 'quickAccess', title: 'Acesso rápido', description: 'Grade com as áreas liberadas pra você. Ela é montada automaticamente: primeiro filtra pelo seu cargo (ex.: só Síndico/Subsíndico veem "Prestação de contas" com formulário de lançamento, moradores só veem consulta) e depois pelas funcionalidades que o Administrador geral ativou pra esse condomínio em Condomínios > Funcionalidades ativas. Um card com "EM BREVE" ainda não tem tela associada.' },
   { key: 'security', title: 'Ambiente seguro', description: 'Lembrete de que os dados e credenciais do condomínio só são exibidos pra perfis autorizados — cada rota do menu é validada tanto na tela quanto na API antes de mostrar qualquer informação.' },
 ];
@@ -131,8 +135,22 @@ export default function Home({ navigation }: any) {
   const [unreadNotices, setUnreadNotices] = useState(0);
   const [unreadReports, setUnreadReports] = useState(0);
   const [condominiumName, setCondominiumName] = useState(user?.condominiumName || '');
+  const [planUsage, setPlanUsage] = useState<{
+    hasPlan: boolean; planName?: string; planType?: string;
+    basePriceCents?: number | null; includedQuantity?: number | null; overagePriceCents?: number | null;
+    overageUnits?: number | null; overageAmountCents?: number | null; estimatedMonthlyAmountCents?: number | null;
+  } | null>(null);
+
+  // Fatura da plataforma em aberto do condomínio (cobrança do sistema, com
+  // Pix) — só síndico/subsíndico veem.
+  const [platformInvoice, setPlatformInvoice] = useState<{
+    id: string; reference_month: string; amount_cents: number; plan_name: string; due_date: string | null; overdue: boolean;
+    pix_copy_paste: string | null; pix_qr_code_base64: string | null;
+  } | null>(null);
+  const [pixCopied, setPixCopied] = useState(false);
 
   const admin = user?.role === 'admin_geral';
+  const manager = user?.role === 'sindico' || user?.role === 'subsindico';
   const initials = (user?.username || 'U').slice(0, 2).toUpperCase();
 
   // condominiumFeatures === null (admin_geral ou ainda carregando) nunca
@@ -149,6 +167,39 @@ export default function Home({ navigation }: any) {
       .then(response=>setCondominiumName(response.user.condominiumName || ''))
       .catch(()=>setCondominiumName(''));
   }, [admin,user?.condominiumName,userToken]);
+
+  // Plano da plataforma contratado pelo condomínio — só síndico/subsíndico
+  // administram isso (moradores não precisam ver, admin_geral não tem um
+  // condomínio próprio). Mesmo endpoint que Pessoas e Painel de usuários já
+  // usam, pra nome/valor/excedente aqui baterem exatamente com as outras telas.
+  useEffect(() => {
+    if (!userToken || !manager) { setPlanUsage(null); return; }
+    apiRequest<{
+      hasPlan: boolean; planName?: string; planType?: string;
+      basePriceCents?: number | null; includedQuantity?: number | null; overagePriceCents?: number | null;
+      overageUnits?: number | null; overageAmountCents?: number | null; estimatedMonthlyAmountCents?: number | null;
+    }>('/condominiums/plan-usage', userToken)
+      .then(response => setPlanUsage(response))
+      .catch(() => setPlanUsage(null));
+  }, [manager, userToken]);
+
+  useEffect(() => {
+    if (!userToken || !manager) { setPlatformInvoice(null); return; }
+    apiRequest<{ invoice: typeof platformInvoice }>('/condominiums/platform-invoice', userToken)
+      .then(response => setPlatformInvoice(response.invoice))
+      .catch(() => setPlatformInvoice(null));
+  }, [manager, userToken]);
+
+  const copyPlatformPix = async () => {
+    if (!platformInvoice?.pix_copy_paste) return;
+    try {
+      await Clipboard.setStringAsync(platformInvoice.pix_copy_paste);
+      setPixCopied(true);
+      setTimeout(() => setPixCopied(false), 3000);
+    } catch {
+      Alert.alert('Não foi possível copiar', 'Selecione o código e copie manualmente.');
+    }
+  };
 
   const loadAttention = useCallback(async () => {
     if (!userToken || admin) return;
@@ -187,9 +238,52 @@ export default function Home({ navigation }: any) {
         </Text>
       </View>
 
+      {manager && platformInvoice ? (
+        <View style={[styles.invoiceCard, platformInvoice.overdue && styles.invoiceCardOverdue, tablet && { marginHorizontal: 20 }, !desktop && { marginHorizontal: 16 }]}>
+          <Text style={[styles.invoiceEyebrow, platformInvoice.overdue && { color: colors.red }]}>{platformInvoice.overdue ? 'FATURA DA PLATAFORMA EM ATRASO' : 'FATURA DA PLATAFORMA EM ABERTO'}</Text>
+          <Text style={styles.invoiceAmount}>{formatCurrency(platformInvoice.amount_cents)}</Text>
+          <Text style={styles.invoiceMeta}>
+            Plano {platformInvoice.plan_name} · competência {new Date(platformInvoice.reference_month).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' })}
+            {platformInvoice.due_date ? ` · vence em ${new Date(`${platformInvoice.due_date}T00:00:00Z`).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}` : ''}
+          </Text>
+          {platformInvoice.pix_copy_paste ? (
+            <>
+              <View style={styles.invoicePixRow}>
+                {platformInvoice.pix_qr_code_base64 ? <Image source={{ uri: `data:image/png;base64,${platformInvoice.pix_qr_code_base64}` }} style={styles.invoiceQr} /> : null}
+                <View style={styles.grow}>
+                  <Text style={styles.invoicePixLabel}>Pix Copia e Cola</Text>
+                  <Text selectable numberOfLines={3} style={styles.invoicePixCode}>{platformInvoice.pix_copy_paste}</Text>
+                  <Pressable onPress={copyPlatformPix} style={styles.invoiceCopy}><Text style={styles.invoiceCopyText}>{pixCopied ? 'Código copiado ✓' : 'Copiar código Pix'}</Text></Pressable>
+                </View>
+              </View>
+              <Text style={styles.invoiceHint}>Depois de pagar, a confirmação e o recibo chegam por e-mail em instantes.</Text>
+            </>
+          ) : (
+            <Text style={styles.invoiceHint}>O código Pix desta fatura ainda está sendo gerado — a administração da plataforma enviará por e-mail.</Text>
+          )}
+        </View>
+      ) : null}
+
       <View ref={registerSection('profile')} style={[isActive('profile') && styles.tourHighlight]}>
       <View style={[styles.statGrid, tablet && { paddingHorizontal: 20, gap: 12 }, !desktop && { paddingHorizontal: 16, gap: 10 }, (tablet || !desktop) && styles.horizontalCards]}>
         <View style={[styles.stat, styles.profileStat, tablet && { minHeight: 140, padding: 16 }, !desktop && { minHeight: 120, padding: 14 }]}><View style={styles.statHead}><View style={[styles.statIcon, { backgroundColor: '#fff3de' }]}><Text style={{ color: colors.amber }}>♙</Text></View><Text style={styles.statLabel}>SEU PERFIL</Text></View><Text numberOfLines={1} style={[styles.statValue, styles.roleValue, tablet && { fontSize: 18 }, !desktop && { fontSize: 16 }]}>{roleLabels[user?.role || ''] || 'Usuário'}</Text><Text style={styles.statDescription}>acesso personalizado por permissão</Text></View>
+        {manager && planUsage?.hasPlan && planUsage.planName && condominiumFeatures?.painel_usuarios === true ? (
+          <Pressable onPress={() => goToRoute(navigation, 'UserStats')} style={[styles.stat, styles.profileStat, tablet && { minHeight: 140, padding: 16 }, !desktop && { minHeight: 120, padding: 14 }]}>
+            <View style={styles.statHead}><View style={[styles.statIcon, { backgroundColor: '#eaf1fb' }]}><Text style={{ color: colors.primary }}>◆</Text></View><Text style={styles.statLabel}>PLANO DA PLATAFORMA</Text></View>
+            <Text numberOfLines={1} style={[styles.statValue, styles.roleValue, tablet && { fontSize: 18 }, !desktop && { fontSize: 16 }]}>{planUsage.planName}</Text>
+            {planUsage.planType === 'included_overage' && planUsage.includedQuantity != null ? (
+              <Text style={styles.statDescription}>
+                {formatCurrency(planUsage.basePriceCents || 0)}/mês · até {planUsage.includedQuantity} incluído{planUsage.includedQuantity === 1 ? '' : 's'} · excedente: {formatCurrency(planUsage.overagePriceCents || 0)}/usuário
+              </Text>
+            ) : null}
+            <Text style={styles.statDescription}>
+              {planUsage.estimatedMonthlyAmountCents != null ? `até o momento, o valor está em ${formatCurrency(planUsage.estimatedMonthlyAmountCents)}` : 'toque para ver o uso e o valor'}
+              {(planUsage.overageUnits || 0) > 0
+                ? ` (${planUsage.overageUnits} excedente${planUsage.overageUnits === 1 ? '' : 's'} × ${formatCurrency(planUsage.overagePriceCents || 0)} = ${formatCurrency(planUsage.overageAmountCents || 0)})`
+                : ''}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
       </View>
 
@@ -310,6 +404,18 @@ const styles = StyleSheet.create({
   pressed: { opacity: .88, transform: [{ scale: .995 }] },
   disabled: { opacity: .65 },
 
+  invoiceCard: { marginHorizontal: 0, marginBottom: 20, borderWidth: 1, borderColor: '#f0d9a8', backgroundColor: '#fdf7ea', borderRadius: layout.radius, padding: 18, gap: 6 },
+  invoiceCardOverdue: { borderColor: colors.red, backgroundColor: '#fbeaea' },
+  invoiceEyebrow: { color: '#9b6a00', fontSize: 12, fontWeight: '900', letterSpacing: .8 },
+  invoiceAmount: { color: colors.ink, fontSize: 26, fontWeight: '900' },
+  invoiceMeta: { color: colors.muted, fontSize: 13 },
+  invoicePixRow: { flexDirection: 'row', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap', marginTop: 10 },
+  invoiceQr: { width: 132, height: 132, borderRadius: 8, backgroundColor: '#fff' },
+  invoicePixLabel: { color: colors.ink, fontWeight: '900', fontSize: 13 },
+  invoicePixCode: { color: colors.muted, fontSize: 11, marginTop: 4 },
+  invoiceCopy: { alignSelf: 'flex-start', marginTop: 8, backgroundColor: colors.primary, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10 },
+  invoiceCopyText: { color: '#fff', fontWeight: '900', fontSize: 13 },
+  invoiceHint: { color: colors.muted, fontSize: 12, marginTop: 6 },
   securityCard: { marginTop: 20, marginHorizontal: 0, flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#f3f7fb', borderRadius: layout.radius, padding: 18 },
   securityIcon: { width: 40, height: 40, borderRadius: 11, backgroundColor: '#e5edf7', alignItems: 'center', justifyContent: 'center' },
   securityTitle: { color: colors.ink, fontSize: 15, fontWeight: '900' },

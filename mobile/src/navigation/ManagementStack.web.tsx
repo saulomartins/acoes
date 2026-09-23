@@ -16,6 +16,7 @@ import BillingSettings from '../screens/BillingSettings';
 import Units from '../screens/Units';
 import PlatformPlans from '../screens/PlatformPlans';
 import PlatformRevenue from '../screens/PlatformRevenue';
+import PlatformReceipts from '../screens/PlatformReceipts';
 import AuditLog from '../screens/AuditLog';
 import Support from '../screens/Support';
 import RegulationArticles from '../screens/RegulationArticles';
@@ -42,6 +43,7 @@ const UnitsScreen = withRoleGuard(withResponsiveShell(Units, 'Units'), 'Units');
 const BillingSettingsScreen = withRoleGuard(withResponsiveShell(BillingSettings, 'BillingSettings'), 'BillingSettings');
 const PlatformPlansScreen = withRoleGuard(withResponsiveShell(PlatformPlans, 'PlatformPlans'), 'PlatformPlans');
 const PlatformRevenueScreen = withRoleGuard(withResponsiveShell(PlatformRevenue, 'PlatformRevenue'), 'PlatformRevenue');
+const PlatformReceiptsScreen = withRoleGuard(withResponsiveShell(PlatformReceipts, 'PlatformReceipts'), 'PlatformReceipts');
 const AuditLogScreen = withRoleGuard(withResponsiveShell(AuditLog, 'AuditLog'), 'AuditLog');
 const GoogleDriveIntegrationGuideScreen = withRoleGuard(withResponsiveShell(GoogleDriveIntegrationGuide, 'GoogleDriveIntegrationGuide'), 'GoogleDriveIntegrationGuide');
 const SupportScreen = withRoleGuard(withResponsiveShell(Support, 'Support'), 'Support');
@@ -68,6 +70,7 @@ export function ManagementStackScreens() {
       <Stack.Screen name="BillingSettings" component={BillingSettingsScreen} options={{ headerShown: false }} />
       <Stack.Screen name="PlatformPlans" component={PlatformPlansScreen} options={{ headerShown: false }} />
       <Stack.Screen name="PlatformRevenue" component={PlatformRevenueScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="PlatformReceipts" component={PlatformReceiptsScreen} options={{ headerShown: false }} />
       <Stack.Screen name="AuditLog" component={AuditLogScreen} options={{ headerShown: false }} />
       <Stack.Screen name="GoogleDriveIntegrationGuide" component={GoogleDriveIntegrationGuideScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Support" component={SupportScreen} options={{ headerShown: false }} />

@@ -9,6 +9,7 @@ import unitExtraChargeRoutes from './routes/unitExtraChargeRoutes';
 import unitConsumptionRoutes from './routes/unitConsumptionRoutes';
 import billingRoutes from './routes/billingRoutes';
 import interWebhookRoutes from './routes/interWebhookRoutes';
+import mercadoPagoWebhookRoutes from './routes/mercadoPagoWebhookRoutes';
 import unitRoutes from './routes/unitRoutes';
 import debtRoutes from './routes/debtRoutes';
 import reportRoutes from './routes/reportRoutes';
@@ -64,6 +65,7 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 app.use('/auth', authRoutes);
 app.use('/webhooks/inter', interWebhookRoutes);
+app.use('/webhooks/mercadopago', mercadoPagoWebhookRoutes);
 app.use('/condominiums', condominiumRoutes);
 app.use('/users', userRoutes);
 app.use('/unit-types', unitTypeRoutes);
