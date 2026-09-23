@@ -8,7 +8,7 @@ import { getInterAccessToken, type InterIntegrationConfig } from '../services/in
 import { sendWhatsAppTemplateMessage } from '../services/whatsappService';
 import { extractDriveFolderId, getDriveFolderMeta } from '../services/googleDriveService';
 import { FEATURE_CATALOG, FEATURE_KEYS, NEW_CONDOMINIUM_FEATURE_DEFAULTS, dependentsOf, isFeatureKey, type FeatureKey } from '../services/featureCatalog';
-import { getOpenPlatformInvoice } from '../services/platformInvoiceService';
+import { getOpenPlatformInvoice, getRecentPaidPlatformInvoice, reconcilePlatformInvoices } from '../services/platformInvoiceService';
 import { countActiveUsers, computeIncludedOverage, computePlanAmountCents, type ActiveUserMetric, type PlatformPlan } from '../services/platformPlanService';
 
 const router = Router();
@@ -425,11 +425,28 @@ router.get('/plan-usage', authorize('admin_geral', 'sindico', 'subsindico'), req
 // Fatura da plataforma em aberto do condomínio do síndico/subsíndico (com o
 // Pix pra pagar). Sem requireFeature de propósito: é cobrança da plataforma,
 // não um módulo que o admin liga/desliga por condomínio.
+const platformInvoicePayload = async (condominiumId: string) => {
+  const invoice = await getOpenPlatformInvoice(condominiumId);
+  // A fatura paga só aparece quando não há outra em aberto.
+  return { invoice, paidInvoice: invoice ? null : await getRecentPaidPlatformInvoice(condominiumId) };
+};
+
 router.get('/platform-invoice', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
   const condominiumId = req.user?.condominiumId;
-  if (!condominiumId) return res.json({ invoice: null });
-  return res.json({ invoice: await getOpenPlatformInvoice(condominiumId) });
+  if (!condominiumId) return res.json({ invoice: null, paidInvoice: null });
+  return res.json(await platformInvoicePayload(condominiumId));
 }));
+
+// "Já paguei — verificar": o próprio síndico pede a conferência da fatura do
+// SEU condomínio no Mercado Pago (mesma reconciliação do job de 15 min), sem
+// esperar o próximo ciclo. Só consulta faturas com Pix pendente desse condomínio.
+router.post('/platform-invoice/verify', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.condominiumId;
+  if (!condominiumId) return res.json({ invoice: null, paidInvoice: null, checked: 0, paid: 0 });
+  const result = await reconcilePlatformInvoices(condominiumId);
+  return res.json({ ...(await platformInvoicePayload(condominiumId)), ...result });
+}));
+
 
 router.get('/', authorize('admin_geral'), asyncHandler(async (_req, res) => {
   const result = await query(

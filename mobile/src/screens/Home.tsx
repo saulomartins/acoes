@@ -147,7 +147,10 @@ export default function Home({ navigation }: any) {
     id: string; reference_month: string; amount_cents: number; plan_name: string; due_date: string | null; overdue: boolean;
     pix_copy_paste: string | null; pix_qr_code_base64: string | null;
   } | null>(null);
+  const [paidInvoice, setPaidInvoice] = useState<{ reference_month: string; amount_cents: number; plan_name: string; paid_at: string; receipt_sent_at: string | null } | null>(null);
   const [pixCopied, setPixCopied] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
 
   const admin = user?.role === 'admin_geral';
   const manager = user?.role === 'sindico' || user?.role === 'subsindico';
@@ -183,12 +186,43 @@ export default function Home({ navigation }: any) {
       .catch(() => setPlanUsage(null));
   }, [manager, userToken]);
 
-  useEffect(() => {
-    if (!userToken || !manager) { setPlatformInvoice(null); return; }
-    apiRequest<{ invoice: typeof platformInvoice }>('/condominiums/platform-invoice', userToken)
-      .then(response => setPlatformInvoice(response.invoice))
-      .catch(() => setPlatformInvoice(null));
+  // Carrega a fatura da plataforma e atualiza sozinho a cada 30 s — assim, assim
+  // que o pagamento é confirmado (webhook, job de 15 min ou "Verificar"), o
+  // cartão vira "Fatura paga" sem precisar recarregar a tela.
+  const loadPlatformInvoice = useCallback(async () => {
+    if (!userToken || !manager) { setPlatformInvoice(null); setPaidInvoice(null); return; }
+    try {
+      const response = await apiRequest<{ invoice: typeof platformInvoice; paidInvoice: typeof paidInvoice }>('/condominiums/platform-invoice', userToken);
+      setPlatformInvoice(response.invoice);
+      setPaidInvoice(response.paidInvoice);
+    } catch {
+      setPlatformInvoice(null);
+      setPaidInvoice(null);
+    }
   }, [manager, userToken]);
+
+  useEffect(() => {
+    loadPlatformInvoice();
+    if (!manager) return;
+    const timer = setInterval(loadPlatformInvoice, 30000);
+    return () => clearInterval(timer);
+  }, [loadPlatformInvoice, manager]);
+
+  const verifyPlatformPayment = async () => {
+    if (!userToken) return;
+    setVerifying(true);
+    setVerifyMessage(null);
+    try {
+      const response = await apiRequest<{ invoice: typeof platformInvoice; paidInvoice: typeof paidInvoice; paid: number }>('/condominiums/platform-invoice/verify', userToken, { method: 'POST' });
+      setPlatformInvoice(response.invoice);
+      setPaidInvoice(response.paidInvoice);
+      setVerifyMessage(response.paid > 0 ? 'Pagamento confirmado! Obrigado.' : 'Ainda não identificamos o pagamento. O Pix pode levar alguns instantes — tente de novo em um minuto.');
+    } catch {
+      setVerifyMessage('Não foi possível verificar agora. Tente novamente em instantes.');
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   const copyPlatformPix = async () => {
     if (!platformInvoice?.pix_copy_paste) return;
@@ -256,11 +290,24 @@ export default function Home({ navigation }: any) {
                   <Pressable onPress={copyPlatformPix} style={styles.invoiceCopy}><Text style={styles.invoiceCopyText}>{pixCopied ? 'Código copiado ✓' : 'Copiar código Pix'}</Text></Pressable>
                 </View>
               </View>
-              <Text style={styles.invoiceHint}>Depois de pagar, a confirmação e o recibo chegam por e-mail em instantes.</Text>
+              <Pressable onPress={verifyPlatformPayment} disabled={verifying} style={[styles.invoiceVerify, verifying && { opacity: 0.6 }]}><Text style={styles.invoiceVerifyText}>{verifying ? 'Verificando...' : 'Já paguei — verificar pagamento'}</Text></Pressable>
+              {verifyMessage ? <Text style={styles.invoiceHint}>{verifyMessage}</Text> : null}
+              <Text style={styles.invoiceHint}>A confirmação também é automática (a tela atualiza sozinha) e o recibo chega por e-mail.</Text>
             </>
           ) : (
             <Text style={styles.invoiceHint}>O código Pix desta fatura ainda está sendo gerado — a administração da plataforma enviará por e-mail.</Text>
           )}
+        </View>
+      ) : null}
+
+      {manager && !platformInvoice && paidInvoice ? (
+        <View style={[styles.invoiceCard, styles.invoiceCardPaid, tablet && { marginHorizontal: 20 }, !desktop && { marginHorizontal: 16 }]}>
+          <Text style={[styles.invoiceEyebrow, { color: colors.green }]}>✓ FATURA DA PLATAFORMA PAGA</Text>
+          <Text style={styles.invoiceAmount}>{formatCurrency(paidInvoice.amount_cents)}</Text>
+          <Text style={styles.invoiceMeta}>
+            Plano {paidInvoice.plan_name} · competência {new Date(paidInvoice.reference_month).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' })} · pago em {new Date(paidInvoice.paid_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+          </Text>
+          <Text style={styles.invoiceHint}>{paidInvoice.receipt_sent_at ? 'O recibo foi enviado por e-mail — guarde-o para a prestação de contas do condomínio.' : 'O recibo será enviado por e-mail.'}</Text>
         </View>
       ) : null}
 
@@ -405,6 +452,9 @@ const styles = StyleSheet.create({
   disabled: { opacity: .65 },
 
   invoiceCard: { marginHorizontal: 0, marginBottom: 20, borderWidth: 1, borderColor: '#f0d9a8', backgroundColor: '#fdf7ea', borderRadius: layout.radius, padding: 18, gap: 6 },
+  invoiceCardPaid: { borderColor: '#a8ddd0', backgroundColor: colors.softGreen },
+  invoiceVerify: { alignSelf: 'flex-start', marginTop: 10, borderWidth: 1, borderColor: colors.primary, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: '#fff' },
+  invoiceVerifyText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
   invoiceCardOverdue: { borderColor: colors.red, backgroundColor: '#fbeaea' },
   invoiceEyebrow: { color: '#9b6a00', fontSize: 12, fontWeight: '900', letterSpacing: .8 },
   invoiceAmount: { color: colors.ink, fontSize: 26, fontWeight: '900' },

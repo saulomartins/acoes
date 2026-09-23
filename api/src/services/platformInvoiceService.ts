@@ -493,3 +493,16 @@ export const refundPlatformInvoice = async (invoiceId: string, note: string): Pr
   if (!result.rows.length) return { ok: false, message: 'Só é possível estornar uma fatura paga.' };
   return { ok: true, pixCanceled: null };
 };
+
+// Última fatura paga (últimos 30 dias) — o cartão da tela Início mostra "paga"
+// em vez de simplesmente sumir, pro síndico ter a confirmação.
+export const getRecentPaidPlatformInvoice = async (condominiumId: string) => {
+  const result = await query<any>(
+    `select i.id, i.reference_month, i.amount_cents, p.name as plan_name, i.paid_at, i.payment_method, i.receipt_sent_at
+     from platform_invoices i join platform_plans p on p.id = i.plan_id
+     where i.condominium_id=$1 and i.status='paid' and i.paid_at > now() - interval '30 days'
+     order by i.paid_at desc limit 1`,
+    [condominiumId],
+  );
+  return result.rows[0] || null;
+};
