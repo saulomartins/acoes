@@ -125,8 +125,13 @@ const roleLabels: Record<string, string> = {
   inquilino: 'Inquilino',
 };
 
+// Só para síndico/subsíndico: o motivo da suspensão (fatura da plataforma em
+// atraso) nunca aparece para morador — para ele a mensagem é neutra (ver
+// RESIDENT_SUSPENDED_MESSAGE em api/src/services/platformSuspensionService.ts).
+const MANAGER_INVOICE_TOUR = ' Acima de tudo aparece o cartão da fatura da plataforma: o Pix pra pagar, "Já paguei — verificar pagamento" e o link "Ver todas as faturas e recibos" (tela Minhas faturas). Com a fatura em atraso, o cartão avisa a data em que a gestão fica somente leitura e os moradores perdem o acesso ao aplicativo (30 dias de atraso); se isso acontecer, uma faixa vermelha aparece aqui até o pagamento ser confirmado — a liberação é automática.';
+
 const tourSteps: TourStep[] = [
-  { key: 'profile', title: 'Seu perfil', description: 'Mostra o cargo com que você está logado (Síndico, Subsíndico, Proprietário, Inquilino ou Administrador geral) — é esse cargo que define quais áreas aparecem no "Acesso rápido" logo abaixo e o que você pode fazer em cada uma. Síndico/subsíndico também veem, ao lado, o plano de cobrança da plataforma contratado pelo condomínio e quanto o mês está dando até agora — inclusive quantos usuários excedentes e o quanto isso já soma, quando o plano é do tipo "base + incluídos" (quando a funcionalidade "Painel de usuários" está ativa). Toque no card pra ver o detalhamento completo. Acima de tudo, síndico/subsíndico veem o cartão da fatura da plataforma: o Pix pra pagar, "Já paguei — verificar pagamento" e o link "Ver todas as faturas e recibos" (tela Minhas faturas). Com a fatura em atraso, o cartão avisa a data em que a gestão fica somente leitura e os moradores perdem o acesso ao aplicativo (30 dias de atraso); se isso acontecer, uma faixa vermelha aparece aqui até o pagamento ser confirmado — a liberação é automática.' },
+  { key: 'profile', title: 'Seu perfil', description: 'Mostra o cargo com que você está logado (Síndico, Subsíndico, Proprietário, Inquilino ou Administrador geral) — é esse cargo que define quais áreas aparecem no "Acesso rápido" logo abaixo e o que você pode fazer em cada uma. Síndico/subsíndico também veem, ao lado, o plano de cobrança da plataforma contratado pelo condomínio e quanto o mês está dando até agora — inclusive quantos usuários excedentes e o quanto isso já soma, quando o plano é do tipo "base + incluídos" (quando a funcionalidade "Painel de usuários" está ativa). Toque no card pra ver o detalhamento completo.' },
   { key: 'quickAccess', title: 'Acesso rápido', description: 'Grade com as áreas liberadas pra você. Ela é montada automaticamente: primeiro filtra pelo seu cargo (ex.: só Síndico/Subsíndico veem "Prestação de contas" com formulário de lançamento, moradores só veem consulta) e depois pelas funcionalidades que o Administrador geral ativou pra esse condomínio em Condomínios > Funcionalidades ativas. Um card com "EM BREVE" ainda não tem tela associada.' },
   { key: 'security', title: 'Ambiente seguro', description: 'Lembrete de que os dados e credenciais do condomínio só são exibidos pra perfis autorizados — cada rota do menu é validada tanto na tela quanto na API antes de mostrar qualquer informação.' },
 ];
@@ -409,7 +414,7 @@ export default function Home({ navigation }: any) {
       </View>
       {(tablet || !desktop) ? <Pressable onPress={() => signOut()} style={[styles.mobileExit, tablet && { marginHorizontal: 20 }, !desktop && { marginHorizontal: 16 }]}><Text style={styles.mobileExitText}>Sair da conta</Text></Pressable> : null}
     </ScrollView>
-    <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} /></>
+    <FeatureTour steps={manager ? tourSteps.map(step => step.key === 'profile' ? { ...step, description: step.description + MANAGER_INVOICE_TOUR } : step) : tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} /></>
   );
 }
 
