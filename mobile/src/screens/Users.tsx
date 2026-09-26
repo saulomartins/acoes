@@ -92,9 +92,15 @@ const planMetricLabel = (metric?: 'login_enabled' | 'registered') => metric === 
 const onlyDigits = (value: string) => value.replace(/\D/g, '');
 const formatCurrency = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+// CPF ou CNPJ sem máscara. Mantém letras: desde julho de 2026 a Receita emite
+// CNPJ alfanumérico (12.ABC.345/01DE-35) — mesma regra de documentService.ts na API.
+const normalizeDocument = (value: string) => value.toUpperCase().replace(/[^0-9A-Z]/g, '');
+
 const formatCpf = (value: string) => {
-  const digits = onlyDigits(value).slice(0, 14);
-  if (digits.length > 11) return digits.replace(/^(\d{2})(\d)/, '$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1/$2').replace(/(\/\d{4})(\d)/, '$1-$2');
+  const digits = normalizeDocument(value).slice(0, 14);
+  if (digits.length > 11 || /[A-Z]/.test(digits)) {
+    return digits.replace(/^(\w{2})(\w)/, '$1.$2').replace(/^(\w{2})\.(\w{3})(\w)/, '$1.$2.$3').replace(/\.(\w{3})(\w)/, '.$1/$2').replace(/(\/\w{4})(\w)/, '$1-$2');
+  }
   return digits
     .replace(/^(\d{3})(\d)/, '$1.$2')
     .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
@@ -207,13 +213,13 @@ export default function Users({ navigation }: any) {
   }, [user?.role, userToken]);
 
   const filteredItems = useMemo(() => {
-    const cpfDigits = onlyDigits(filterCpf);
+    const cpfDigits = normalizeDocument(filterCpf);
     const normalizedName = filterName.trim().toLocaleLowerCase('pt-BR');
     return items.filter((item) => {
       const matchesCondominium =
         !filterCondominiumId ||
         (filterCondominiumId === '__unlinked__' ? !item.condominium_id : item.condominium_id === filterCondominiumId);
-      const matchesCpf = !cpfDigits || onlyDigits(item.cpf || '').includes(cpfDigits);
+      const matchesCpf = !cpfDigits || normalizeDocument(item.cpf || '').includes(cpfDigits);
       const matchesName = !normalizedName || (item.full_name || item.username).toLocaleLowerCase('pt-BR').includes(normalizedName);
       const isResident = item.role === 'proprietario' || item.role === 'inquilino';
       const matchesUnitType = !filterUnitTypeId
@@ -345,9 +351,9 @@ export default function Users({ navigation }: any) {
     if (!userToken) return;
     if (!role) { setError('Selecione o perfil do usuário.'); return; }
     if (!username.trim()) { setError('Informe o usuário de acesso.'); return; }
-    if (!editingId && !onlyDigits(cpf)) { setError('Informe o CPF — ele é necessário para gerar a senha inicial.'); return; }
+    if (!editingId && !normalizeDocument(cpf)) { setError('Informe o CPF — ele é necessário para gerar a senha inicial.'); return; }
     if (user?.role === 'admin_geral' && !condominiumId.trim()) { setError('Selecione o condomínio.'); return; }
-    const cpfDigits = onlyDigits(cpf);
+    const cpfDigits = normalizeDocument(cpf);
 
     setIsLoading(true);
     setError(null);
@@ -682,16 +688,16 @@ export default function Users({ navigation }: any) {
 
   const isAdmin = user?.role === 'admin_geral';
   const adminTourSteps: TourStep[] = [
-    { key: 'form', title: 'Cadastrar síndico ou subsíndico', description: 'Usuário de acesso é único no sistema (usado no login). CPF é obrigatório num cadastro novo — os 6 primeiros dígitos viram a senha inicial, gerada e mostrada uma única vez depois de salvar (ou enviada por e-mail, se informado). Selecione o condomínio que esse gestor vai administrar e o perfil (Síndico ou Subsíndico). Ao editar alguém, aparece o painel "Perfis desta pessoa" — um mesmo login pode acumular mais de um perfil (ex.: síndico que também é proprietário em outra unidade); conceda ou remova perfis extras ali.' },
+    { key: 'form', title: 'Cadastrar síndico ou subsíndico', description: 'Usuário de acesso é único no sistema (usado no login). CPF ou CNPJ é obrigatório num cadastro novo (o campo aceita também o CNPJ novo com letras, ex.: 12.ABC.345/01DE-35) — os 6 primeiros caracteres viram a senha inicial, gerada e mostrada uma única vez depois de salvar (ou enviada por e-mail, se informado). Selecione o condomínio que esse gestor vai administrar e o perfil (Síndico ou Subsíndico). Ao editar alguém, aparece o painel "Perfis desta pessoa" — um mesmo login pode acumular mais de um perfil (ex.: síndico que também é proprietário em outra unidade); conceda ou remova perfis extras ali.' },
     { key: 'filters', title: 'Filtrar cadastros', description: 'Combine condomínio (inclusive "Sem condomínio"), nome e CPF pra localizar um síndico ou subsíndico específico entre todos os condomínios.' },
-    { key: 'reset', title: 'Reset de senha em massa', description: 'Selecione um condomínio no filtro acima pra habilitar "Resetar todos deste condomínio" — gera uma nova senha inicial (regra padrão: 6 primeiros dígitos do CPF) pra todos os síndicos/subsíndicos daquele condomínio de uma vez. Ou marque pessoas específicas nos cards da lista e use "Resetar selecionados".' },
+    { key: 'reset', title: 'Reset de senha em massa', description: 'Selecione um condomínio no filtro acima pra habilitar "Resetar todos deste condomínio" — gera uma nova senha inicial (regra padrão: 6 primeiros caracteres do CPF/CNPJ) pra todos os síndicos/subsíndicos daquele condomínio de uma vez. Ou marque pessoas específicas nos cards da lista e use "Resetar selecionados".' },
     { key: 'list', title: 'Ativos e excluídos', description: 'As abas "Ativos"/"Excluídos" alternam a lista. Em cada card dá pra editar, resetar a senha individualmente, excluir logicamente (bloqueia o login mas mantém o cadastro — reversível na aba "Excluídos" com "Reativar") ou excluir fisicamente (apaga o cadastro pra sempre, sem volta). Aqui você só gerencia cadastros de síndico e subsíndico.' },
   ];
   const managerTourSteps: TourStep[] = [
     { key: 'planUsage', title: 'Uso do plano', description: 'Mostra quantos usuários ativos o condomínio já tem contra o plano de cobrança contratado com a plataforma — critério "cadastrado" ou "login habilitado", conforme o plano. Em plano de faixa fechada com teto definido, passar do limite mostra aviso vermelho "excedeu" — fale com a administração da plataforma nesse caso. Em plano "base + incluídos + excedente" (ex.: Essencial/Intermediário/Completo), passar da quantidade incluída não é erro: aparece em âmbar, com quantos usuários excedentes e quanto isso soma no mês, cobrado automaticamente — nada trava. Plano "por usuário ativo" não tem teto nem incluído, então não mostra esse aviso. Nada disso bloqueia novos cadastros.' },
-    { key: 'form', title: 'Cadastrar morador ou subsíndico', description: 'Escolha o perfil (Subsíndico, Proprietário ou Inquilino), a unidade/apartamento (obrigatória para moradores) e marque se a pessoa é representante da unidade. Se não for isenta de boleto, defina o dia preferido de vencimento (10 ou 20). Preencha o endereço de cobrança do boleto — o CEP autocompleta rua, bairro, cidade e UF. A senha inicial é gerada automaticamente (apartamento + 4 primeiros dígitos do CPF) e mostrada uma única vez depois de salvar. Ao editar alguém, o painel "Perfis desta pessoa" permite conceder ou remover perfis adicionais (ex.: um subsíndico que também é proprietário).' },
+    { key: 'form', title: 'Cadastrar morador ou subsíndico', description: 'Escolha o perfil (Subsíndico, Proprietário ou Inquilino), a unidade/apartamento (obrigatória para moradores) e marque se a pessoa é representante da unidade. Se não for isenta de boleto, defina o dia preferido de vencimento (10 ou 20). Preencha o endereço de cobrança do boleto — o CEP autocompleta rua, bairro, cidade e UF. No campo "CPF ou CNPJ" vale também o CNPJ novo com letras (ex.: 12.ABC.345/01DE-35), para proprietário pessoa jurídica. A senha inicial é gerada automaticamente (apartamento + 4 primeiros caracteres do CPF/CNPJ) e mostrada uma única vez depois de salvar. Ao editar alguém, o painel "Perfis desta pessoa" permite conceder ou remover perfis adicionais (ex.: um subsíndico que também é proprietário).' },
     { key: 'filters', title: 'Filtrar moradores', description: 'Filtre por nome, CPF ou tipologia do apartamento — inclusive "Sem tipologia", útil pra achar quem ainda não tem uma taxa condominial configurada.' },
-    { key: 'reset', title: 'Reset de senha em massa', description: 'Gera uma nova senha inicial pela regra padrão (apartamento + 4 primeiros dígitos do CPF). "Resetar todos os moradores" afeta todo mundo do condomínio de uma vez; ou marque pessoas específicas nos cards da lista e use "Resetar selecionados".' },
+    { key: 'reset', title: 'Reset de senha em massa', description: 'Gera uma nova senha inicial pela regra padrão (apartamento + 4 primeiros caracteres do CPF/CNPJ). "Resetar todos os moradores" afeta todo mundo do condomínio de uma vez; ou marque pessoas específicas nos cards da lista e use "Resetar selecionados".' },
     { key: 'list', title: 'Ativos e excluídos', description: 'As abas "Ativos"/"Excluídos" alternam a lista. Em cada card de morador dá pra editar, resetar a senha, excluir logicamente (bloqueia o login mas mantém o cadastro — reversível na aba "Excluídos") ou excluir fisicamente (apaga o cadastro pra sempre, junto com débitos, acordos e avisos dessa pessoa). Você pode cadastrar outro subsíndico por aqui, mas as ações de editar/resetar/excluir do card só ficam disponíveis pra moradores — outro subsíndico não é gerenciável por você.' },
   ];
   const tourSteps = isAdmin ? adminTourSteps : managerTourSteps;
@@ -843,7 +849,9 @@ export default function Users({ navigation }: any) {
             placeholder="000.000.000-00"
             value={cpf}
             onChangeText={(value) => setCpf(formatCpf(value))}
-            keyboardType="number-pad"
+            // Teclado completo: CNPJ alfanumérico tem letras (number-pad não deixa digitá-las).
+            autoCapitalize="characters"
+            autoCorrect={false}
             maxLength={18}
           />
           <Field label="Senha inicial" hint={editingId
@@ -1043,7 +1051,7 @@ export default function Users({ navigation }: any) {
           <TextInput placeholder="Digite todo ou parte do nome" value={filterName} onChangeText={setFilterName} style={[styles.filterInput, styles.filterInputSpacing]} />
 
           <Text style={styles.label}>CPF</Text>
-          <TextInput placeholder="Digite todo ou parte do CPF" value={filterCpf} onChangeText={(value) => setFilterCpf(formatCpf(value))} style={styles.filterInput} keyboardType="number-pad" maxLength={14} />
+          <TextInput placeholder="Digite todo ou parte do CPF" value={filterCpf} onChangeText={(value) => setFilterCpf(formatCpf(value))} style={styles.filterInput} autoCapitalize="characters" autoCorrect={false} maxLength={18} />
 
           {user?.role !== 'admin_geral' ? <>
             <Text style={styles.filterStatusLabel}>Tipologia do apartamento</Text>

@@ -5,6 +5,7 @@ import { requireFeature } from '../middleware/requireFeature';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { query } from '../db';
 import { buildInitialPassword, buildManagerInitialPassword } from '../services/passwordRuleService';
+import { normalizeDocument } from '../services/documentService';
 import { sendWelcomeEmail, sendPasswordResetByAdminEmail } from '../services/emailService';
 import { CURRENT_TERMS_VERSION } from './authRoutes';
 
@@ -134,7 +135,7 @@ const rotatePasswordAndNotify = async (req: any, res: any, emailSender: typeof s
   const target = await loadAuthorizedTarget(req, res);
   if (!target) return;
   if (target.role === 'admin_geral') return res.status(400).json({ message: 'Não é possível redefinir a senha de outro admin_geral por aqui.' });
-  const cpfDigits = target.cpf ? String(target.cpf).replace(/\D/g, '') : '';
+  const cpfDigits = normalizeDocument(target.cpf);
   if (!cpfDigits) return res.status(400).json({ message: 'Cadastro sem CPF — não é possível gerar a senha.' });
   const isResident = target.role === 'proprietario' || target.role === 'inquilino';
   if (isResident && !target.unit_number) return res.status(400).json({ message: 'Cadastro sem unidade — não é possível gerar a senha.' });

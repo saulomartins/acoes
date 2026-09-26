@@ -8,6 +8,7 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { query, withTransaction } from '../db';
 import type { UserRole } from '../types';
 import { buildInitialPassword, buildManagerInitialPassword } from '../services/passwordRuleService';
+import { isAcceptedDocumentFormat, maskDocument, normalizeDocument } from '../services/documentService';
 import { sendWelcomeEmail, sendPasswordResetByAdminEmail } from '../services/emailService';
 import { logAudit } from '../services/auditService';
 import { listProfiles } from '../services/authService';
@@ -46,16 +47,6 @@ router.get('/', authorize('admin_geral', 'sindico', 'subsindico'), asyncHandler(
 
   return res.json({ users: result.rows });
 }));
-
-// Mascara o CPF/CNPJ para exposição fora do sistema (planilha exportada) —
-// exigência de LGPD: mantém só os dígitos das pontas, o suficiente para
-// conferência visual, sem expor o documento completo.
-const maskDocument = (raw: string | null) => {
-  const digits = String(raw || '').replace(/\D/g, '');
-  if (digits.length === 11) return `${digits.slice(0, 3)}.***.***-${digits.slice(9)}`;
-  if (digits.length === 14) return `${digits.slice(0, 2)}.***.***/****-${digits.slice(12)}`;
-  return 'Não informado';
-};
 
 // Planilha de Pessoas para o gestor levar a informação para fora do sistema
 // (ex.: assembleia, prestação de contas) sem expor o CPF completo. `ids`
@@ -137,12 +128,13 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
     return res.status(400).json({ message: 'condominiumId is required' });
   }
 
-  const cpfDigits = cpf ? String(cpf).replace(/\D/g, '') : null;
+  // "Digits" por costume: um CNPJ alfanumérico também tem letras aqui.
+  const cpfDigits = cpf ? normalizeDocument(cpf) || null : null;
   const phoneDigits = phone ? String(phone).replace(/\D/g, '') : null;
   const normalizedUsername = username.trim().toLowerCase();
 
-  if (cpfDigits && ![11, 14].includes(cpfDigits.length)) {
-    return res.status(400).json({ message: 'CPF deve ter 11 dígitos ou CNPJ deve ter 14 dígitos' });
+  if (cpfDigits && !isAcceptedDocumentFormat(cpfDigits)) {
+    return res.status(400).json({ message: 'CPF deve ter 11 dígitos ou CNPJ deve ter 14 caracteres' });
   }
   if (!cpfDigits) {
     return res.status(400).json({ message: 'Informe o CPF — ele é necessário para gerar a senha inicial.' });
@@ -157,7 +149,7 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
   }
 
   if (cpfDigits && unitId) {
-    const existingCpf = await query(`select id from users where regexp_replace(coalesce(cpf, ''), '[^0-9]', '', 'g') = $1 and unit_id=$2`, [cpfDigits, unitId]);
+    const existingCpf = await query(`select id from users where regexp_replace(upper(coalesce(cpf, '')), '[^0-9A-Z]', '', 'g') = $1 and unit_id=$2`, [cpfDigits, unitId]);
     if (existingCpf.rows[0]) {
       return res.status(409).json({ message: 'CPF já cadastrado para outra pessoa.' });
     }
@@ -256,15 +248,15 @@ router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), requireF
 
   const targetCondominiumId = req.user?.role === 'admin_geral' ? condominiumId || target.condominium_id : req.user?.condominiumId;
   const normalizedUsername = String(username || '').trim().toLowerCase();
-  const cpfDigits = cpf ? String(cpf).replace(/\D/g, '') : null;
+  const cpfDigits = cpf ? normalizeDocument(cpf) || null : null;
   const phoneDigits = phone ? String(phone).replace(/\D/g, '') : null;
   if (!normalizedUsername) return res.status(400).json({ message: 'Usuário de acesso é obrigatório.' });
-  if (cpfDigits && ![11, 14].includes(cpfDigits.length)) return res.status(400).json({ message: 'CPF deve ter 11 dígitos ou CNPJ deve ter 14 dígitos.' });
+  if (cpfDigits && !isAcceptedDocumentFormat(cpfDigits)) return res.status(400).json({ message: 'CPF deve ter 11 dígitos ou CNPJ deve ter 14 caracteres.' });
 
   const usernameConflict = await query(`select id from users where unaccent(lower(username)) = unaccent($1) and id <> $2`, [normalizedUsername, req.params.id]);
   if (usernameConflict.rows[0]) return res.status(409).json({ message: 'Usuário de acesso já cadastrado para outra pessoa.' });
   if (cpfDigits && unitId) {
-    const cpfConflict = await query(`select id from users where regexp_replace(coalesce(cpf, ''), '[^0-9]', '', 'g') = $1 and unit_id=$2 and id <> $3`, [cpfDigits, unitId, req.params.id]);
+    const cpfConflict = await query(`select id from users where regexp_replace(upper(coalesce(cpf, '')), '[^0-9A-Z]', '', 'g') = $1 and unit_id=$2 and id <> $3`, [cpfDigits, unitId, req.params.id]);
     if (cpfConflict.rows[0]) return res.status(409).json({ message: 'CPF já cadastrado para outra pessoa.' });
   }
 
@@ -340,7 +332,7 @@ router.post('/reset-password', authorize('admin_geral', 'sindico', 'subsindico')
   const skipped: Array<{ id: string; fullName: string | null; reason: string }> = [];
 
   for (const person of targets.rows) {
-    const cpfDigits = person.cpf ? String(person.cpf).replace(/\D/g, '') : '';
+    const cpfDigits = normalizeDocument(person.cpf);
     const isPersonResident = person.role === 'proprietario' || person.role === 'inquilino';
     if (!cpfDigits) {
       skipped.push({ id: person.id, fullName: person.full_name, reason: 'Cadastro sem CPF — não é possível gerar a senha.' });
