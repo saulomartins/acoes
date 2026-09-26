@@ -34,7 +34,15 @@ type PlatformInvoice = {
   cancel_reason: string | null;
   refund_note: string | null;
   paid_after_canceled_at: string | null;
+  // Política de inadimplência (api/src/services/platformSuspensionService.ts).
+  suspends_on: string | null;
+  suspension_reached: boolean;
+  suspension_extended_until: string | null;
+  suspension_extension_note: string | null;
 };
+
+const EXTENSION_DAYS = [7, 15, 30] as const;
+const formatDay = (value: string) => new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
 
 type Summary = { receivedCents: number; openCents: number; overdueCents: number; canceledCents: number; refundedCents: number; count: number };
 
@@ -81,6 +89,29 @@ export default function PlatformReceipts() {
   const [panel, setPanel] = useState<{ id: string; mode: PanelMode } | null>(null);
   const [panelNote, setPanelNote] = useState('');
   const [dialog, setDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
+  const [extendId, setExtendId] = useState('');
+  const [extendDays, setExtendDays] = useState<(typeof EXTENSION_DAYS)[number]>(15);
+  const [extendNote, setExtendNote] = useState('');
+
+  // Prorroga a suspensão do CONDOMÍNIO da fatura (vale pra todas as faturas dele).
+  const extendSuspension = async (invoice: PlatformInvoice) => {
+    if (!userToken) return;
+    if (extendNote.trim().length < 5) { setError('Informe o motivo da prorrogação (mínimo 5 caracteres).'); return; }
+    setBusyId(invoice.id);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await apiRequest<{ extendedUntil: string }>(`/platform-plans/condominiums/${invoice.condominium_id}/suspension-extension`, userToken, { method: 'POST', body: JSON.stringify({ days: extendDays, note: extendNote.trim() }) });
+      setMessage(`Suspensão de ${invoice.condominium_name} prorrogada até ${formatDay(result.extendedUntil)}. O síndico recebe de novo os avisos com a data nova.`);
+      setExtendId('');
+      setExtendNote('');
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Falha ao prorrogar a suspensão.');
+    } finally {
+      setBusyId('');
+    }
+  };
 
   const load = useCallback(async () => {
     if (!userToken) return;
@@ -200,7 +231,7 @@ export default function PlatformReceipts() {
 
   const tourSteps: TourStep[] = [
     { key: 'summary', title: 'Resumo', description: 'Recebido soma as faturas pagas; A receber, as pendentes ou aguardando pagamento; Em atraso, as em aberto com vencimento já passado (o vencimento é 10 dias depois da geração); Canceladas, as anuladas — tudo respeitando os filtros abaixo.' },
-    { key: 'list', title: 'Faturas e confirmações', description: 'Cada card é uma fatura da plataforma cobrada de um condomínio. "Verificar" consulta agora no Mercado Pago se o Pix foi pago e, se foi, marca como paga e envia o recibo. "Marcar como paga" serve pra pagamento recebido por fora (exige uma observação, que fica registrada). "Reenviar recibo" só existe pra fatura paga. "Cancelar" anula uma fatura em aberto (motivo obrigatório): cancela o Pix no Mercado Pago e avisa o síndico por e-mail. "Corrigir e reemitir" cancela a fatura errada e emite outra recalculada com o plano e os usuários de hoje. "Estornar" registra o estorno de uma fatura paga por engano — o reembolso do dinheiro é feito no painel do Mercado Pago. Se um pagamento chegar em fatura já cancelada, aparece um alerta vermelho no card. "Gerar Pix" / "Gerar novo Pix" cria a cobrança (ou substitui uma expirada) e reenvia a fatura por e-mail ao síndico e subsíndico. No topo, "Gerar faturas do mês" cria a fatura de todos os condomínios com plano e cobrança iniciada, e "Verificar todos" consulta o Mercado Pago pra todas as faturas com Pix pendente — o sistema também faz as duas coisas sozinho todo dia às 9h.' },
+    { key: 'list', title: 'Faturas e confirmações', description: 'Cada card é uma fatura da plataforma cobrada de um condomínio. "Verificar" consulta agora no Mercado Pago se o Pix foi pago e, se foi, marca como paga e envia o recibo. "Marcar como paga" serve pra pagamento recebido por fora (exige uma observação, que fica registrada). "Reenviar recibo" só existe pra fatura paga. "Cancelar" anula uma fatura em aberto (motivo obrigatório): cancela o Pix no Mercado Pago e avisa o síndico por e-mail. "Corrigir e reemitir" cancela a fatura errada e emite outra recalculada com o plano e os usuários de hoje. "Estornar" registra o estorno de uma fatura paga por engano — o reembolso do dinheiro é feito no painel do Mercado Pago. Se um pagamento chegar em fatura já cancelada, aparece um alerta vermelho no card. "Gerar Pix" / "Gerar novo Pix" cria a cobrança (ou substitui uma expirada) e reenvia a fatura por e-mail ao síndico e subsíndico. No topo, "Gerar faturas do mês" cria a fatura de todos os condomínios com plano e cobrança iniciada, e "Verificar todos" consulta o Mercado Pago pra todas as faturas com Pix pendente — o sistema também faz as duas coisas sozinho todo dia às 9h, e troca sozinho o Pix que expirou. Política de inadimplência: fatura em atraso mostra a data em que a gestão do condomínio fica somente leitura e os moradores perdem o acesso (30 dias de atraso; o síndico é avisado com 7, 15 e 25 dias). "Prorrogar suspensão" adia isso por 7, 15 ou 30 dias a partir de hoje, com motivo obrigatório — vale pro condomínio inteiro e os avisos voltam a sair com a data nova. O pagamento libera tudo na hora.' },
   ];
 
   return (
@@ -271,6 +302,12 @@ export default function PlatformReceipts() {
               </View>
               <Text style={styles.cardInfo}>{paymentInfo(invoice)}</Text>
               <Text style={styles.cardInfo}>Recibo: {invoice.receipt_sent_at ? `enviado em ${formatDateTime(invoice.receipt_sent_at)}` : 'não enviado'}</Text>
+              {open && invoice.overdue && invoice.suspends_on ? (
+                <Text style={[styles.cardInfo, invoice.suspension_reached && styles.alertText]}>
+                  {invoice.suspension_reached ? `Gestão do condomínio somente leitura desde ${formatDay(invoice.suspends_on)}` : `Gestão fica somente leitura em ${formatDay(invoice.suspends_on)} se não pagar`}
+                  {invoice.suspension_extended_until ? ` · prorrogado até ${formatDay(invoice.suspension_extended_until)}${invoice.suspension_extension_note ? ` (${invoice.suspension_extension_note})` : ''}` : ''}
+                </Text>
+              ) : null}
 
               <View style={styles.actions}>
                 {open && invoice.pix_payment_id ? <Pressable disabled={busy} onPress={() => verifyOne(invoice)} style={styles.action}><Text style={styles.actionText}>{busy ? 'Verificando...' : 'Verificar'}</Text></Pressable> : null}
@@ -280,7 +317,22 @@ export default function PlatformReceipts() {
                 {open ? <Pressable disabled={busy} onPress={() => openPanel(invoice, 'correct')} style={styles.action}><Text style={styles.actionText}>Corrigir e reemitir</Text></Pressable> : null}
                 {open ? <Pressable disabled={busy} onPress={() => openPanel(invoice, 'cancel')} style={styles.action}><Text style={[styles.actionText, { color: colors.red }]}>Cancelar</Text></Pressable> : null}
                 {invoice.status === 'paid' ? <Pressable disabled={busy} onPress={() => openPanel(invoice, 'refund')} style={styles.action}><Text style={[styles.actionText, { color: colors.red }]}>Estornar</Text></Pressable> : null}
+                {open && invoice.overdue ? <Pressable disabled={busy} onPress={() => { setError(null); setExtendNote(''); setExtendId(extendId === invoice.id ? '' : invoice.id); }} style={styles.action}><Text style={styles.actionText}>Prorrogar suspensão</Text></Pressable> : null}
               </View>
+
+              {extendId === invoice.id ? (
+                <View style={styles.markPaidBox}>
+                  <View style={styles.chipRow}>
+                    {EXTENSION_DAYS.map(days => (
+                      <Pressable key={days} onPress={() => setExtendDays(days)} style={[styles.chip, extendDays === days && styles.chipActive]}>
+                        <Text style={[styles.chipText, extendDays === days && styles.chipTextActive]}>+{days} dias a partir de hoje</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <TextInput value={extendNote} onChangeText={setExtendNote} placeholder='Motivo (ex.: "síndico negociou pagamento para o dia 15")' style={styles.noteInput} />
+                  <Pressable disabled={busy} onPress={() => extendSuspension(invoice)} style={styles.confirmButton}><Text style={styles.confirmButtonText}>{busy ? 'Salvando...' : 'Prorrogar'}</Text></Pressable>
+                </View>
+              ) : null}
 
               {invoice.paid_after_canceled_at ? (
                 <Text style={styles.alertText}>⚠ Pagamento recebido DEPOIS do cancelamento ({formatDateTime(invoice.paid_after_canceled_at)}) — reembolse o valor no painel do Mercado Pago.</Text>

@@ -10,6 +10,7 @@ export const TOUR_STEPS: TourStep[] = [
   { route: 'Home', title: 'Início', description: 'Resumo das informações mais importantes e atalhos para as rotinas do condomínio.', roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'] },
   { route: 'Dashboard', title: 'Painel administrativo', description: 'Indicadores financeiros e operacionais para acompanhar a situação do condomínio.', roles: ['sindico', 'subsindico'] },
   { route: 'UserStats', title: 'Painel de usuários', description: 'Cadastro, acesso e ocupação de cada condomínio — toque em um número para ver quem são.', roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'painel_usuarios' },
+  { route: 'PlatformInvoices', title: 'Minhas faturas', description: 'Faturas da assinatura do Lar em Dia do condomínio, com o recibo em PDF de cada pagamento.', roles: ['sindico', 'subsindico'] },
   { route: 'BillingAnalytics', title: 'Indicadores de boletos', description: 'Recebidos, não pagos e cancelados por período, com os motivos de cancelamento.', roles: ['sindico', 'subsindico'], feature: 'indicadores_boletos' },
   { route: 'Condominiums', title: 'Condomínios', description: 'Cadastro e gestão de todos os condomínios atendidos pela plataforma.', roles: ['admin_geral'] },
   { route: 'Users', title: 'Pessoas', description: 'Cadastro e gestão de síndicos, subsíndicos, proprietários e inquilinos.', roles: ['sindico', 'subsindico'], feature: 'pessoas' },

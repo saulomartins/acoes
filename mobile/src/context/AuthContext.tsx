@@ -1,7 +1,7 @@
 import React, { createContext, ReactNode, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { API_BASE_URL, refreshSession } from '../api/client';
+import { API_BASE_URL, apiRequest, onPlatformSuspended, refreshSession } from '../api/client';
 import { registerForPushNotifications, unregisterPushNotifications } from '../services/pushNotifications';
 
 type UserRole = 'admin_geral' | 'sindico' | 'subsindico' | 'proprietario' | 'inquilino';
@@ -67,6 +67,12 @@ type AuthContextType = {
   // só existem na versão web. AppNavigator mostra uma tela bloqueando o
   // acesso em vez do painel.
   nativeAccessBlocked: boolean;
+  // Mensagem de suspensão quando o condomínio deste morador está suspenso por
+  // inadimplência da assinatura (api: platformSuspensionService.ts) — null
+  // quando liberado. AppNavigator troca o app inteiro pela tela de aviso.
+  platformSuspendedMessage: string | null;
+  // "Tentar novamente" da tela de suspensão: pergunta de novo à API.
+  recheckPlatformAccess: () => Promise<void>;
   signIn: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   signUp: (username: string, password: string) => Promise<void>;
@@ -186,6 +192,8 @@ export const AuthContext = createContext<AuthContextType>({
   profiles: [],
   needsProfileSelection: false,
   nativeAccessBlocked: false,
+  platformSuspendedMessage: null,
+  recheckPlatformAccess: async () => {},
   signIn: async () => {},
   signOut: async () => {},
   signUp: async () => {},
@@ -206,6 +214,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [profilesLoaded, setProfilesLoaded] = useState(false);
   const [needsProfileSelection, setNeedsProfileSelection] = useState(false);
   const [nativeAccessBlocked, setNativeAccessBlocked] = useState(false);
+  const [platformSuspendedMessage, setPlatformSuspendedMessage] = useState<string | null>(null);
+
+  // Suspensão por inadimplência (só moradores são bloqueados por inteiro).
+  // Pergunta ao entrar/trocar de perfil; falha de rede não bloqueia ninguém.
+  const checkPlatformAccess = async (token: string | null, role: UserRole | undefined) => {
+    if (!token || !role || !RESIDENT_ROLES.includes(role)) { setPlatformSuspendedMessage(null); return; }
+    try {
+      // apiRequest renova o token vencido pelo mutex único de client.ts.
+      const data = await apiRequest<{ suspended: boolean; message?: string }>('/auth/access-status', token);
+      setPlatformSuspendedMessage(data.suspended ? data.message || 'O acesso ao Lar em Dia está temporariamente indisponível para o seu condomínio. Para mais informações, entre em contato com a administração do condomínio.' : null);
+    } catch {
+      // offline ou erro: mantém o estado atual
+    }
+  };
+
+  useEffect(() => { void checkPlatformAccess(userToken, user?.role); }, [userToken, user?.id, user?.role]);
+  useEffect(() => onPlatformSuspended(message => {
+    if (user && RESIDENT_ROLES.includes(user.role)) setPlatformSuspendedMessage(message);
+  }), [user?.id, user?.role]);
+
+  const recheckPlatformAccess = async () => {
+    const token = (await storage.get('userToken')) || userToken;
+    await checkPlatformAccess(token, user?.role);
+  };
 
   useEffect(() => {
     (async () => {
@@ -444,7 +476,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, userToken, isLoading, authError, pushStatus, pushError, condominiumFeatures, profiles, needsProfileSelection, nativeAccessBlocked, signIn, signOut, signUp, updateUser, switchProfile, selectProfile }}>
+    <AuthContext.Provider value={{ user, userToken, isLoading, authError, pushStatus, pushError, condominiumFeatures, profiles, needsProfileSelection, nativeAccessBlocked, platformSuspendedMessage, recheckPlatformAccess, signIn, signOut, signUp, updateUser, switchProfile, selectProfile }}>
       {children}
     </AuthContext.Provider>
   );

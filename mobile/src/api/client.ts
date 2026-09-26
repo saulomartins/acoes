@@ -68,6 +68,16 @@ export const refreshSession = async () => {
 
 const refreshAccessToken = async () => (await refreshSession())?.token ?? null;
 
+// Condomínio suspenso por inadimplência (api: middleware/auth.ts responde 403
+// com code PLATFORM_SUSPENDED pra moradores). Qualquer chamada que receba isso
+// avisa o AuthContext, que troca o app inteiro pela tela de suspensão — cobre
+// a suspensão que começa com o app já aberto.
+const platformSuspendedListeners = new Set<(message: string) => void>();
+export const onPlatformSuspended = (listener: (message: string) => void) => {
+  platformSuspendedListeners.add(listener);
+  return () => { platformSuspendedListeners.delete(listener); };
+};
+
 export const apiRequest = async <T>(
   path: string,
   token: string,
@@ -93,8 +103,9 @@ export const apiRequest = async <T>(
   const data = (await response.json().catch(() => null)) as T | { message?: string } | null;
 
   if (!response.ok) {
-    const maybeError = data as { message?: string } | null;
+    const maybeError = data as { message?: string; code?: string } | null;
     const message = maybeError?.message || 'Falha na requisicao';
+    if (response.status === 403 && maybeError?.code === 'PLATFORM_SUSPENDED') platformSuspendedListeners.forEach(listener => listener(message));
     throw new Error(message);
   }
 

@@ -28,6 +28,7 @@ import ResetPassword from '../screens/ResetPassword';
 import ForcePasswordChange from '../screens/ForcePasswordChange';
 import SelectProfile from '../screens/SelectProfile';
 import NativeAccessBlocked from '../screens/NativeAccessBlocked';
+import PlatformSuspended from '../screens/PlatformSuspended';
 import { AuthContext, storage } from '../context/AuthContext';
 import { apiRequest } from '../api/client';
 import { subscribeSystemTour } from '../services/tourEvents';
@@ -45,6 +46,7 @@ type RootStackParamList = {
   ForcePasswordChange: undefined;
   SelectProfile: undefined;
   NativeAccessBlocked: undefined;
+  PlatformSuspended: undefined;
   Home: undefined;
   Dashboard: undefined;
   UserStats: undefined;
@@ -73,6 +75,7 @@ type RootStackParamList = {
   PlatformPlans: undefined;
   PlatformRevenue: undefined;
   PlatformReceipts: undefined;
+  PlatformInvoices: undefined;
   AuditLog: undefined;
   GoogleDriveIntegrationGuide: undefined;
   Support: undefined;
@@ -147,6 +150,7 @@ const ResetPasswordScreen = withSafeArea(ResetPassword);
 const LegalDocumentScreen = withSafeArea(LegalDocument);
 const SelectProfileScreen = withSafeArea(SelectProfile);
 const NativeAccessBlockedScreen = withSafeArea(NativeAccessBlocked);
+const PlatformSuspendedScreen = withSafeArea(PlatformSuspended);
 const TermsAcceptanceScreen = withSafeArea(TermsAcceptance);
 const ForcePasswordChangeScreen = withSafeArea(ForcePasswordChange);
 const ClearanceVerifyStandaloneScreen = withSafeArea(ClearanceVerify);
@@ -158,7 +162,7 @@ const resolveNotificationScreen = (payload: unknown): 'Communications' | 'Report
 };
 
 export default function AppNavigator() {
-  const { userToken, user, isLoading, condominiumFeatures, updateUser, needsProfileSelection, nativeAccessBlocked } = useContext(AuthContext);
+  const { userToken, user, isLoading, condominiumFeatures, updateUser, needsProfileSelection, nativeAccessBlocked, platformSuspendedMessage } = useContext(AuthContext);
   const [inAppNotification, setInAppNotification] = useState<InAppNotification | null>(null);
   const [tourActive,setTourActive]=useState(false);const [tourIndex,setTourIndex]=useState(0);const autoTourStarted=useRef(false);
   // Guarda "tour já visto" também neste aparelho (fora do objeto `user`), pois
@@ -257,6 +261,8 @@ export default function AppNavigator() {
             <Stack.Screen name="SelectProfile" component={SelectProfileScreen} options={{ headerShown: false }} />
           ) : userToken && nativeAccessBlocked ? (
             <Stack.Screen name="NativeAccessBlocked" component={NativeAccessBlockedScreen} options={{ headerShown: false }} />
+          ) : userToken && platformSuspendedMessage ? (
+            <Stack.Screen name="PlatformSuspended" component={PlatformSuspendedScreen} options={{ headerShown: false }} />
           ) : userToken ? (
             <>
               <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />

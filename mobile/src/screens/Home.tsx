@@ -17,6 +17,8 @@ import { MANAGEMENT_ROUTES } from '../navigation/routeRoles';
 // .web/.native.tsx) — tocar num atalho dessas mostra este aviso em vez de
 // tentar navegar para uma tela que não foi empacotada no binário.
 const WEB_ONLY_MESSAGE = 'Esta função está disponível apenas na versão web. Abra app.laremdia.com.br no navegador do seu celular ou computador para usá-la.';
+const formatIsoDay = (isoDate: string) => new Date(`${isoDate}T00:00:00Z`).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+
 const goToRoute = (navigation: any, route?: string) => {
   if (!route) return;
   if (Platform.OS !== 'web' && MANAGEMENT_ROUTES.has(route)) {
@@ -124,7 +126,7 @@ const roleLabels: Record<string, string> = {
 };
 
 const tourSteps: TourStep[] = [
-  { key: 'profile', title: 'Seu perfil', description: 'Mostra o cargo com que você está logado (Síndico, Subsíndico, Proprietário, Inquilino ou Administrador geral) — é esse cargo que define quais áreas aparecem no "Acesso rápido" logo abaixo e o que você pode fazer em cada uma. Síndico/subsíndico também veem, ao lado, o plano de cobrança da plataforma contratado pelo condomínio e quanto o mês está dando até agora — inclusive quantos usuários excedentes e o quanto isso já soma, quando o plano é do tipo "base + incluídos" (quando a funcionalidade "Painel de usuários" está ativa). Toque no card pra ver o detalhamento completo.' },
+  { key: 'profile', title: 'Seu perfil', description: 'Mostra o cargo com que você está logado (Síndico, Subsíndico, Proprietário, Inquilino ou Administrador geral) — é esse cargo que define quais áreas aparecem no "Acesso rápido" logo abaixo e o que você pode fazer em cada uma. Síndico/subsíndico também veem, ao lado, o plano de cobrança da plataforma contratado pelo condomínio e quanto o mês está dando até agora — inclusive quantos usuários excedentes e o quanto isso já soma, quando o plano é do tipo "base + incluídos" (quando a funcionalidade "Painel de usuários" está ativa). Toque no card pra ver o detalhamento completo. Acima de tudo, síndico/subsíndico veem o cartão da fatura da plataforma: o Pix pra pagar, "Já paguei — verificar pagamento" e o link "Ver todas as faturas e recibos" (tela Minhas faturas). Com a fatura em atraso, o cartão avisa a data em que a gestão fica somente leitura e os moradores perdem o acesso ao aplicativo (30 dias de atraso); se isso acontecer, uma faixa vermelha aparece aqui até o pagamento ser confirmado — a liberação é automática.' },
   { key: 'quickAccess', title: 'Acesso rápido', description: 'Grade com as áreas liberadas pra você. Ela é montada automaticamente: primeiro filtra pelo seu cargo (ex.: só Síndico/Subsíndico veem "Prestação de contas" com formulário de lançamento, moradores só veem consulta) e depois pelas funcionalidades que o Administrador geral ativou pra esse condomínio em Condomínios > Funcionalidades ativas. Um card com "EM BREVE" ainda não tem tela associada.' },
   { key: 'security', title: 'Ambiente seguro', description: 'Lembrete de que os dados e credenciais do condomínio só são exibidos pra perfis autorizados — cada rota do menu é validada tanto na tela quanto na API antes de mostrar qualquer informação.' },
 ];
@@ -148,6 +150,8 @@ export default function Home({ navigation }: any) {
     pix_copy_paste: string | null; pix_qr_code_base64: string | null;
   } | null>(null);
   const [paidInvoice, setPaidInvoice] = useState<{ reference_month: string; amount_cents: number; plan_name: string; paid_at: string; receipt_sent_at: string | null } | null>(null);
+  // Política de inadimplência: 30 dias de atraso deixam a gestão somente leitura.
+  const [restriction, setRestriction] = useState<{ restricted: boolean; suspendsOn: string } | null>(null);
   const [pixCopied, setPixCopied] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
@@ -190,14 +194,16 @@ export default function Home({ navigation }: any) {
   // que o pagamento é confirmado (webhook, job de 15 min ou "Verificar"), o
   // cartão vira "Fatura paga" sem precisar recarregar a tela.
   const loadPlatformInvoice = useCallback(async () => {
-    if (!userToken || !manager) { setPlatformInvoice(null); setPaidInvoice(null); return; }
+    if (!userToken || !manager) { setPlatformInvoice(null); setPaidInvoice(null); setRestriction(null); return; }
     try {
-      const response = await apiRequest<{ invoice: typeof platformInvoice; paidInvoice: typeof paidInvoice }>('/condominiums/platform-invoice', userToken);
+      const response = await apiRequest<{ invoice: typeof platformInvoice; paidInvoice: typeof paidInvoice; restriction?: typeof restriction }>('/condominiums/platform-invoice', userToken);
       setPlatformInvoice(response.invoice);
       setPaidInvoice(response.paidInvoice);
+      setRestriction(response.restriction || null);
     } catch {
       setPlatformInvoice(null);
       setPaidInvoice(null);
+      setRestriction(null);
     }
   }, [manager, userToken]);
 
@@ -213,9 +219,10 @@ export default function Home({ navigation }: any) {
     setVerifying(true);
     setVerifyMessage(null);
     try {
-      const response = await apiRequest<{ invoice: typeof platformInvoice; paidInvoice: typeof paidInvoice; paid: number }>('/condominiums/platform-invoice/verify', userToken, { method: 'POST' });
+      const response = await apiRequest<{ invoice: typeof platformInvoice; paidInvoice: typeof paidInvoice; restriction?: typeof restriction; paid: number }>('/condominiums/platform-invoice/verify', userToken, { method: 'POST' });
       setPlatformInvoice(response.invoice);
       setPaidInvoice(response.paidInvoice);
+      setRestriction(response.restriction || null);
       setVerifyMessage(response.paid > 0 ? 'Pagamento confirmado! Obrigado.' : 'Ainda não identificamos o pagamento. O Pix pode levar alguns instantes — tente de novo em um minuto.');
     } catch {
       setVerifyMessage('Não foi possível verificar agora. Tente novamente em instantes.');
@@ -272,6 +279,15 @@ export default function Home({ navigation }: any) {
         </Text>
       </View>
 
+      {manager && restriction?.restricted ? (
+        <View style={[styles.restrictionBanner, tablet && { marginHorizontal: 20 }, !desktop && { marginHorizontal: 16 }]}>
+          <Text style={styles.restrictionTitle}>Gestão em modo somente leitura</Text>
+          <Text style={styles.restrictionText}>
+            Desde {formatIsoDay(restriction.suspendsOn)}, por causa da fatura da plataforma em atraso há mais de 30 dias. Você continua vendo tudo, mas não consegue fazer alterações, e os moradores estão sem acesso ao aplicativo. Pague a fatura abaixo: tudo volta automaticamente assim que o pagamento é confirmado.
+          </Text>
+        </View>
+      ) : null}
+
       {manager && platformInvoice ? (
         <View style={[styles.invoiceCard, platformInvoice.overdue && styles.invoiceCardOverdue, tablet && { marginHorizontal: 20 }, !desktop && { marginHorizontal: 16 }]}>
           <Text style={[styles.invoiceEyebrow, platformInvoice.overdue && { color: colors.red }]}>{platformInvoice.overdue ? 'FATURA DA PLATAFORMA EM ATRASO' : 'FATURA DA PLATAFORMA EM ABERTO'}</Text>
@@ -280,6 +296,9 @@ export default function Home({ navigation }: any) {
             Plano {platformInvoice.plan_name} · competência {new Date(platformInvoice.reference_month).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' })}
             {platformInvoice.due_date ? ` · vence em ${new Date(`${platformInvoice.due_date}T00:00:00Z`).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}` : ''}
           </Text>
+          {platformInvoice.overdue && restriction && !restriction.restricted ? (
+            <Text style={styles.invoiceWarning}>Se não for paga, a partir de {formatIsoDay(restriction.suspendsOn)} a gestão fica somente leitura e os moradores ficam sem acesso ao aplicativo.</Text>
+          ) : null}
           {platformInvoice.pix_copy_paste ? (
             <>
               <View style={styles.invoicePixRow}>
@@ -297,6 +316,7 @@ export default function Home({ navigation }: any) {
           ) : (
             <Text style={styles.invoiceHint}>O código Pix desta fatura ainda está sendo gerado — a administração da plataforma enviará por e-mail.</Text>
           )}
+          <Pressable onPress={() => goToRoute(navigation, 'PlatformInvoices')}><Text style={styles.invoiceLink}>Ver todas as faturas e recibos ›</Text></Pressable>
         </View>
       ) : null}
 
@@ -308,6 +328,7 @@ export default function Home({ navigation }: any) {
             Plano {paidInvoice.plan_name} · competência {new Date(paidInvoice.reference_month).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' })} · pago em {new Date(paidInvoice.paid_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
           </Text>
           <Text style={styles.invoiceHint}>{paidInvoice.receipt_sent_at ? 'O recibo foi enviado por e-mail — guarde-o para a prestação de contas do condomínio.' : 'O recibo será enviado por e-mail.'}</Text>
+          <Pressable onPress={() => goToRoute(navigation, 'PlatformInvoices')}><Text style={styles.invoiceLink}>Baixar o recibo em PDF e ver o histórico ›</Text></Pressable>
         </View>
       ) : null}
 
@@ -466,6 +487,11 @@ const styles = StyleSheet.create({
   invoiceCopy: { alignSelf: 'flex-start', marginTop: 8, backgroundColor: colors.primary, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10 },
   invoiceCopyText: { color: '#fff', fontWeight: '900', fontSize: 13 },
   invoiceHint: { color: colors.muted, fontSize: 12, marginTop: 6 },
+  invoiceLink: { color: colors.primaryDark, fontWeight: '900', fontSize: 13, marginTop: 10 },
+  invoiceWarning: { color: colors.red, fontWeight: '800', fontSize: 13, marginTop: 6 },
+  restrictionBanner: { borderWidth: 1, borderColor: colors.red, backgroundColor: '#fbeaea', borderRadius: 12, padding: 16, marginBottom: 14 },
+  restrictionTitle: { color: colors.red, fontWeight: '900', fontSize: 16 },
+  restrictionText: { color: colors.ink, fontSize: 14, lineHeight: 20, marginTop: 6 },
   securityCard: { marginTop: 20, marginHorizontal: 0, flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#f3f7fb', borderRadius: layout.radius, padding: 18 },
   securityIcon: { width: 40, height: 40, borderRadius: 11, backgroundColor: '#e5edf7', alignItems: 'center', justifyContent: 'center' },
   securityTitle: { color: colors.ink, fontSize: 15, fontWeight: '900' },

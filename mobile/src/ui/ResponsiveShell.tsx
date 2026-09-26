@@ -24,6 +24,7 @@ const items: Item[] = [
   { label: 'Início', route: 'Home', symbol: '⌂', roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'] },
   { label: 'Painel', route: 'Dashboard', symbol: '◆', roles: ['sindico', 'subsindico'], feature: 'painel' },
   { label: 'Painel de usuários', route: 'UserStats', symbol: '☰', roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'painel_usuarios' },
+  { label: 'Minhas faturas', route: 'PlatformInvoices', symbol: '🧾', roles: ['sindico', 'subsindico'] },
   { label: 'Indicadores de boletos', route: 'BillingAnalytics', symbol: '📈', roles: ['sindico', 'subsindico'], feature: 'indicadores_boletos' },
   { label: 'Condomínios', route: 'Condominiums', symbol: '▦', roles: ['admin_geral'] },
   { label: 'Pessoas', route: 'Users', symbol: '♙', roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'pessoas' },
