@@ -1049,3 +1049,91 @@ Publicada a partir do `master` (commits `12de4e2` e `49bdfd3`, já no remoto).
   cadastrar em produção pela tela "Planos da plataforma".
 - Único condomínio com plano em produção (Templum) só começa a ser cobrado em
   2026-10-22.
+
+## Publicação de 26/09/2026 — política de inadimplência, Minhas faturas, recibo em PDF, Android 1.5.0
+
+Publicada a partir da working tree do `master` (NÃO commitada no momento deste
+registro — aguardando decisão do usuário sobre commit/push).
+
+- API: `railway up --service acoes --environment production --detach` →
+  deployment `e7ca801c-2509-473a-aea6-6fa25e6e5d4b`, `SUCCESS`. Rollback: o
+  anterior era `48dea095-c0e8-4f2b-9153-b6574e41f222`. Boot com o erro esperado
+  `column i.suspension_clock_from does not exist` (API nova sobe antes da
+  migração; o job captura).
+- **Banco: passo 3 PENDENTE.** A execução do comando de migração foi bloqueada
+  pelo controle de permissões da sessão (shell remoto com escrita em produção)
+  e precisa ser rodada pelo usuário ou com a permissão liberada — comando de
+  sempre do passo 3. Até lá: geração de faturas da plataforma falha (capturado,
+  não gera nada), a tela "Recebimentos" do admin geral dá erro 500 (a listagem
+  usa as colunas novas) e a checagem de suspensão falha aberta (ninguém é
+  bloqueado). Mudanças do schema, todas aditivas: `platform_invoices.
+  suspension_clock_from` (bloco `do $$` que só roda na primeira vez e preenche
+  as faturas existentes com greatest(vencimento, data da migração) — o relógio
+  de 30 dias começa na publicação), `platform_invoices.overdue_reminder_stage`,
+  `condominiums.platform_suspension_extended_until/_extension_note/_extended_by`.
+- Web: build com `EXPO_PUBLIC_API_URL` de produção, bundle sem `localhost:3000`;
+  Cloudflare Pages `6859d9ea.lar-em-dia.pages.dev`; `gestaolaremdia.com` 200
+  servindo `AppEntry-ddfba722d203b7efcc7f8955d3a05939.js` (o mesmo do build local).
+- Smoke: `/health` 200; login inválido 401 com `access-control-allow-origin:
+  https://gestaolaremdia.com`; `/auth/access-status` e
+  `/condominiums/platform-invoices` sem login 401.
+- Android: versão `1.5.0` (`app.json`), versionCode 34 (auto-incremento EAS),
+  perfil `production-apk`, build EAS `836b6031-8473-49c0-b6d0-6480b32b6c6e`.
+  A etapa final do pipeline (`releases:seed-android` via `railway ssh`) cai no
+  mesmo bloqueio de permissão da migração: o APK é baixado e validado com
+  `--no-publish`, e a publicação na central "Instalar aplicativo" fica com o
+  usuário (retomar com `npm run release:apk:resume -- --build-id <id>` com a
+  permissão liberada, ou enviar o APK pela própria tela como admin_geral).
+
+### O que mudou
+- **Política de inadimplência** (`api/src/services/platformSuspensionService.ts`):
+  avisos com 7/15/25 dias de atraso; com 30 dias, síndico/subsíndico ficam
+  somente leitura (`middleware/auth.ts`, 403 `PLATFORM_RESTRICTED`) e moradores
+  ficam bloqueados em tudo (403 `PLATFORM_SUSPENDED`, cache de 30 s) com uma
+  mensagem neutra que orienta procurar a administração do condomínio; o app
+  troca tudo pela tela `PlatformSuspended.tsx`. Liberação automática ao pagar
+  (a restrição é calculada, não gravada). Admin geral prorroga por 7/15/30 dias
+  em Recebimentos. Sem fatura nova enquanto restrito. Qualquer falha na
+  checagem LIBERA (lição do incidente de 18/08).
+- **Termos de Uso versão `2026-09-26`** (cláusula 8): todos os usuários veem a
+  tela de aceite de novo na web; a API ainda aceita a versão `2026-08-04`
+  vinda de apps antigos das lojas.
+- **Minhas faturas** (web, síndico/subsíndico): histórico e recibo em PDF
+  (`GET /condominiums/platform-invoices`, `.../:id/receipt`).
+- **Recibo em PDF anexo ao e-mail de recibo** (SMTP e Resend).
+- **Pix expirado renovado sozinho** (job de 15 min).
+- **CNPJ alfanumérico** aceito no cadastro de pessoas e na cobrança Pix.
+- Testes automatizados da cobrança (`npm test` na API, 121 testes).
+
+**Atualização (mesmo dia):** passo 3 executado pelo próprio usuário
+(`Schema applied successfully`); confirmado pelo boot do deploy seguinte sem
+`errorMissingColumn`. APK 1.5.0 build 34 baixado e validado com `--no-publish`
+(`releases/lar-em-dia-1.5.0-build-34-production.apk`, SHA-256
+`D1AAF3482363D50482585FBEE1D83EB848312E38FCE23F519D1BBF039BA068A6`, v2, mesma
+chave pública `2dd2dd1a3b0b3024…`) — publicação na central ainda pendente.
+
+### Webhook validado por assinatura — publicado no deploy `3f0592e8-28ff-49e4-957a-5406813643bb`
+Webhook cadastrado pelo usuário no painel (aplicação "Lar em Dia -
+Faturamento", Modo de produção, evento "Order (Mercado Pago)") e
+`MERCADOPAGO_WEBHOOK_SIGNATURE_SECRET` criada no Railway. Smoke: assinatura
+falsa → 401 no endereço novo e no antigo. **Validado com o "Simular" do painel**
+(evento Order): HTTP log do Railway mostra `POST /webhooks/mercadopago => 200`
+vindo de `restclient-node`, ou seja, a assinatura real do Mercado Pago bateu; o
+handler reconsultou a order e o MP devolveu 400 `invalid_path_param` para o id
+fictício (esperado — nada foi confirmado). Atenção para simulações futuras: o
+simulador recusa com `1111 - Request failed with status code 403` (sem enviar
+nada) quando o Data ID tem formato inválido, como `ORD-TESTE`; um número
+simples (`123456`) funciona.
+- `POST /webhooks/mercadopago` passou a exigir o cabeçalho `x-signature` do
+  Mercado Pago (HMAC-SHA256 de `id:<data.id>;request-id:<x-request-id>;ts:<ts>;`,
+  formato do SDK oficial) em vez do segredo na URL. O caminho antigo
+  `/webhooks/mercadopago/<qualquer-coisa>` continua aceito, mas o trecho da URL
+  é ignorado. Só o `data.id` da query (assinado) é usado; o do corpo não.
+- Variável nova no Railway: `MERCADOPAGO_WEBHOOK_SIGNATURE_SECRET` (a
+  "assinatura secreta" que o painel mostra ao cadastrar o webhook, tópico
+  Order, URL `https://acoes-production.up.railway.app/webhooks/mercadopago`).
+  `MERCADOPAGO_WEBHOOK_SECRET` deixou de ser usada e pode ser removida.
+- Sem a variável, o webhook recusa tudo (401) e os pagamentos continuam sendo
+  confirmados pela reconciliação de 15 min. Conferir no PRIMEIRO pagamento
+  real que o webhook respondeu 200 (logs do Railway), já que o formato da
+  assinatura não pôde ser testado contra o Mercado Pago de verdade.

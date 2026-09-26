@@ -197,6 +197,7 @@ footer.manual-footer b{color:var(--ink);}
     <a href="#sobre">Sobre este manual</a>
     <a href="#acesso">Como entrar no app</a>
     <a href="#inicio">Tela inicial</a>
+    <a href="#fatura">Fatura da plataforma</a>
   </nav>
   <div class="toc-kicker">Painéis e pessoas</div>
   <nav class="toc-list">
@@ -275,7 +276,8 @@ footer.manual-footer b{color:var(--ink);}
     <div class="rules"><h4>Regras do primeiro acesso</h4><ul>
       <li>No primeiro login com a senha provisória, o app exige a criação de uma <b>nova senha</b> (mínimo 8 caracteres) antes de liberar qualquer tela.</li>
       <li>Se você tem mais de um perfil (por exemplo, é síndico em um condomínio e também proprietário de uma unidade em outro), o app mostra a tela <b>"Como você quer entrar?"</b> logo após o login, listando cada perfil com seu cargo e condomínio. Depois de escolher, dá para trocar de perfil a qualquer momento pelo menu, sem sair da conta.</li>
-      <li>No aplicativo instalado (Android/iOS) a tela inicial é sempre o login — a página de apresentação do produto só existe na versão para navegador.</li>
+      <li>Depois do login, o app pede o aceite dos <b>Termos de Uso</b>. Quando os termos mudam, a tela aparece de novo com um resumo do que mudou, e é preciso aceitar a versão nova para continuar.</li>
+      <li>A gestão do condomínio é feita pela <b>versão web</b>, em <b>gestaolaremdia.com</b>, no navegador do computador ou do celular. O aplicativo instalado (Android/iOS) é só para moradores: se você também for proprietário ou inquilino, ele abre no seu perfil de morador.</li>
     </ul></div>
   </section>
 
@@ -318,7 +320,51 @@ footer.manual-footer b{color:var(--ink);}
       <li><b>Menu lateral</b> — todas as áreas liberadas para o seu cargo. Grupos com seta (▾) escondem sub-itens relacionados, como "Boletos".</li>
       <li><b>Seu perfil</b> — mostra o cargo com que você está logado; é ele que define o que aparece no menu.</li>
       <li><b>Acesso rápido</b> — atalhos em cartões para as mesmas áreas do menu lateral, montados automaticamente por cargo e pelas funcionalidades ativas do seu condomínio.</li>
+      <li><b>Fatura da plataforma</b> — quando há fatura da assinatura do Lar em Dia em aberto, ela aparece no topo do Início, com o Pix para pagar. Depois de paga, o cartão mostra a confirmação. Veja <a href="#fatura">Fatura da plataforma</a>.</li>
     </ol></div>
+  </section>
+
+  <section id="fatura">
+    <div class="eyebrow">Assinatura do condomínio</div>
+    <h2 class="section-title">Fatura da plataforma</h2>
+    <p class="lede">Todo mês o condomínio recebe a fatura da assinatura do Lar em Dia. Ela é paga por Pix, e o recibo em PDF serve de comprovante na prestação de contas. Este valor é a assinatura do sistema, não tem relação com as taxas condominiais dos moradores.</p>
+
+    <div class="mock-wrap">
+      <div class="mock-cap">Tela · Minhas faturas</div>
+      <div class="app-mock"><div class="mock-bar"><div class="mock-dots"><span></span><span></span><span></span></div><span class="mock-url">gestaolaremdia.com/minhas-faturas</span></div>
+        <div class="mock-body"><div class="mock-main" style="flex:1;">
+          <div class="mock-h">Minhas faturas</div><div class="mock-sub-h">Histórico das faturas do Lar em Dia do seu condomínio, com o recibo de cada pagamento.</div>
+          <div class="mock-row">
+            <div class="mock-card"><div class="lbl">Em aberto</div><div class="val" style="color:#93650a;">R$ 99,00</div></div>
+            <div class="mock-card"><div class="lbl">Pago em 12 meses</div><div class="val" style="color:#0f7a68;">R$ 891,00</div></div>
+          </div>
+          <div class="mock-list">
+            <div class="item"><div><div class="t">Setembro de 2026 · R$ 99,00</div><div class="m">Plano Essencial · vence em 11/09/2026 · Copiar código Pix</div></div><span class="mtag open">aguardando</span></div>
+            <div class="item"><div><div class="t">Agosto de 2026 · R$ 99,00</div><div class="m">Pago em 05/08/2026 · Pix · Baixar recibo (PDF)</div></div><span class="mtag paid">paga</span></div>
+            <div class="item"><div><div class="t">Julho de 2026 · R$ 104,00</div><div class="m">Cancelada: usuários contados a mais. Não é preciso pagar.</div></div><span class="mtag draft">cancelada</span></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+    <div class="legend"><h5>Nesta tela</h5><ol>
+      <li><b>Em aberto / Pago em 12 meses</b> — quanto falta pagar e quanto o condomínio pagou pela assinatura no último ano.</li>
+      <li><b>Copiar código Pix</b> e <b>Já paguei — verificar pagamento</b> — nas faturas em aberto. A confirmação também é automática: o Início e esta tela atualizam sozinhos.</li>
+      <li><b>Baixar recibo (PDF)</b> — nas faturas pagas, a qualquer momento. É o mesmo recibo que chega anexo ao e-mail de confirmação do pagamento.</li>
+    </ol></div>
+    <div class="gate">🖥️ <b>Minhas faturas fica no menu lateral da versão web.</b> O cartão da fatura no Início também tem o link "Ver todas as faturas e recibos".</div>
+
+    <div class="rules"><h4>Como funciona a cobrança</h4><ul>
+      <li>A fatura sai no começo do mês, com <b>vencimento em 10 dias</b>, e chega por e-mail ao síndico e ao subsíndico com o código Pix. Síndico e subsíndico podem pagar; o Pix é um só para a fatura.</li>
+      <li>O código Pix vale <b>30 dias</b>. Se expirar sem pagamento, o sistema gera outro sozinho e manda por e-mail. O código antigo deixa de valer.</li>
+      <li>Você recebe lembretes <b>3 dias antes do vencimento</b> e <b>no dia seguinte</b>, se a fatura não tiver sido paga.</li>
+      <li>Assim que o pagamento é confirmado, chega o <b>e-mail de recibo com o PDF anexo</b>. Guarde para a prestação de contas.</li>
+      <li>Se uma fatura estiver errada, a administração da plataforma pode <b>cancelá-la</b> ou <b>corrigi-la e reemiti-la</b>. Você recebe um e-mail com o motivo, e o Pix antigo deixa de valer.</li>
+    </ul></div>
+
+    <div class="callout warn">
+      <div class="callout-title">Fatura em atraso: o que acontece</div>
+      Com a fatura em atraso, você recebe avisos com <b>7, 15 e 25 dias</b>, sempre com a data exata da suspensão. Com <b>30 dias de atraso</b>, até o pagamento: a gestão do condomínio fica em <b>modo somente leitura</b> (síndico e subsíndico continuam vendo tudo, inclusive exportações e recibos, mas não conseguem fazer alterações) e os <b>moradores ficam sem acesso ao aplicativo</b>, vendo um aviso de acesso temporariamente indisponível que os orienta a procurar a administração do condomínio. Nenhum dado é perdido, e tudo volta a funcionar <b>automaticamente assim que o pagamento é confirmado</b>. Se precisar negociar um prazo, fale com a administração da plataforma antes da data da suspensão.
+    </div>
   </section>
 
   <section id="painel">
@@ -392,14 +438,14 @@ footer.manual-footer b{color:var(--ink);}
           <div class="mock-h">Nova pessoa</div>
           <div class="mock-row">
             <div style="flex:1;min-width:120px;"><div class="mock-field"><div class="flbl">Usuário de acesso</div><div class="fbox">joao.silva</div></div></div>
-            <div style="flex:1;min-width:120px;"><div class="mock-field"><div class="flbl">CPF</div><div class="fbox">000.000.000-00</div></div></div>
+            <div style="flex:1;min-width:120px;"><div class="mock-field"><div class="flbl">CPF ou CNPJ</div><div class="fbox">000.000.000-00</div></div></div>
           </div>
           <div class="mock-row">
             <div style="flex:1;min-width:110px;"><div class="mock-field"><div class="flbl">Cargo</div><div class="fbox">Proprietário ▾</div></div></div>
             <div style="flex:1;min-width:110px;"><div class="mock-field"><div class="flbl">Unidade</div><div class="fbox">Bloco A · 302 ▾</div></div></div>
           </div>
           <div class="mock-btn">Salvar pessoa</div>
-          <div class="mock-note">A senha inicial é gerada a partir do CPF (e do nº da unidade, se for morador) e mostrada uma única vez após salvar.</div>
+          <div class="mock-note">A senha inicial é gerada a partir do CPF ou CNPJ (e do nº da unidade, se for morador) e mostrada uma única vez após salvar.</div>
         </div></div>
       </div>
     </div>
@@ -419,6 +465,7 @@ footer.manual-footer b{color:var(--ink);}
     <div class="rules"><h4>Regras importantes</h4><ul>
       <li>Cadastrar outro subsíndico é permitido, mas depois de criado ele <b>não é gerenciável</b> por você — editar, resetar senha e excluir só funcionam em cartões de proprietário/inquilino.</li>
       <li>Trocar o cargo principal de uma pessoa pelo seletor <b>substitui</b> o perfil atual — o app mostra um aviso de confirmação antes.</li>
+      <li><b>CPF ou CNPJ</b> — o campo aceita CPF (11 dígitos) e CNPJ, inclusive o CNPJ novo com letras emitido pela Receita desde julho de 2026 (ex.: 12.ABC.345/01DE-35), útil para proprietário pessoa jurídica. A senha inicial usa os primeiros caracteres do documento, como ele foi digitado, sem a pontuação.</li>
     </ul></div>
   </section>
 
