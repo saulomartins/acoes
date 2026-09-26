@@ -4,7 +4,10 @@ dist
 .env.local
 .DS_Store
 releases/*.apk
+releases/*.aab
 releases/*.json
 releases/*.log
+# Cache local do Wrangler (Cloudflare) — tem dados da conta.
+.wrangler/
 mobile/web-run.err.log
 mobile/web-run.out.log

@@ -7,3 +7,9 @@ certs/
 *.key
 *.pfx
 *.pem
+# Scripts avulsos na raiz (correções pontuais com senha ou dados de
+# moradores) nunca entram no repositório — o código da API fica em src/ e os
+# scripts versionados em src/scripts/.
+/*.js
+/*.cjs
+/*.mjs
