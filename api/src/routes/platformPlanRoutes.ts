@@ -5,6 +5,7 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { query, withTransaction } from '../db';
 import { cancelPlatformInvoice, correctPlatformInvoice, refundPlatformInvoice, generatePlatformInvoices, reissuePlatformInvoicePix, reconcilePlatformInvoices, settlePlatformInvoiceById, resendPlatformInvoiceReceipt, verifyPlatformInvoice } from '../services/platformInvoiceService';
 import { computePlanAmountCents, type ActiveUserMetric, type PlatformPlan, type PlatformPlanTier } from '../services/platformPlanService';
+import { extendPlatformSuspension, SUSPENSION_AFTER_DAYS } from '../services/platformSuspensionService';
 
 const router = Router();
 router.use(authenticate, authorize('admin_geral'));
@@ -269,7 +270,12 @@ router.get('/invoices', asyncHandler(async (req, res) => {
             i.status, i.sent_at, i.paid_at, i.pix_payment_id, (i.pix_copy_paste is not null) as has_pix, i.pix_expires_at,
             i.receipt_sent_at, i.payment_method, i.manual_note, i.created_at,
             i.cancel_reason, i.canceled_at, i.refund_note, i.refunded_at, i.paid_after_canceled_at,
-            to_char(i.due_date,'YYYY-MM-DD') as due_date, (i.status in ('pending','sent') and i.due_date < current_date) as overdue
+            to_char(i.due_date,'YYYY-MM-DD') as due_date, (i.status in ('pending','sent') and i.due_date < current_date) as overdue,
+            -- Política de inadimplência (platformSuspensionService.ts): data em
+            -- que esta fatura restringe a gestão e se já chegou lá.
+            case when i.status in ('pending','sent') then to_char(greatest(i.suspension_clock_from + ${SUSPENSION_AFTER_DAYS}, c.platform_suspension_extended_until + 1),'YYYY-MM-DD') end as suspends_on,
+            (i.status in ('pending','sent') and greatest(i.suspension_clock_from + ${SUSPENSION_AFTER_DAYS}, c.platform_suspension_extended_until + 1) <= current_date) as suspension_reached,
+            to_char(c.platform_suspension_extended_until,'YYYY-MM-DD') as suspension_extended_until, c.platform_suspension_extension_note as suspension_extension_note
      from platform_invoices i
      join condominiums c on c.id = i.condominium_id
      join platform_plans p on p.id = i.plan_id
@@ -349,6 +355,21 @@ router.post('/invoices/:id/correct', asyncHandler(async (req, res) => {
   const outcome = await correctPlatformInvoice(req.params.id, reason, req.user?.id || null);
   if (!outcome.ok) return res.status(409).json({ message: outcome.message });
   return res.json({ canceled: true, pixCanceled: outcome.pixCanceled, created: outcome.created });
+}));
+
+// Prorroga a suspensão por inadimplência de um condomínio (negociação, erro de
+// cobrança): sem restrição da gestão por mais N dias a partir de hoje. Os
+// avisos voltam a sair com a data nova.
+router.post('/condominiums/:id/suspension-extension', asyncHandler(async (req, res) => {
+  const days = Number(req.body?.days);
+  const note = String(req.body?.note || '').trim();
+  if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(404).json({ message: 'Condomínio não encontrado.' });
+  if (![7, 15, 30].includes(days)) return res.status(400).json({ message: 'Escolha prorrogar por 7, 15 ou 30 dias.' });
+  if (note.length < 5) return res.status(400).json({ message: 'Informe o motivo da prorrogação (mínimo 5 caracteres).' });
+  const until = (await query<{ until: string }>(`select to_char(current_date + $1::int, 'YYYY-MM-DD') as until`, [days])).rows[0].until;
+  const updated = await extendPlatformSuspension(req.params.id, until, note, req.user?.id || null);
+  if (!updated) return res.status(404).json({ message: 'Condomínio não encontrado.' });
+  return res.json({ extendedUntil: until });
 }));
 
 router.post('/invoices/:id/refund', asyncHandler(async (req, res) => {

@@ -8,7 +8,9 @@ import { getInterAccessToken, type InterIntegrationConfig } from '../services/in
 import { sendWhatsAppTemplateMessage } from '../services/whatsappService';
 import { extractDriveFolderId, getDriveFolderMeta } from '../services/googleDriveService';
 import { FEATURE_CATALOG, FEATURE_KEYS, NEW_CONDOMINIUM_FEATURE_DEFAULTS, dependentsOf, isFeatureKey, type FeatureKey } from '../services/featureCatalog';
-import { getOpenPlatformInvoice, getRecentPaidPlatformInvoice, reconcilePlatformInvoices } from '../services/platformInvoiceService';
+import { getOpenPlatformInvoice, getPlatformInvoiceReceipt, getRecentPaidPlatformInvoice, listCondominiumPlatformInvoices, reconcilePlatformInvoices } from '../services/platformInvoiceService';
+import { buildPlatformReceiptPdf } from '../services/platformReceiptDocument';
+import { getPlatformRestriction } from '../services/platformSuspensionService';
 import { countActiveUsers, computeIncludedOverage, computePlanAmountCents, type ActiveUserMetric, type PlatformPlan } from '../services/platformPlanService';
 
 const router = Router();
@@ -428,8 +430,20 @@ router.get('/plan-usage', authorize('admin_geral', 'sindico', 'subsindico'), req
 const platformInvoicePayload = async (condominiumId: string) => {
   const invoice = await getOpenPlatformInvoice(condominiumId);
   // A fatura paga só aparece quando não há outra em aberto.
-  return { invoice, paidInvoice: invoice ? null : await getRecentPaidPlatformInvoice(condominiumId) };
+  return {
+    invoice,
+    paidInvoice: invoice ? null : await getRecentPaidPlatformInvoice(condominiumId),
+    restriction: await safeRestriction(condominiumId),
+  };
 };
+
+// Situação na política de inadimplência pro aviso do Início e de "Minhas
+// faturas". Falha (ex.: migração pendente) vira null — o cartão da fatura
+// continua funcionando sem o aviso.
+const safeRestriction = (condominiumId: string) => getPlatformRestriction(condominiumId).catch((error) => {
+  console.warn('platform restriction lookup failed', error);
+  return null;
+});
 
 router.get('/platform-invoice', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
   const condominiumId = req.user?.condominiumId;
@@ -445,6 +459,33 @@ router.post('/platform-invoice/verify', authorize('sindico', 'subsindico'), asyn
   if (!condominiumId) return res.json({ invoice: null, paidInvoice: null, checked: 0, paid: 0 });
   const result = await reconcilePlatformInvoices(condominiumId);
   return res.json({ ...(await platformInvoicePayload(condominiumId)), ...result });
+}));
+
+// Tela "Minhas faturas": histórico completo das faturas da plataforma do
+// condomínio do síndico/subsíndico — sempre o condomínio do token, nunca um
+// id vindo da requisição.
+router.get('/platform-invoices', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.condominiumId;
+  if (!condominiumId) return res.json({ invoices: [], restriction: null });
+  return res.json({ invoices: await listCondominiumPlatformInvoices(condominiumId), restriction: await safeRestriction(condominiumId) });
+}));
+
+// Recibo em PDF de uma fatura paga do próprio condomínio.
+router.get('/platform-invoices/:id/receipt', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.condominiumId;
+  const invoiceId = String(req.params.id || '');
+  if (!condominiumId || !/^[0-9a-f-]{36}$/i.test(invoiceId)) return res.status(404).json({ message: 'Recibo não encontrado.' });
+  const invoice = await getPlatformInvoiceReceipt(invoiceId, condominiumId);
+  if (!invoice) return res.status(404).json({ message: 'Recibo não encontrado — só faturas pagas têm recibo.' });
+
+  const pdf = await buildPlatformReceiptPdf({
+    invoiceId: invoice.id, condominiumName: invoice.condominium_name, referenceMonth: invoice.reference_month,
+    amountCents: invoice.amount_cents, activeUsers: invoice.active_users, planName: invoice.plan_name,
+    paidAt: new Date(invoice.paid_at), paymentMethod: invoice.payment_method,
+  });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="recibo-lar-em-dia-${invoice.reference_month.slice(0, 7)}.pdf"`);
+  return res.send(pdf);
 }));
 
 

@@ -14,6 +14,7 @@
     "inter:test": "ts-node --files src/scripts/testInterToken.ts",
     "inter:audit": "ts-node --files src/scripts/auditBankIntegrations.ts",
     "admin:update": "ts-node --files src/scripts/updateAdminProfile.ts",
+    "emails:preview": "ts-node --transpile-only src/scripts/buildEmailPreview.ts",
     "test": "vitest run"
   },
   "dependencies": {

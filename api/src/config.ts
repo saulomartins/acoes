@@ -58,7 +58,9 @@ export const config = {
   // e-mail sem SMTP/Resend).
   mercadoPago: {
     accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN || '',
-    webhookSecret: process.env.MERCADOPAGO_WEBHOOK_SECRET || '',
+    // "Assinatura secreta" da aplicação no painel do Mercado Pago (Suas
+    // integrações > Webhooks) — valida o x-signature de cada notificação.
+    webhookSignatureSecret: process.env.MERCADOPAGO_WEBHOOK_SIGNATURE_SECRET || '',
   },
   // URL pública da própria API (não a do app web) — usada só pra montar a
   // notification_url que o Mercado Pago chama quando um pagamento muda de

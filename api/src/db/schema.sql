@@ -1108,6 +1108,30 @@ update platform_invoices set due_date = ((created_at at time zone 'America/Sao_P
   due_soon_notified_at = now(), overdue_notified_at = now()
 where due_date is null;
 
+-- Política de inadimplência (platformSuspensionService.ts): 30 dias depois de
+-- suspension_clock_from, com a fatura ainda em aberto, a gestão do condomínio
+-- (síndico/subsíndico) fica somente leitura até o pagamento. Nas faturas
+-- novas o relógio é o vencimento (gravado na criação). Nas que já existiam
+-- quando a política entrou, é a data desta migração — ninguém é suspenso por
+-- um atraso anterior à regra. O bloco só roda na primeira vez (quando a
+-- coluna ainda não existe); rodar o schema de novo não mexe no relógio.
+do $$ begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = current_schema() and table_name = 'platform_invoices' and column_name = 'suspension_clock_from') then
+    alter table platform_invoices add column suspension_clock_from date;
+    update platform_invoices set suspension_clock_from = greatest(due_date, (now() at time zone 'America/Sao_Paulo')::date);
+  end if;
+end $$;
+-- Último aviso de suspensão já enviado pra fatura: 0 nenhum, 1/2/3 "suspensão
+-- em N dias" (7, 15 e 25 dias de atraso), 4 "gestão restrita". Volta a 0
+-- quando o admin prorroga, pra os avisos saírem de novo com a data nova.
+alter table platform_invoices add column if not exists overdue_reminder_stage smallint not null default 0;
+-- Prorrogação da suspensão dada pelo admin geral (negociação, erro de
+-- cobrança): a gestão não é restringida até esta data, inclusive.
+alter table condominiums add column if not exists platform_suspension_extended_until date;
+alter table condominiums add column if not exists platform_suspension_extension_note text;
+alter table condominiums add column if not exists platform_suspension_extended_by uuid references users(id) on delete set null;
+
 -- Cobranças adicionais esporádicas por unidade (ex.: tag de portaria):
 -- somam à taxa condominial normal no lote mensal enquanto houver parcela
 -- pendente para o mês. Vinculadas à unidade (não ao morador), porque a

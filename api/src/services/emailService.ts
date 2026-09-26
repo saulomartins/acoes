@@ -1,9 +1,10 @@
 import { config } from '../config';
 import nodemailer from 'nodemailer';
 
-type EmailInput = { to: string; subject: string; html: string };
+export type EmailAttachment = { filename: string; content: Buffer; contentType: string };
+type EmailInput = { to: string; subject: string; html: string; attachments?: EmailAttachment[] };
 
-export const sendEmail = async ({ to, subject, html }: EmailInput) => {
+export const sendEmail = async ({ to, subject, html, attachments }: EmailInput) => {
   const smtp = config.email.smtp;
   if (smtp.host && smtp.user && smtp.pass && config.email.from) {
     const transporter = nodemailer.createTransport({
@@ -18,6 +19,7 @@ export const sendEmail = async ({ to, subject, html }: EmailInput) => {
       subject,
       html,
       ...(config.email.replyTo ? { replyTo: config.email.replyTo } : {}),
+      ...(attachments?.length ? { attachments: attachments.map(a => ({ filename: a.filename, content: a.content, contentType: a.contentType })) } : {}),
     });
     return { status: 'sent' as const, data: { messageId: info.messageId, provider: 'smtp' } };
   }
@@ -40,6 +42,8 @@ export const sendEmail = async ({ to, subject, html }: EmailInput) => {
       subject,
       html,
       ...(config.email.replyTo ? { reply_to: config.email.replyTo } : {}),
+      // Resend recebe o arquivo em base64 no próprio corpo.
+      ...(attachments?.length ? { attachments: attachments.map(a => ({ filename: a.filename, content: a.content.toString('base64'), content_type: a.contentType })) } : {}),
     }),
   });
   const data = await response.json().catch(() => null);
@@ -169,15 +173,22 @@ export const sendPlatformInvoiceEmail = (
   activeUsers: number,
   pix?: PlatformInvoicePix | null,
   dueDate?: Date | null,
+  // Renovação automática do Pix expirado (renewExpiredPlatformInvoicePix):
+  // mesma fatura, só troca o assunto e explica por que chegou um código novo.
+  pixRenewed = false,
 ) => sendEmail({
   to,
-  subject: `Fatura da plataforma — ${formatMonthLabel(referenceMonth)}`,
+  subject: pixRenewed ? `Novo código Pix — Fatura da plataforma de ${formatMonthLabel(referenceMonth)}` : `Fatura da plataforma — ${formatMonthLabel(referenceMonth)}`,
   html: `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#17283e;line-height:1.5">
     <div style="max-width:560px;margin:auto;padding:28px;border:1px solid #e4e9ee;border-radius:12px">
-      <h2 style="margin-top:0">Fatura da plataforma</h2>
+      <h2 style="margin-top:0">${pixRenewed ? 'Novo código Pix da sua fatura' : 'Fatura da plataforma'}</h2>
       <p>Olá, ${escapeHtml(name)}.</p>
-      <p>A fatura de <strong>${escapeHtml(formatMonthLabel(referenceMonth))}</strong> do condomínio
-      <strong>${escapeHtml(condominiumName || '')}</strong> já está disponível.</p>
+      ${pixRenewed
+        ? `<p>O código Pix da fatura de <strong>${escapeHtml(formatMonthLabel(referenceMonth))}</strong> do condomínio
+      <strong>${escapeHtml(condominiumName || '')}</strong> expirou sem pagamento, então geramos um novo abaixo. O valor é o mesmo;
+      <strong>o código anterior não vale mais</strong>.</p>`
+        : `<p>A fatura de <strong>${escapeHtml(formatMonthLabel(referenceMonth))}</strong> do condomínio
+      <strong>${escapeHtml(condominiumName || '')}</strong> já está disponível.</p>`}
       <p style="background:#f5f7fb;border-radius:8px;padding:14px 16px">
         Plano contratado: <strong>${escapeHtml(planName)}</strong><br/>
         ${planDetailRows(planDetail, activeUsers)}<br/>
@@ -224,6 +235,42 @@ export const sendPlatformInvoiceReminderEmail = (
   });
 };
 
+// Política de inadimplência (platformSuspensionService.ts): aviso de que a
+// gestão fica somente leitura em tal data, ou de que já ficou.
+export const sendPlatformSuspensionEmail = (
+  to: string,
+  name: string,
+  condominiumName: string,
+  referenceMonth: Date,
+  amountCents: number,
+  suspendsOn: Date,
+  kind: 'warning' | 'restricted',
+) => {
+  const dateLabel = suspendsOn.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+  const restricted = kind === 'restricted';
+  return sendEmail({
+    to,
+    subject: restricted
+      ? `Gestão do condomínio em modo somente leitura — fatura de ${formatMonthLabel(referenceMonth)}`
+      : `Fatura em atraso: a gestão fica somente leitura em ${dateLabel}`,
+    html: `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#17283e;line-height:1.5">
+      <div style="max-width:560px;margin:auto;padding:28px;border:1px solid #e4e9ee;border-radius:12px">
+        <h2 style="margin-top:0">${restricted ? 'Gestão em modo somente leitura' : 'Fatura da plataforma em atraso'}</h2>
+        <p>Olá, ${escapeHtml(name)}.</p>
+        <p>A fatura de <strong>${escapeHtml(formatMonthLabel(referenceMonth))}</strong> do condomínio <strong>${escapeHtml(condominiumName || '')}</strong>
+        (${escapeHtml(formatCurrencyBRL(amountCents))}) continua em aberto.</p>
+        <p style="background:#fbeaea;border-radius:8px;padding:14px 16px">
+          ${restricted
+            ? `Desde <strong>${escapeHtml(dateLabel)}</strong>, a gestão do condomínio está em <strong>modo somente leitura</strong> (síndico e subsíndico continuam vendo as informações, mas não conseguem fazer alterações) e <strong>os moradores estão sem acesso ao aplicativo</strong>, vendo apenas um aviso de acesso indisponível que os orienta a procurar a administração do condomínio.`
+            : `Se não for paga, a partir de <strong>${escapeHtml(dateLabel)}</strong> a gestão do condomínio fica em <strong>modo somente leitura</strong> e <strong>os moradores ficam sem acesso ao aplicativo</strong>, vendo apenas um aviso de acesso indisponível que os orienta a procurar a administração do condomínio.`}
+          Nenhum dado é perdido.
+        </p>
+        <p>Pague pelo Pix na tela <strong>Início</strong> ou em <strong>Minhas faturas</strong>. ${restricted ? 'O acesso completo volta automaticamente assim que o pagamento é confirmado.' : ''}</p>
+        <p style="color:#6f7e8d;font-size:13px">Se já pagou, desconsidere — a confirmação pode levar alguns instantes. Dúvidas ou negociação: responda este e-mail.</p>
+      </div></body></html>`,
+  });
+};
+
 // Aviso de fatura da plataforma cancelada pelo admin geral (fatura indevida
 // ou substituída por uma corrigida) — o Pix antigo deixa de valer.
 export const sendPlatformInvoiceCanceledEmail = (
@@ -262,6 +309,9 @@ export const sendPlatformInvoiceReceiptEmail = (
   condominiumName: string,
   referenceMonth: Date,
   amountCents: number,
+  // Recibo em PDF (platformReceiptDocument.ts) — o mesmo de "Minhas faturas".
+  // Sem ele (falha ao gerar), o e-mail sai sozinho e continua valendo como recibo.
+  receiptPdf?: EmailAttachment | null,
 ) => {
   const owner = config.platformReceipt;
   const today = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
@@ -281,10 +331,13 @@ export const sendPlatformInvoiceReceiptEmail = (
       <div style="max-width:560px;margin:auto;padding:28px;border:1px solid #e4e9ee;border-radius:12px">
         <h2 style="margin-top:0">Recibo de pagamento</h2>
         <p>Olá, ${escapeHtml(name)}.</p>
-        <p>Seu pagamento via Pix foi confirmado. Este e-mail serve como recibo — guarde-o para a prestação de contas do condomínio.</p>
+        <p>Seu pagamento via Pix foi confirmado. ${receiptPdf
+          ? '<strong>O recibo em PDF segue em anexo</strong> — é o comprovante para a prestação de contas do condomínio. Você também pode baixá-lo quando quiser em <strong>Minhas faturas</strong>.'
+          : 'Este e-mail serve como recibo — guarde-o para a prestação de contas do condomínio.'}</p>
         <div style="background:#f5f7fb;border-radius:8px;padding:16px 18px">${identification}</div>
         <p style="color:#6f7e8d;font-size:13px">Este valor se refere à assinatura da plataforma pelo condomínio, não a taxas condominiais dos moradores.</p>
       </div></body></html>`,
+    attachments: receiptPdf ? [receiptPdf] : undefined,
   });
 };
 

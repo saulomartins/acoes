@@ -1,12 +1,21 @@
 import { NextFunction, Request, Response, Router } from 'express';
-import { authenticate } from '../middleware/auth';
+import { authenticate, forgetPlatformRestriction } from '../middleware/auth';
+import { isPlatformRestricted, RESIDENT_SUSPENDED_MESSAGE } from '../services/platformSuspensionService';
 import { AMBIGUOUS_LOGIN, changePassword, listProfiles, login, refresh, register, requestPasswordReset, resetPassword, revokeRefreshToken, switchProfile } from '../services/authService';
 import { query } from '../db';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { FEATURE_KEYS, type FeatureKey } from '../services/featureCatalog';
 
 const router = Router();
-export const CURRENT_TERMS_VERSION = '2026-08-04';
+// 2026-09-26: cláusula 8 passou a prever a gestão somente leitura por
+// inadimplência da assinatura (platformSuspensionService.ts).
+export const CURRENT_TERMS_VERSION = '2026-09-26';
+// Versão anterior ainda aceita: o app instalado pelas lojas traz a versão dos
+// termos embutida e só mostra a nova depois de atualizado — sem isso, quem
+// fizer o primeiro acesso por ele ficaria preso na tela de aceite. Grava a
+// versão que a pessoa de fato aceitou; a web (e o app atualizado) pedem o
+// aceite da atual a quem só aceitou a anterior.
+const ACCEPTED_TERMS_VERSIONS = [CURRENT_TERMS_VERSION, '2026-08-04'];
 export const CURRENT_TOUR_VERSION = '2026-08-17-1';
 const attempts = new Map<string, { count: number; resetAt: number }>();
 const limit = (maximum: number, windowMs: number) => (req: Request, res: Response, next: NextFunction) => {
@@ -198,17 +207,34 @@ router.post('/change-password', authenticate, asyncHandler(async (req, res) => {
   return res.json({ user });
 }));
 
+// O app (moradores) pergunta ao abrir e no "Tentar novamente" da tela de
+// suspensão se o condomínio está suspenso por inadimplência. Sem cache: se já
+// foi pago, também limpa o cache do middleware pra liberar as outras chamadas
+// na hora. Gestor e admin sempre recebem false (a restrição deles é só
+// escrita, avisada no Início). Falha na consulta = não suspenso.
+router.get('/access-status', authenticate, asyncHandler(async (req, res) => {
+  const { role, condominiumId } = req.user!;
+  if ((role !== 'proprietario' && role !== 'inquilino') || !condominiumId) return res.json({ suspended: false });
+  const restricted = await isPlatformRestricted(condominiumId).catch((error) => {
+    console.warn('access-status restriction check failed', error);
+    return false;
+  });
+  if (!restricted) forgetPlatformRestriction(condominiumId);
+  return res.json(restricted ? { suspended: true, message: RESIDENT_SUSPENDED_MESSAGE } : { suspended: false });
+}));
+
 router.post('/terms/accept', authenticate, asyncHandler(async (req, res) => {
-  if (req.body?.accepted !== true || req.body?.version !== CURRENT_TERMS_VERSION) return res.status(400).json({ message: 'Confirme a leitura e aceitação da versão atual dos Termos de Uso.' });
+  if (req.body?.accepted !== true || !ACCEPTED_TERMS_VERSIONS.includes(req.body?.version)) return res.status(400).json({ message: 'Confirme a leitura e aceitação da versão atual dos Termos de Uso.' });
+  const acceptedVersion: string = req.body.version;
   const ipAddress = req.ip || req.socket.remoteAddress || null;
   const userAgent = String(req.headers['user-agent'] || '').slice(0, 500) || null;
-  await query(`insert into user_terms_acceptances(id,user_id,terms_version,ip_address,user_agent) values(gen_random_uuid(),$1,$2,$3,$4) on conflict(user_id,terms_version) do nothing`,[req.user!.id,CURRENT_TERMS_VERSION,ipAddress,userAgent]);
+  await query(`insert into user_terms_acceptances(id,user_id,terms_version,ip_address,user_agent) values(gen_random_uuid(),$1,$2,$3,$4) on conflict(user_id,terms_version) do nothing`,[req.user!.id,acceptedVersion,ipAddress,userAgent]);
   // `req.user` vem do JWT emitido no login/refresh e pode carregar um
   // `mustChangePassword` desatualizado (ex.: senha trocada depois que esse
   // token foi emitido, já que a troca de senha não reemite token). Por isso
   // sempre buscamos o valor atual no banco em vez de espalhar `...req.user`.
-  const result=await query<{terms_accepted_at:Date;must_change_password:boolean}>(`update users set terms_accepted_version=$1,terms_accepted_at=now() where id=$2 returning terms_accepted_at,must_change_password`,[CURRENT_TERMS_VERSION,req.user!.id]);
-  return res.json({user:{...req.user,mustChangePassword:result.rows[0].must_change_password,termsAcceptedVersion:CURRENT_TERMS_VERSION,termsAcceptedAt:result.rows[0].terms_accepted_at.toISOString()}});
+  const result=await query<{terms_accepted_at:Date;must_change_password:boolean}>(`update users set terms_accepted_version=$1,terms_accepted_at=now() where id=$2 returning terms_accepted_at,must_change_password`,[acceptedVersion,req.user!.id]);
+  return res.json({user:{...req.user,mustChangePassword:result.rows[0].must_change_password,termsAcceptedVersion:acceptedVersion,termsAcceptedAt:result.rows[0].terms_accepted_at.toISOString()}});
 }));
 
 router.post('/tour/complete', authenticate, asyncHandler(async (req, res) => {

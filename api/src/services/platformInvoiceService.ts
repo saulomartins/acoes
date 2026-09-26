@@ -2,9 +2,11 @@ import { randomUUID } from 'crypto';
 import { query } from '../db';
 import { computePlanAmountCents, computeIncludedOverage, countActiveUsers, type PlatformPlan, type PlatformPlanTier } from './platformPlanService';
 import { notifyUsers } from './notificationService';
-import { sendPlatformInvoiceEmail, sendPlatformInvoiceReceiptEmail, sendPlatformInvoiceReminderEmail, sendPlatformInvoiceCanceledEmail, type PlatformInvoicePlanDetail, type PlatformInvoicePix } from './emailService';
+import { sendPlatformInvoiceEmail, sendPlatformInvoiceReceiptEmail, sendPlatformInvoiceReminderEmail, sendPlatformInvoiceCanceledEmail, type EmailAttachment, type PlatformInvoicePlanDetail, type PlatformInvoicePix } from './emailService';
+import { buildPlatformReceiptPdf } from './platformReceiptDocument';
 import { sendPushNotification } from './notificationService';
 import { isMercadoPagoConfigured, createPixCharge, getOrder, cancelOrder } from './mercadoPagoService';
+import { isPlatformRestricted } from './platformSuspensionService';
 
 // Prazo de pagamento contado a partir da geração da fatura — assim nenhuma
 // fatura já nasce atrasada, mesmo gerada no meio do mês. O Pix vale mais
@@ -15,8 +17,27 @@ const PLATFORM_PIX_VALID_DAYS = 30;
 type SettleOptions = { method?: 'pix_mercadopago' | 'manual'; note?: string | null; confirmedBy?: string | null };
 type InvoiceRow = { id: string; condominium_id: string; reference_month: string; amount_cents: number };
 
-// Manda o recibo pra síndicos/subsíndicos do condomínio da fatura.
+// Recibo em PDF da fatura paga pra ir anexo ao e-mail — o mesmo de "Minhas
+// faturas". Falha aqui não pode impedir o e-mail: sem PDF, ele sai sozinho.
+const buildReceiptAttachment = async (row: InvoiceRow): Promise<EmailAttachment | null> => {
+  try {
+    const receipt = await getPlatformInvoiceReceipt(row.id, row.condominium_id);
+    if (!receipt) return null;
+    const content = await buildPlatformReceiptPdf({
+      invoiceId: receipt.id, condominiumName: receipt.condominium_name, referenceMonth: receipt.reference_month,
+      amountCents: receipt.amount_cents, activeUsers: receipt.active_users, planName: receipt.plan_name,
+      paidAt: new Date(receipt.paid_at), paymentMethod: receipt.payment_method,
+    });
+    return { filename: `recibo-lar-em-dia-${receipt.reference_month.slice(0, 7)}.pdf`, content, contentType: 'application/pdf' };
+  } catch (error) {
+    console.warn('platform invoice receipt pdf failed — sending e-mail without attachment', { invoiceId: row.id, error });
+    return null;
+  }
+};
+
+// Manda o recibo pra síndicos/subsíndicos do condomínio da fatura, com o PDF anexo.
 const sendReceiptEmails = async (row: InvoiceRow) => {
+  const receiptPdf = await buildReceiptAttachment(row);
   const condo = await query<{ name: string }>(`select name from condominiums where id=$1`, [row.condominium_id]);
   const managers = await query<{ full_name: string | null; username: string; email: string | null }>(
     `select full_name, username, email from users where condominium_id=$1 and role in ('sindico','subsindico') and deleted_at is null`,
@@ -25,7 +46,7 @@ const sendReceiptEmails = async (row: InvoiceRow) => {
   for (const manager of managers.rows) {
     if (!manager.email) continue;
     try {
-      await sendPlatformInvoiceReceiptEmail(manager.email, manager.full_name || manager.username, condo.rows[0]?.name || '', new Date(row.reference_month), row.amount_cents);
+      await sendPlatformInvoiceReceiptEmail(manager.email, manager.full_name || manager.username, condo.rows[0]?.name || '', new Date(row.reference_month), row.amount_cents, receiptPdf);
     } catch (error) {
       console.warn('platform invoice receipt email failed', error);
     }
@@ -202,6 +223,10 @@ export const checkAndSendPlatformInvoice = async (condominiumId: string): Promis
     [condominiumId],
   );
   if (!condo.rows[0] || condo.rows[0].platform_status !== 'active') return false;
+  // Gestão restrita por inadimplência: não gera fatura nova enquanto durar
+  // (o condomínio não está usando a gestão). Depois do pagamento, o job
+  // diário gera a do mês corrente normalmente. Falha na checagem não bloqueia.
+  if (await isPlatformRestricted(condominiumId).catch(() => false)) return false;
 
   const sub = await query<{ id: string; plan_id: string; billing_starts_at: string }>(
     `select id, plan_id, to_char(billing_starts_at, 'YYYY-MM-DD') as billing_starts_at
@@ -228,8 +253,8 @@ export const checkAndSendPlatformInvoice = async (condominiumId: string): Promis
   let invoiceId: string;
   try {
     const inserted = await query<{ id: string }>(
-      `insert into platform_invoices (id, condominium_id, plan_id, reference_month, active_users, amount_cents, due_date)
-       values ($1,$2,$3,$4,$5,$6, current_date + $7::int) returning id`,
+      `insert into platform_invoices (id, condominium_id, plan_id, reference_month, active_users, amount_cents, due_date, suspension_clock_from)
+       values ($1,$2,$3,$4,$5,$6, current_date + $7::int, current_date + $7::int) returning id`,
       [randomUUID(), condominiumId, subscription.plan_id, referenceMonthIso, activeUsers, amountCents, PLATFORM_INVOICE_DUE_DAYS],
     );
     invoiceId = inserted.rows[0].id;
@@ -301,7 +326,10 @@ export const generatePlatformInvoices = async (): Promise<{ created: number; ski
 // Gera um Pix (novo) para uma fatura em aberto — cobre fatura criada sem
 // Pix (Mercado Pago ainda não configurado, falha na emissão) e Pix
 // expirado — e reenvia o e-mail da fatura, agora com o código de pagamento.
-export const reissuePlatformInvoicePix = async (invoiceId: string): Promise<{ ok: true } | { ok: false; message: string }> => {
+export const reissuePlatformInvoicePix = async (
+  invoiceId: string,
+  options: { idempotencyKey?: string; pixRenewed?: boolean } = {},
+): Promise<{ ok: true } | { ok: false; message: string }> => {
   if (!isMercadoPagoConfigured()) return { ok: false, message: 'Mercado Pago não está configurado (MERCADOPAGO_ACCESS_TOKEN).' };
   const invoice = await query<{ id: string; condominium_id: string; plan_id: string; reference_month: string; active_users: number; amount_cents: number; status: string; due_date: string | null }>(
     `select id, condominium_id, plan_id, reference_month, active_users, amount_cents, status, to_char(due_date,'YYYY-MM-DD') as due_date from platform_invoices where id=$1`,
@@ -316,7 +344,7 @@ export const reissuePlatformInvoicePix = async (invoiceId: string): Promise<{ ok
 
   const condo = await query<{ name: string }>(`select name from condominiums where id=$1`, [row.condominium_id]);
   const referenceMonth = new Date(row.reference_month);
-  const pix = await createAndStorePix(invoiceId, condo.rows[0]?.name || '', referenceMonth, row.amount_cents, managers, `${invoiceId}-${Date.now()}`);
+  const pix = await createAndStorePix(invoiceId, condo.rows[0]?.name || '', referenceMonth, row.amount_cents, managers, options.idempotencyKey || `${invoiceId}-${Date.now()}`);
   if (!pix) return { ok: false, message: 'O Mercado Pago recusou a criação do Pix. Veja o log da API para o motivo.' };
 
   const plan = (await query<PlatformPlan & { name: string }>(`select * from platform_plans where id=$1`, [row.plan_id])).rows[0];
@@ -326,7 +354,7 @@ export const reissuePlatformInvoicePix = async (invoiceId: string): Promise<{ ok
     for (const manager of managers) {
       if (!manager.email) continue;
       try {
-        await sendPlatformInvoiceEmail(manager.email, manager.full_name || '', condo.rows[0]?.name || '', plan.name, planDetail, referenceMonth, row.amount_cents, row.active_users, pix, row.due_date ? new Date(`${row.due_date}T00:00:00Z`) : null);
+        await sendPlatformInvoiceEmail(manager.email, manager.full_name || '', condo.rows[0]?.name || '', plan.name, planDetail, referenceMonth, row.amount_cents, row.active_users, pix, row.due_date ? new Date(`${row.due_date}T00:00:00Z`) : null, options.pixRenewed);
       } catch (error) {
         console.warn('platform invoice email failed', error);
       }
@@ -334,6 +362,64 @@ export const reissuePlatformInvoicePix = async (invoiceId: string): Promise<{ ok
   }
   await query(`update platform_invoices set status='sent', sent_at=coalesce(sent_at, now()) where id=$1`, [invoiceId]);
   return { ok: true };
+};
+
+// Margem depois da validade guardada antes de renovar. pix_expires_at é
+// calculado aqui (createPixCharge), não vem do Mercado Pago — a margem
+// garante que o Pix antigo já morreu lá também. Importante porque um
+// pagamento no Pix antigo depois da troca não seria reconhecido (webhook e
+// reconciliação procuram pelo pix_payment_id ATUAL da fatura).
+const PIX_RENEWAL_GRACE = '1 hour';
+
+// Renova sozinho o Pix expirado das faturas ainda em aberto (job de 15 min) —
+// antes dependia do admin clicar "Gerar novo Pix". Pra cada uma: confere o Pix
+// antigo no Mercado Pago (se foi pago, confirma o pagamento em vez de
+// renovar; se a consulta falha, tenta de novo na próxima rodada), cancela o
+// antigo por garantia e gera outro, reenviando a fatura por e-mail com o
+// código novo. A idempotency key é fixa por (fatura, Pix antigo, hora): duas
+// rodadas ao mesmo tempo recebem a MESMA order do Mercado Pago, nunca duas
+// cobranças; e, se a criação falhar, a hora seguinte usa outra chave (senão
+// o Mercado Pago poderia devolver pra sempre a resposta da tentativa que
+// falhou). Nunca lança.
+export const renewExpiredPlatformInvoicePix = async (): Promise<{ renewed: number; paid: number; failed: number }> => {
+  const counts = { renewed: 0, paid: 0, failed: 0 };
+  if (!isMercadoPagoConfigured()) return counts;
+  let expired: { id: string; pix_payment_id: string }[];
+  try {
+    expired = (await query<{ id: string; pix_payment_id: string }>(
+      `select id, pix_payment_id from platform_invoices
+       where status in ('pending','sent') and pix_payment_id is not null
+         and pix_expires_at < now() - interval '${PIX_RENEWAL_GRACE}'`,
+    )).rows;
+  } catch (error) {
+    console.warn('platform invoice pix renewal query failed', error);
+    return counts;
+  }
+  for (const row of expired) {
+    try {
+      const order = await getOrder(row.pix_payment_id);
+      if (order.paid) {
+        if (await settlePlatformInvoiceById(row.id)) counts.paid += 1;
+        continue;
+      }
+      try {
+        await cancelOrder(row.pix_payment_id);
+      } catch {
+        // Já expirado no Mercado Pago costuma recusar o cancelamento — esperado.
+      }
+      const hour = new Date().toISOString().slice(0, 13);
+      const result = await reissuePlatformInvoicePix(row.id, { idempotencyKey: `${row.id}-renova-${row.pix_payment_id}-${hour}`, pixRenewed: true });
+      if (result.ok) counts.renewed += 1;
+      else {
+        counts.failed += 1;
+        console.warn('platform invoice pix renewal failed', { invoiceId: row.id, message: result.message });
+      }
+    } catch (error) {
+      counts.failed += 1;
+      console.warn('platform invoice pix renewal failed', { invoiceId: row.id, error });
+    }
+  }
+  return counts;
 };
 
 // Lembretes das faturas da plataforma (job diário): "vence em 3 dias" e
@@ -492,6 +578,38 @@ export const refundPlatformInvoice = async (invoiceId: string, note: string): Pr
   );
   if (!result.rows.length) return { ok: false, message: 'Só é possível estornar uma fatura paga.' };
   return { ok: true, pixCanceled: null };
+};
+
+// Histórico de faturas da plataforma do condomínio (tela "Minhas faturas" do
+// síndico/subsíndico), da mais recente pra mais antiga. Só o que o síndico
+// precisa ver: ficam de fora os campos internos do admin (nota da confirmação
+// manual, observação do estorno, alerta de pagamento após cancelamento, id da
+// order no Mercado Pago). O Pix só vem nas faturas em aberto.
+export const listCondominiumPlatformInvoices = async (condominiumId: string) => (await query<any>(
+  `select i.id, to_char(i.reference_month,'YYYY-MM-DD') as reference_month, i.amount_cents, i.active_users, p.name as plan_name, i.status,
+          to_char(i.due_date,'YYYY-MM-DD') as due_date, (i.status in ('pending','sent') and i.due_date < current_date) as overdue,
+          i.paid_at, i.payment_method, i.receipt_sent_at, i.canceled_at, i.cancel_reason, i.refunded_at,
+          case when i.status in ('pending','sent') then i.pix_copy_paste end as pix_copy_paste
+   from platform_invoices i join platform_plans p on p.id = i.plan_id
+   where i.condominium_id=$1
+   order by i.reference_month desc, i.created_at desc`,
+  [condominiumId],
+)).rows;
+
+// Dados do recibo em PDF de UMA fatura paga do condomínio — null se não
+// existir, for de outro condomínio ou não estiver paga (estornada perde o
+// recibo, como no reenvio por e-mail).
+export const getPlatformInvoiceReceipt = async (invoiceId: string, condominiumId: string) => {
+  const result = await query<{ id: string; reference_month: string; amount_cents: number; active_users: number; plan_name: string; paid_at: Date; payment_method: string | null; condominium_name: string }>(
+    `select i.id, to_char(i.reference_month,'YYYY-MM-DD') as reference_month, i.amount_cents, i.active_users, p.name as plan_name,
+            i.paid_at, i.payment_method, c.name as condominium_name
+     from platform_invoices i
+     join platform_plans p on p.id = i.plan_id
+     join condominiums c on c.id = i.condominium_id
+     where i.id=$1 and i.condominium_id=$2 and i.status='paid'`,
+    [invoiceId, condominiumId],
+  );
+  return result.rows[0] || null;
 };
 
 // Última fatura paga (últimos 30 dias) — o cartão da tela Início mostra "paga"

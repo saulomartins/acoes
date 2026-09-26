@@ -1,27 +1,35 @@
-import { timingSafeEqual } from 'crypto';
 import { Router } from 'express';
+import { config } from '../config';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { getOrder } from '../services/mercadoPagoService';
+import { getOrder, verifyWebhookSignature } from '../services/mercadoPagoService';
 import { settlePlatformInvoicePayment } from '../services/platformInvoiceService';
 
 const router = Router();
-const safeEqual = (received: string, expected: string) => {
-  const a = Buffer.from(received); const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-};
 
-// Segredo na própria URL, mesmo padrão de interWebhookRoutes.ts. O corpo da
-// notificação do Mercado Pago só avisa "a order X mudou" — nunca traz o
-// valor pago nem confirma o status por si só, então SEMPRE reconsultamos
-// GET /v1/orders/:id (getOrder) antes de considerar algo pago.
-router.post('/:secret', asyncHandler(async (req, res) => {
-  const expected = process.env.MERCADOPAGO_WEBHOOK_SECRET || '';
-  if (!expected || !safeEqual(String(req.params.secret || ''), expected)) return res.status(404).end();
+// Webhook do Mercado Pago (tópico 'order', API de Orders). A autenticidade vem
+// da assinatura x-signature (verifyWebhookSignature em mercadoPagoService.ts),
+// não mais de um segredo na URL. Mesmo com assinatura válida, o corpo só avisa
+// "a order X mudou" — nunca traz o valor pago nem confirma o status por si só,
+// então SEMPRE reconsultamos GET /v1/orders/:id (getOrder) antes de considerar
+// algo pago. Se a assinatura falhar por qualquer motivo, a reconciliação a
+// cada 15 min continua confirmando os pagamentos (só atrasa).
+//
+// '/:legacySecret': o endereço antigo (/webhooks/mercadopago/<segredo>) cai
+// aqui também, mas o trecho da URL é ignorado — vale só a assinatura.
+router.post(['/', '/:legacySecret'], asyncHandler(async (req, res) => {
+  // Só o data.id da query string é assinado — o do corpo não, então não é usado.
+  const orderId = typeof req.query['data.id'] === 'string' ? req.query['data.id'] : '';
+  const valid = verifyWebhookSignature({
+    xSignature: req.header('x-signature'),
+    xRequestId: req.header('x-request-id'),
+    dataId: orderId,
+    secret: config.mercadoPago.webhookSignatureSecret,
+  });
+  if (!valid) {
+    if (!config.mercadoPago.webhookSignatureSecret) console.warn('mercadopago webhook rejected: MERCADOPAGO_WEBHOOK_SIGNATURE_SECRET not configured');
+    return res.status(401).json({ message: 'invalid signature' });
+  }
 
-  // O Mercado Pago manda a notificação tanto por query string (?type=order&data.id=123)
-  // quanto por corpo JSON ({type, data:{id}}), dependendo da configuração — aceitamos os dois.
-  // topic 'order' é o da API de Orders (não 'payment', que é da API de Pagamentos clássica).
-  const orderId = String(req.body?.data?.id || req.query['data.id'] || req.query.id || '');
   const type = String(req.body?.type || req.query.type || '');
   if (type !== 'order' || !orderId) return res.status(200).json({ ignored: true });
 

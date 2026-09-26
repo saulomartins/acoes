@@ -1,4 +1,6 @@
+import { createHmac, timingSafeEqual } from 'crypto';
 import { config } from '../config';
+import { identifyDocument, isAlphanumericCnpj } from './documentService';
 
 // Cobrança Pix da fatura da plataforma, direto na conta Mercado Pago do
 // dono da plataforma (pessoa física) — sem split/marketplace, é um
@@ -13,6 +15,34 @@ const MERCADOPAGO_API_BASE = 'https://api.mercadopago.com';
 
 export const isMercadoPagoConfigured = () => Boolean(config.mercadoPago.accessToken);
 
+// Assinatura do webhook (formato oficial — mesmo do webhook.ValidateSignature
+// do SDK Go do Mercado Pago): o cabeçalho x-signature traz "ts=...,v1=...";
+// v1 é o HMAC-SHA256 em hex, com a "assinatura secreta" da aplicação (painel
+// Suas integrações > Webhooks) como chave, do texto
+//   id:<data.id>;request-id:<x-request-id>;ts:<ts>;
+// data.id vem da query string e entra em minúsculas; um campo ausente sai do
+// texto junto com o rótulo. Comparação em tempo constante. Sem checagem de
+// idade do ts (o SDK também não faz por padrão): quem recebe o aviso sempre
+// reconsulta a order no Mercado Pago, então repetir um aviso antigo não
+// confirma nada que não esteja pago de verdade.
+export const verifyWebhookSignature = (input: { xSignature?: string | null; xRequestId?: string | null; dataId?: string | null; secret: string }): boolean => {
+  if (!input.secret || !input.xSignature) return false;
+  const parts = new Map(
+    input.xSignature.split(',').map((part) => {
+      const [key, ...rest] = part.split('=');
+      return [key.trim(), rest.join('=').trim()] as const;
+    }),
+  );
+  const ts = parts.get('ts');
+  const v1 = parts.get('v1');
+  if (!ts || !v1 || !/^[0-9a-f]+$/i.test(v1)) return false;
+
+  const manifest = `${input.dataId ? `id:${input.dataId.toLowerCase()};` : ''}${input.xRequestId ? `request-id:${input.xRequestId};` : ''}ts:${ts};`;
+  const expected = createHmac('sha256', input.secret).update(manifest).digest();
+  const received = Buffer.from(v1, 'hex');
+  return received.length === expected.length && timingSafeEqual(received, expected);
+};
+
 export type PixChargeInput = {
   amountCents: number;
   description: string;
@@ -21,10 +51,10 @@ export type PixChargeInput = {
   payerFirstName?: string;
   payerLastName?: string;
   // CPF (pessoa física, 11 dígitos) ou CNPJ (pessoa jurídica — síndico
-  // profissional/administradora, 14 dígitos) do síndico/subsíndico pagador.
-  // O mesmo campo `users.cpf` já guarda os dois formatos hoje (ver
-  // maskDocument em userRoutes.ts) — o tipo é detectado pela quantidade de
-  // dígitos, nunca fixo em CPF.
+  // profissional/administradora, 14 posições, numérico ou alfanumérico) do
+  // síndico/subsíndico pagador. O mesmo campo `users.cpf` guarda os dois
+  // formatos (ver documentService.ts) — o tipo é detectado pelo formato,
+  // nunca fixo em CPF.
   payerDocument?: string | null;
   // Padrão: externalReference. Trocar ao gerar um NOVO Pix pra mesma fatura
   // (senão o Mercado Pago devolve a mesma order da primeira tentativa).
@@ -43,47 +73,6 @@ export type PixCharge = {
   expiresAt: string | null;
 };
 
-// Valida o dígito verificador de verdade, não só a quantidade de dígitos —
-// confirmado testando contra a API real: um número do tamanho certo (11 ou
-// 14 dígitos) mas com dígito verificador inválido (dado de teste
-// fabricado, erro de digitação etc.) também faz o Mercado Pago recusar o
-// pagamento com "processing_error". Repetidos (000..., 111...) nunca são
-// válidos e nem passam pelo cálculo.
-const isValidCpf = (digits: string): boolean => {
-  if (digits.length !== 11 || /^(\d)\1+$/.test(digits)) return false;
-  const calc = (len: number) => {
-    let sum = 0;
-    for (let i = 0; i < len; i++) sum += Number(digits[i]) * (len + 1 - i);
-    const result = (sum * 10) % 11;
-    return result === 10 ? 0 : result;
-  };
-  return calc(9) === Number(digits[9]) && calc(10) === Number(digits[10]);
-};
-
-const isValidCnpj = (digits: string): boolean => {
-  if (digits.length !== 14 || /^(\d)\1+$/.test(digits)) return false;
-  const calc = (len: number) => {
-    let sum = 0;
-    let pos = len - 7;
-    for (let i = len; i >= 1; i--) {
-      sum += Number(digits[len - i]) * pos--;
-      if (pos < 2) pos = 9;
-    }
-    const result = sum % 11;
-    return result < 2 ? 0 : 11 - result;
-  };
-  return calc(12) === Number(digits[12]) && calc(13) === Number(digits[13]);
-};
-
-// CPF tem 11 dígitos, CNPJ tem 14 — só manda identification quando o
-// documento cadastrado é um CPF ou CNPJ de verdade (dígito verificador
-// bate); qualquer outra coisa é omitida em vez de travar a cobrança.
-const identificationFor = (document?: string | null): { type: 'CPF' | 'CNPJ'; number: string } | null => {
-  const digits = (document || '').replace(/\D/g, '');
-  if (isValidCpf(digits)) return { type: 'CPF', number: digits };
-  if (isValidCnpj(digits)) return { type: 'CNPJ', number: digits };
-  return null;
-};
 
 // A resposta de uma order traz o pagamento dentro de transactions.payments[0]
 // — esse helper isola o "achar o primeiro pagamento" tanto na resposta de
@@ -98,8 +87,30 @@ const firstPayment = (order: any) => order?.transactions?.payments?.[0] || null;
 export const createPixCharge = async (input: PixChargeInput): Promise<PixCharge> => {
   if (!isMercadoPagoConfigured()) throw new Error('Mercado Pago is not configured (MERCADOPAGO_ACCESS_TOKEN missing)');
 
+  const identification = identifyDocument(input.payerDocument);
+  const idempotencyKey = input.idempotencyKey || input.externalReference;
+  if (!identification || !isAlphanumericCnpj(identification.number)) {
+    return toPixCharge(await postOrder(input, identification, idempotencyKey), input);
+  }
+
+  // CNPJ alfanumérico (emitido desde julho de 2026): não há confirmação
+  // pública de que o Mercado Pago já aceita — e documento que ele não aceita
+  // derruba a cobrança inteira. Tenta com o CNPJ; se falhar ou vier sem Pix,
+  // gera outra order sem identification (outra idempotency key, senão o MP
+  // devolve a order com falha), que é como a cobrança já sai hoje pra
+  // documento omitido.
+  try {
+    const data = await postOrder(input, identification, idempotencyKey);
+    if (firstPayment(data)?.payment_method?.qr_code) return toPixCharge(data, input);
+    console.warn('mercadopago order with alphanumeric CNPJ came without pix, retrying without identification', JSON.stringify(data));
+  } catch (error) {
+    console.warn('mercadopago order with alphanumeric CNPJ failed, retrying without identification', error);
+  }
+  return toPixCharge(await postOrder(input, null, `${idempotencyKey}-sem-documento`), input);
+};
+
+const postOrder = async (input: PixChargeInput, identification: ReturnType<typeof identifyDocument>, idempotencyKey: string): Promise<any> => {
   const amountReais = (Math.round(input.amountCents) / 100).toFixed(2);
-  const identification = identificationFor(input.payerDocument);
   const body: Record<string, unknown> = {
     type: 'online',
     total_amount: amountReais,
@@ -115,14 +126,13 @@ export const createPixCharge = async (input: PixChargeInput): Promise<PixCharge>
       email: input.payerEmail,
       ...(input.payerFirstName ? { first_name: input.payerFirstName } : {}),
       ...(input.payerLastName ? { last_name: input.payerLastName } : {}),
-      // Detecta CPF (11 dígitos) vs CNPJ (14) pela quantidade de dígitos —
-      // muitos síndicos são profissionais/administradoras com CNPJ, não
-      // pessoa física. Confirmado testando contra a API real: mandar um
-      // número de 14 dígitos rotulado como `type: 'CPF'` faz o Mercado
-      // Pago recusar o pagamento inteiro com "processing_error", sem
-      // detalhar o motivo — por isso o tipo tem que bater com o tamanho.
-      // Documento com outro tamanho (dado sujo) não é enviado, pra não
-      // travar a cobrança por causa disso.
+      // CPF vs CNPJ detectado pelo formato (documentService.ts) — muitos
+      // síndicos são profissionais/administradoras com CNPJ, não pessoa
+      // física. Confirmado testando contra a API real: mandar um CNPJ
+      // rotulado como `type: 'CPF'` faz o Mercado Pago recusar o pagamento
+      // inteiro com "processing_error", sem detalhar o motivo — por isso o
+      // tipo tem que bater. Documento inválido (dado sujo) não é enviado,
+      // pra não travar a cobrança por causa disso.
       ...(identification ? { identification } : {}),
     },
   };
@@ -131,7 +141,8 @@ export const createPixCharge = async (input: PixChargeInput): Promise<PixCharge>
   // não permitida" — confirmado testando contra a API real). O webhook pro
   // tópico 'order' tem que ser cadastrado no painel do Mercado Pago
   // (Sua aplicação > Webhooks), apontando pra
-  // `${API_PUBLIC_URL}/webhooks/mercadopago/${MERCADOPAGO_WEBHOOK_SECRET}`.
+  // `${API_PUBLIC_URL}/webhooks/mercadopago` — a autenticidade vem da
+  // assinatura x-signature (verifyWebhookSignature), não da URL.
 
   const response = await fetch(`${MERCADOPAGO_API_BASE}/v1/orders`, {
     method: 'POST',
@@ -140,13 +151,16 @@ export const createPixCharge = async (input: PixChargeInput): Promise<PixCharge>
       'Content-Type': 'application/json',
       // Evita cobrança duplicada se a chamada for repetida (ex.: retry de
       // rede) — mesma referência da fatura, sempre a mesma idempotency key.
-      'X-Idempotency-Key': input.idempotencyKey || input.externalReference,
+      'X-Idempotency-Key': idempotencyKey,
     },
     body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => null) as any;
   if (!response.ok) throw new Error(`Mercado Pago returned ${response.status}: ${JSON.stringify(data)}`);
+  return data;
+};
 
+const toPixCharge = (data: any, input: PixChargeInput): PixCharge => {
   const payment = firstPayment(data);
   const pixMethod = payment?.payment_method;
   if (!pixMethod?.qr_code) {

@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { notifyDueSoonInvoices, transitionOverdueInvoices } from '../services/invoiceReminderService';
-import { generatePlatformInvoices, notifyPlatformInvoiceReminders, reconcilePlatformInvoices } from '../services/platformInvoiceService';
+import { generatePlatformInvoices, notifyPlatformInvoiceReminders, reconcilePlatformInvoices, renewExpiredPlatformInvoicePix } from '../services/platformInvoiceService';
+import { notifyPlatformSuspensionReminders } from '../services/platformSuspensionService';
 
 const runDailyChecks = async () => {
   try {
@@ -15,6 +16,9 @@ const runDailyChecks = async () => {
     if (reconciled.paid) console.log(`Faturas da plataforma: ${reconciled.paid} pagamento(s) confirmado(s) na reconciliação.`);
     const reminders = await notifyPlatformInvoiceReminders();
     if (reminders.dueSoon || reminders.overdue) console.log(`Faturas da plataforma: ${reminders.dueSoon} lembrete(s) de vencimento, ${reminders.overdue} de atraso.`);
+    // Política de inadimplência: avisos de 7/15/25 dias e o de gestão restrita (30).
+    const suspension = await notifyPlatformSuspensionReminders();
+    if (suspension.warnings || suspension.restricted) console.log(`Faturas da plataforma: ${suspension.warnings} aviso(s) de suspensão, ${suspension.restricted} condomínio(s) com gestão restrita.`);
   } catch (error) {
     console.error('Falha ao rodar os lembretes diários de boleto', error);
   }
@@ -39,6 +43,13 @@ export const startBillingReminderScheduler = () => {
     try {
       const reconciled = await reconcilePlatformInvoices();
       if (reconciled.paid) console.log(`Faturas da plataforma: ${reconciled.paid} pagamento(s) confirmado(s) na reconciliação.`);
+      // Pix expirado de fatura ainda em aberto: gera outro e reenvia por
+      // e-mail (antes dependia do admin clicar "Gerar novo Pix"). Só aqui,
+      // não no job diário das 9h — que coincide com esta rodada das 9h00.
+      const renewal = await renewExpiredPlatformInvoicePix();
+      if (renewal.renewed || renewal.paid || renewal.failed) {
+        console.log(`Faturas da plataforma: Pix expirado — ${renewal.renewed} renovado(s), ${renewal.paid} já estava(m) pago(s), ${renewal.failed} com falha.`);
+      }
     } catch (error) {
       console.error('Falha na reconciliação das faturas da plataforma', error);
     }
