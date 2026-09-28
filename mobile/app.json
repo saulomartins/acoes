@@ -3,7 +3,7 @@
     "name": "Lar em Dia",
     "slug": "lar-em-dia",
     "scheme": "laremdia",
-    "version": "1.5.1",
+    "version": "1.5.2",
     "orientation": "portrait",
     "icon": "./assets/lar-em-dia-icon.png",
     "ios": {
@@ -16,7 +16,7 @@
       "googleServicesFile": "./google-services.json",
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/lar-em-dia-icon.png",
+        "foregroundImage": "./assets/lar-em-dia-adaptive-icon.png",
         "backgroundColor": "#F6F8FA"
       }
     },
