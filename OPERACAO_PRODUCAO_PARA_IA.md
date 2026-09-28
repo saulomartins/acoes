@@ -1137,3 +1137,51 @@ simples (`123456`) funciona.
   confirmados pela reconciliação de 15 min. Conferir no PRIMEIRO pagamento
   real que o webhook respondeu 200 (logs do Railway), já que o formato da
   assinatura não pôde ser testado contra o Mercado Pago de verdade.
+
+## Publicação de 28/09/2026 — sessão do app não cai mais depois de um tempo parado, Android 1.5.1
+
+Commits `f1d183e`, `1b9f228` e `76d6e11` na branch
+`feat/cobranca-plataforma-2026-09-26`.
+
+- **Banco ANTES da API** (inverso do passo 3 de sempre): a API nova lê
+  `refresh_tokens.replaced_by` em todo `/auth/refresh`; sem a coluna, toda
+  renovação falharia (401) e o app novo mandaria todo mundo para o Login. A
+  coluna foi criada no contêiner ainda com a API antiga, pelo usuário:
+  `railway ssh ... 'node -e ''const {query}=require(`./dist/db`);query(`alter table refresh_tokens add column if not exists replaced_by uuid references refresh_tokens(id) on delete set null`)...'''`
+  → `ok`. No PowerShell 5.1, aspas duplas dentro do argumento somem ao
+  chegar no bash do contêiner (erro `syntax error near unexpected token`):
+  usar aspas simples por fora e crase nas strings do JavaScript.
+- API: primeiro `railway up` rodou a partir de `APP COND` (pasta acima do
+  repositório) e falhou em `railpack prepare exited with an error` (deploy
+  `5476b147`); a partir de `externals` subiu: deployment
+  `f724d4b5-9cfa-423b-9da6-27b6af8366f1`, `SUCCESS`, boot limpo. Rollback: o
+  anterior era `3f0592e8-28ff-49e4-957a-5406813643bb`.
+- Web: `gestaolaremdia.com` servindo `AppEntry-c0cb880a2d381caff56ad5e01c1d2124.js`
+  (o mesmo do build local).
+- Smoke: `/health` 200, site 200, `/auth/refresh` com token inválido 401.
+- Android: versão `1.5.1`, versionCode 36, build EAS
+  `d13a62b8-709d-41d9-aa9e-11325c0a17f2`, validado com `--no-publish`
+  (`releases/lar-em-dia-1.5.1-build-36-production.apk`, SHA-256
+  `5B34D74CE19FF01D18C9AC32096484636121200321DD935178EC7321D2CA7988`, v2,
+  mesma chave pública `2dd2dd1a3b0b3024…`). Publicação na central "Instalar
+  aplicativo": `npm run release:apk:resume -- --build-id d13a62b8-709d-41d9-aa9e-11325c0a17f2`
+  (usa `railway ssh`) ou envio do APK pela tela como admin_geral.
+
+### O que mudou
+- **Menu e "Acesso rápido" vazios após 15 min em segundo plano** (app): o
+  `AuthContext` guardava o access token de quando o app abriu, e o `/auth/me`
+  das funcionalidades (fetch direto) dava 401 com ele vencido; a falha virava
+  `condominiumFeatures = {}` e escondia tudo — mesma assinatura do incidente
+  de 18/08, mas sem erro no servidor. Agora `client.ts` avisa o contexto a
+  cada renovação (`onSessionRefreshed`), o `/auth/me` passa por `apiRequest` e
+  uma falha passageira mantém as funcionalidades já carregadas.
+- **Sessão encerrada no servidor** (401 no `/auth/refresh`): o app volta ao
+  Login com "Sua sessão expirou. Entre novamente." em vez de ficar "logado"
+  com todas as telas falhando. Rede fora ou 5xx não desloga.
+- **Resposta de renovação perdida não derruba mais tudo** (API): cada rotação
+  grava a sessão substituta em `replaced_by`. Reapresentar o token anterior
+  enquanto a substituta nunca renovou (celular perdeu a resposta) descarta a
+  substituta e rotaciona de novo; se a substituta já seguiu adiante, é reuso
+  real e todas as sessões caem, como antes. Sessão revogada por logout não
+  derruba mais as outras (sair no navegador não tira o celular).
+- Cabeçalho da tela Comunicação não espreme mais o título em celular.
