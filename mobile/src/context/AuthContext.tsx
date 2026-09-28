@@ -1,7 +1,7 @@
 import React, { createContext, ReactNode, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { API_BASE_URL, apiRequest, onPlatformSuspended, refreshSession } from '../api/client';
+import { API_BASE_URL, apiRequest, onPlatformSuspended, onSessionExpired, onSessionRefreshed, refreshSession } from '../api/client';
 import { registerForPushNotifications, unregisterPushNotifications } from '../services/pushNotifications';
 
 type UserRole = 'admin_geral' | 'sindico' | 'subsindico' | 'proprietario' | 'inquilino';
@@ -229,7 +229,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  useEffect(() => { void checkPlatformAccess(userToken, user?.role); }, [userToken, user?.id, user?.role]);
+  // Os efeitos abaixo dependem de "está logado", não do token em si: o token
+  // muda a cada renovação (15 min) e isso não deve recarregar menu, perfis ou
+  // o registro de push. As chamadas usam apiRequest, que lê o token atual.
+  const signedIn = !!userToken;
+
+  useEffect(() => { void checkPlatformAccess(userToken, user?.role); }, [signedIn, user?.id, user?.role]);
   useEffect(() => onPlatformSuspended(message => {
     if (user && RESIDENT_ROLES.includes(user.role)) setPlatformSuspendedMessage(message);
   }), [user?.id, user?.role]);
@@ -238,6 +243,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const token = (await storage.get('userToken')) || userToken;
     await checkPlatformAccess(token, user?.role);
   };
+
+  useEffect(() => {
+    const stopRefreshed = onSessionRefreshed(session => {
+      setUserToken(session.token);
+      if (session.user) setUser(session.user as AuthUser);
+    });
+    const stopExpired = onSessionExpired(() => {
+      void clearAuth();
+      setUserToken(null);
+      setUser(null);
+      setNeedsProfileSelection(false);
+      setNativeAccessBlocked(false);
+      setAuthError('Sua sessão expirou. Entre novamente.');
+    });
+    return () => { stopRefreshed(); stopExpired(); };
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -259,6 +280,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               setUser(result.user as AuthUser);
               return;
             }
+            // Sessão encerrada no servidor: onSessionExpired já limpou tudo.
+            if (!result) return;
           } catch (error) {
             // Se estiver offline, mantém a sessão já armazenada no aparelho.
             console.warn('Could not refresh auth session', error);
@@ -308,7 +331,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
 
     return () => { active = false; };
-  }, [userToken, user?.id]);
+  }, [signedIn, user?.id]);
 
   useEffect(() => {
     if (!userToken || !user) {
@@ -320,17 +343,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
     let active = true;
-    const loadFeatures = () => fetch(`${API_BASE_URL}/auth/me`, { headers: { Authorization: `Bearer ${userToken}` } })
-      .then(response => response.ok ? response.json() : null)
-      .then((data: { condominiumFeatures?: Record<FeatureKey, boolean> | null } | null) => {
+    // apiRequest usa o token salvo e renova se venceu. Numa falha (offline,
+    // servidor fora) mantém as funcionalidades já carregadas — zerar aqui
+    // esconderia o menu inteiro por causa de um erro passageiro.
+    const loadFeatures = () => apiRequest<{ condominiumFeatures?: Record<FeatureKey, boolean> | null }>('/auth/me', userToken)
+      .then(data => {
         if (active) setCondominiumFeatures(data?.condominiumFeatures ?? ({} as Record<FeatureKey,boolean>));
       })
-      .catch(() => { if (active) setCondominiumFeatures({} as Record<FeatureKey,boolean>); });
+      .catch(() => { if (active) setCondominiumFeatures(current => current ?? ({} as Record<FeatureKey,boolean>)); });
     setCondominiumFeatures(null);
     loadFeatures();
     const timer=setInterval(loadFeatures,60_000);
     return () => { active = false; clearInterval(timer); };
-  }, [userToken, user?.id, user?.role]);
+  }, [signedIn, user?.id, user?.role]);
 
   useEffect(() => {
     if (!userToken || !user) {
@@ -343,7 +368,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .then(list => { if (active) { setProfiles(list); setProfilesLoaded(true); } })
       .catch(() => { if (active) { setProfiles([]); setProfilesLoaded(true); } });
     return () => { active = false; };
-  }, [userToken, user?.id]);
+  }, [signedIn, user?.id]);
 
   // No app nativo, o perfil ativo nunca pode ficar em síndico/subsíndico/admin
   // (isso é o que fazia aparecer opções de gestão no menu — o menu já filtra

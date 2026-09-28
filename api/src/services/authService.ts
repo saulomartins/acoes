@@ -79,6 +79,19 @@ const createSession = async (user: AuthenticatedUser) => {
   };
 };
 
+// Troca a sessão `oldSid` por uma nova e registra a substituta em
+// replaced_by — é isso que validateRefreshSession usa para distinguir perda
+// de resposta (recupera) de reuso de token vazado (derruba tudo).
+const rotateSession = async (oldSid: string, user: AuthenticatedUser) => {
+  const response = await createSession(user);
+  const newSid = (jwt.decode(response.refreshToken) as { sid: string }).sid;
+  await query(
+    `update refresh_tokens set revoked_at = coalesce(revoked_at, now()), replaced_by = $2 where id = $1`,
+    [oldSid, newSid],
+  );
+  return response;
+};
+
 const findUserById = async (id: string) => {
   const result = await query<DbUser>(
     `select u.id, u.username, u.password_hash, u.role, u.condominium_id, u.full_name, u.must_change_password, u.terms_accepted_version, u.terms_accepted_at, u.tour_completed_version, u.tour_completed_at, c.name condominium_name
@@ -118,8 +131,8 @@ const resolveActiveProfile = async (
 // validação antes de decidir qual perfil ativar.
 const validateRefreshSession = async (refreshToken: string) => {
   const payload = jwt.verify(refreshToken, config.refreshTokenSecret) as { sub: string; sid: string };
-  const sessionResult = await query<{ id: string; token_hash: string; revoked_at: Date | null; active_profile_id: string | null }>(
-    `select id, token_hash, revoked_at, active_profile_id
+  const sessionResult = await query<{ id: string; token_hash: string; revoked_at: Date | null; active_profile_id: string | null; replaced_by: string | null }>(
+    `select id, token_hash, revoked_at, active_profile_id, replaced_by
      from refresh_tokens
      where id = $1 and user_id = $2 and expires_at > now()`,
     [payload.sid, payload.sub],
@@ -131,11 +144,33 @@ const validateRefreshSession = async (refreshToken: string) => {
   }
 
   if (session.revoked_at) {
-    // O hash bate com um token já rotacionado (revogado) — isso só acontece
-    // se alguém reapresentar um refresh token antigo que já foi trocado por
-    // um novo, sinal de que o token vazou. Resposta: derruba todas as
-    // sessões ativas do usuário, não só nega esta tentativa.
-    await query(`update refresh_tokens set revoked_at = now() where user_id = $1 and revoked_at is null`, [payload.sub]);
+    // Revogada por logout, suspensão, troca de senha etc. (não por rotação):
+    // só nega. Derrubar as outras sessões aqui tiraria do app, por exemplo,
+    // o celular de quem apenas saiu da conta no navegador.
+    if (!session.replaced_by) return null;
+
+    // Revogada por rotação. Se a sessão que a substituiu nunca foi usada
+    // para renovar (continua ativa), o caso comum é o celular ter perdido a
+    // resposta da renovação (sinal fraco, app fechado no meio) e ainda ter só
+    // este token: descarta a substituta e deixa esta sessão ser rotacionada
+    // de novo. Sem isso, a pessoa era deslogada de todos os aparelhos.
+    const child = await query<{ id: string; active_profile_id: string | null }>(
+      `update refresh_tokens set revoked_at = now()
+       where id = $1 and user_id = $2 and revoked_at is null
+       returning id, active_profile_id`,
+      [session.replaced_by, payload.sub],
+    );
+    if (child.rows[0]) {
+      return { sid: payload.sid as string, userId: payload.sub as string, activeProfileId: child.rows[0].active_profile_id };
+    }
+
+    // A substituta também já foi rotacionada: alguém reapresentou um token
+    // antigo depois que a sessão seguiu adiante — sinal de que o token vazou.
+    // Resposta: derruba todas as sessões ativas do usuário.
+    const next = await query<{ replaced_by: string | null }>(`select replaced_by from refresh_tokens where id = $1`, [session.replaced_by]);
+    if (next.rows[0]?.replaced_by) {
+      await query(`update refresh_tokens set revoked_at = now() where user_id = $1 and revoked_at is null`, [payload.sub]);
+    }
     return null;
   }
 
@@ -238,9 +273,7 @@ export const refresh = async (refreshToken: string) => {
   const activeProfile = await resolveActiveProfile(session.activeProfileId, user);
 
   // Rotaciona sessões antigas para a política persistente atual.
-  const response = await createSession({ ...publicUser(user), ...activeProfile });
-  await query(`update refresh_tokens set revoked_at = now() where id = $1 and revoked_at is null`, [session.sid]);
-  return response;
+  return rotateSession(session.sid, { ...publicUser(user), ...activeProfile });
 };
 
 // Perfis disponíveis para este login: o padrão (a própria linha em `users`,
@@ -284,9 +317,7 @@ export const switchProfile = async (refreshToken: string, profileId: string | nu
   }
 
   const activeProfile = await resolveActiveProfile(profileId, user);
-  const response = await createSession({ ...publicUser(user), ...activeProfile });
-  await query(`update refresh_tokens set revoked_at = now() where id = $1 and revoked_at is null`, [session.sid]);
-  return response;
+  return rotateSession(session.sid, { ...publicUser(user), ...activeProfile });
 };
 
 export const revokeRefreshToken = async (refreshToken: string) => {

@@ -323,6 +323,12 @@ create table if not exists refresh_tokens (
 -- para o perfil padrão no meio de uma sessão trocada via switch-profile.
 alter table refresh_tokens add column if not exists active_profile_id uuid references user_profiles(id) on delete set null;
 
+-- Sessão que substituiu esta na rotação (refresh/switch-profile). Diferencia
+-- "revogada por rotação" de "revogada por logout/suspensão" e permite
+-- recuperar a sessão quando o celular perdeu a resposta da renovação (ver
+-- validateRefreshSession em authService.ts).
+alter table refresh_tokens add column if not exists replaced_by uuid references refresh_tokens(id) on delete set null;
+
 create table if not exists password_reset_tokens (
   id uuid primary key,
   user_id uuid not null references users(id) on delete cascade,

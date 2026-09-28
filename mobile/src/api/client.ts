@@ -40,6 +40,28 @@ const authStorage = {
 // sua própria requisição a /auth/refresh.
 let refreshInFlight: Promise<{ token: string; user?: unknown } | null> | null = null;
 
+// O AuthContext guarda o access token em estado; sem este aviso ele ficava
+// com o token de quando o app abriu e, depois de 15 min em segundo plano,
+// chamadas feitas com ele (ex.: /auth/me das funcionalidades) davam 401 e o
+// menu ficava vazio mesmo com a sessão válida.
+type RefreshedSession = { token: string; user?: unknown };
+const sessionRefreshedListeners = new Set<(session: RefreshedSession) => void>();
+export const onSessionRefreshed = (listener: (session: RefreshedSession) => void) => {
+  sessionRefreshedListeners.add(listener);
+  return () => { sessionRefreshedListeners.delete(listener); };
+};
+
+// Sessão revogada ou vencida no servidor: o AuthContext volta para o Login
+// com um aviso, em vez de manter o app "logado" com todas as telas falhando.
+const sessionExpiredListeners = new Set<() => void>();
+export const onSessionExpired = (listener: () => void) => {
+  sessionExpiredListeners.add(listener);
+  return () => { sessionExpiredListeners.delete(listener); };
+};
+
+// Retorna null só quando a sessão não existe mais (sem refresh token ou 401
+// do servidor). Falha de rede ou erro 5xx lança exceção — são temporárias e
+// não devem tirar ninguém do app.
 export const refreshSession = async () => {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
@@ -52,12 +74,18 @@ export const refreshSession = async () => {
       body: JSON.stringify({ refreshToken }),
     });
     const data = (await response.json().catch(() => null)) as { token?: string; refreshToken?: string; user?: unknown } | null;
-    if (!response.ok || !data?.token) return null;
+    if (response.status === 401) {
+      sessionExpiredListeners.forEach(listener => listener());
+      return null;
+    }
+    if (!response.ok || !data?.token) throw new Error(`Falha ao renovar a sessão (HTTP ${response.status})`);
 
     await authStorage.set('userToken', data.token);
     if (data.refreshToken) await authStorage.set('refreshToken', data.refreshToken);
     if (data.user) await authStorage.set('authUser', JSON.stringify(data.user));
-    return { token: data.token, user: data.user };
+    const session = { token: data.token, user: data.user };
+    sessionRefreshedListeners.forEach(listener => listener(session));
+    return session;
   })();
   try {
     return await refreshInFlight;
@@ -66,7 +94,7 @@ export const refreshSession = async () => {
   }
 };
 
-const refreshAccessToken = async () => (await refreshSession())?.token ?? null;
+const refreshAccessToken = async () => (await refreshSession().catch(() => null))?.token ?? null;
 
 // Condomínio suspenso por inadimplência (api: middleware/auth.ts responde 403
 // com code PLATFORM_SUSPENDED pra moradores). Qualquer chamada que receba isso
