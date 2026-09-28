@@ -236,21 +236,17 @@ export default function Communications({ navigation }: any) {
           />
         }
       >
+        <View>
+          <Text style={styles.eyebrow}>AVISOS DO CONDOMÍNIO</Text>
+          <Text style={styles.pageTitle}>Comunicação</Text>
+          <Text style={styles.subtitle}>
+            Mensagens da administração para todos os moradores.
+          </Text>
+        </View>
         <View style={styles.heading}>
-          <View style={styles.grow}>
-            <View style={styles.headerRow}>
-              <View style={styles.grow}>
-                <Text style={styles.eyebrow}>AVISOS DO CONDOMÍNIO</Text>
-                <Text style={styles.pageTitle}>Comunicação</Text>
-                <Text style={styles.subtitle}>
-                  Mensagens da administração para todos os moradores.
-                </Text>
-              </View>
-              <Pressable onPress={openTour} style={styles.tourButton}>
-                <Text style={styles.tourButtonText}>? Tour desta tela</Text>
-              </Pressable>
-            </View>
-          </View>
+          <Pressable onPress={openTour} style={styles.tourButton}>
+            <Text style={styles.tourButtonText}>? Tour desta tela</Text>
+          </Pressable>
           <View style={styles.counter}>
             <Text style={styles.counterValue}>{unread}</Text>
             <Text style={styles.counterLabel}>
@@ -527,10 +523,11 @@ const styles = StyleSheet.create({
   desktopCap: { maxWidth: 860, alignSelf: "center", width: "100%" },
   heading: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
     flexWrap: "wrap",
-    gap: 16,
+    gap: 12,
+    marginTop: 12,
   },
   eyebrow: {
     color: colors.primary,
