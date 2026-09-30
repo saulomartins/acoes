@@ -1228,3 +1228,29 @@ renova em 01/10).
 - O Conselho Fiscal no **app nativo** só vê o painel do extrato a partir da
   build 1.6.1 (código JS já no commit, mas não há OTA para o runtime 1.6.1
   antes da build existir).
+
+## Publicação de 30/09/2026 (2) — limpeza automática de APKs no volume
+
+Commits `5509bd9` e `f641c78`. Só a API (o web não mudou).
+
+- **Motivo**: o volume `acoes-volume` (`/data`, 434 MB) estava em 79%, com 5
+  APKs de ~70 MB em `/data/mobile-releases`. Nada apagava os builds antigos:
+  foi o mesmo problema do ENOSPC de 13/09. A próxima publicação passaria de 90%.
+- **Agora**: `api/src/services/mobileReleaseStorage.ts` mantém só os **2 APKs
+  mais recentes**. A versão ativa mais nova sempre fica. As linhas e os
+  arquivos das versões antigas são apagados, e APKs órfãos com mais de 1 h
+  também. Roda ao publicar APK (tela de admin e `seedAndroidRelease`) e a cada
+  subida da API. **Não é mais preciso limpar `/data` na mão.**
+- **Primeiro deploy (`9a2ecf0c`) falhou na limpeza**: o update que zerava
+  `file_path` violou `mobile_releases_check` (toda linha precisa de arquivo ou
+  link externo), depois de já ter apagado o APK da 1.3.4 build 29. A central
+  continuou servindo a 1.5.1. Corrigido em `f641c78` (apaga a linha) e
+  validado contra o Postgres local antes de republicar.
+- **Deploy final**: `0b6117f6-a967-4281-98f1-100397bf9521`, `SUCCESS`. Log
+  `Removed 2 old APK file(s), freed 133 MB`; `/data` em **32%** (133 MB). Em
+  `mobile_releases` ficaram só a 1.5.1 build 36 e a 1.4.0 build 32, as duas
+  ativas e com arquivo. `/health` 200.
+- **APK menor**: `mobile/plugins/withAndroidAbis.js` + `ANDROID_ABIS` nos
+  perfis `preview` e `production-apk` compilam só `armeabi-v7a,arm64-v8a`,
+  sem x86/x86_64. Vale a partir do próximo APK. O AAB (`production`) segue
+  com as 4 arquiteturas.
