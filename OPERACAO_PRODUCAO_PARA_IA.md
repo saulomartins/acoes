@@ -1185,3 +1185,46 @@ Commits `f1d183e`, `1b9f228` e `76d6e11` na branch
   real e todas as sessões caem, como antes. Sessão revogada por logout não
   derruba mais as outras (sair no navegador não tira o celular).
 - Cabeçalho da tela Comunicação não espreme mais o título em celular.
+
+## Publicação de 30/09/2026 — extrato bancário obrigatório na prestação de contas
+
+Commits `39df5e9`, `5134dde` e `529b0c9` na branch
+`feat/cobranca-plataforma-2026-09-26` (API + web; o Android 1.6.1 ficou
+pendente porque a cota gratuita de builds Android do EAS acabou em 30/09 e
+renova em 01/10).
+
+- **Banco ANTES da API** (mesmo motivo de 28/09): a API nova consulta
+  `accountability_report_statements` em toda listagem/abertura de prestação de
+  contas; sem a tabela, a tela quebraria para todos os condomínios. A tabela
+  foi criada **pelo usuário no painel do Railway** (Postgres → Data → Query),
+  colando o `create table if not exists accountability_report_statements (...)`
+  do `schema.sql`. Motivo: o `railway ssh ... node -e` com escrita no banco foi
+  barrado pelo classificador do Claude Code ("Remote Shell Writes"), mesmo com
+  a regra `Bash(railway.cmd ssh:*)` no `settings.local.json`. Para migrações
+  futuras feitas por IA, o caminho que funciona é pedir ao usuário para rodar
+  o SQL no painel.
+- API: `railway up` a partir de `externals` → deployment
+  `5a420362-d8d1-4983-97f4-42a813eea5a2`, `SUCCESS`, boot limpo, sem erros no
+  log. Rollback: o anterior era `f724d4b5-9cfa-423b-9da6-27b6af8366f1`.
+- Web: deploy `https://a19f39d3.lar-em-dia.pages.dev`;
+  `gestaolaremdia.com` servindo `AppEntry-9e421729814ebefa9720d0340b5b785d.js`
+  (o mesmo do build local, com a URL de produção e sem `localhost`).
+- Smoke: `/health` 200, site 200, CORS 204,
+  `/accountability/:id/statement` sem token 401.
+
+### O que mudou
+- **Extrato bancário do mês obrigatório** para salvar uma prestação de contas
+  nova. No formulário: "Buscar extrato do banco" (PDF do Inter para o mês,
+  enviado junto ao salvar; barra extrato de outro mês) ou "Anexar arquivo do
+  extrato" (PDF/JPG/PNG/WEBP até 10 MB). A obrigatoriedade é aplicada na tela;
+  a API aceita criar sem extrato porque o arquivo sobe logo após a criação.
+- `POST/GET/DELETE /accountability/:id/statement`. O extrato é visível **só**
+  para síndico, subsíndico e Conselho Fiscal 1/2 (os assentos da
+  homologação). Os demais moradores recebem 403 e nem recebem os campos
+  `has_statement`/`statement_*`. Guardado inline ou no Google Drive do
+  condomínio, como os recibos.
+- Prestações antigas sem extrato aparecem no histórico como "Extrato bancário
+  pendente".
+- O Conselho Fiscal no **app nativo** só vê o painel do extrato a partir da
+  build 1.6.1 (código JS já no commit, mas não há OTA para o runtime 1.6.1
+  antes da build existir).
