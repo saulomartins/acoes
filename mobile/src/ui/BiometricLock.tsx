@@ -10,15 +10,18 @@ import {
   authenticateWithBiometrics,
   BiometricKind,
   getBiometricKind,
+  getLastActiveAt,
   isBiometricAvailable,
   isBiometricEnabled,
   markBiometricAsked,
+  recordLastActive,
   setBiometricEnabled,
   wasBiometricAsked,
 } from '../services/biometricAuth';
 
-// Tempo em segundo plano a partir do qual o app pede a biometria de novo ao
-// voltar. Curto demais irritaria quem sai para copiar um código Pix e volta.
+// Tempo fora do app (minimizado ou fechado) a partir do qual a biometria é
+// pedida de novo. Curto demais irritaria quem sai para copiar um código Pix
+// e volta.
 const RELOCK_AFTER_MS = 5 * 60 * 1000;
 
 type GateState = 'checking' | 'locked' | 'open';
@@ -30,9 +33,9 @@ const kindCopy: Record<BiometricKind, { noun: string }> = {
 };
 
 // Trava do app nativo: cobre a navegação (sem desmontá-la) enquanto a
-// biometria não for confirmada. Entra em dois momentos:
-//  - retomada silenciosa de sessão (reabrir o app com a sessão salva);
-//  - volta do segundo plano depois de RELOCK_AFTER_MS.
+// biometria não for confirmada. Entra quando a pessoa passou RELOCK_AFTER_MS
+// ou mais fora do app, seja voltando do segundo plano, seja reabrindo o app
+// do zero com a sessão salva.
 // Login explícito com senha nunca trava — em vez disso, oferece ativar a
 // biometria uma única vez por usuário neste aparelho.
 export default function BiometricGate({ children }: { children: ReactNode }) {
@@ -77,8 +80,12 @@ function NativeBiometricGate({ children }: { children: ReactNode }) {
     if (isLoading || restoreChecked.current) return;
     restoreChecked.current = true;
     previousToken.current = userToken;
-    if (userToken && userId) void lockIfEnabled(userId);
-    else setState('open');
+    if (!userToken || !userId) { setState('open'); return; }
+    void (async () => {
+      const lastActiveAt = await getLastActiveAt();
+      if (lastActiveAt && Date.now() - lastActiveAt < RELOCK_AFTER_MS) setState('open');
+      else await lockIfEnabled(userId);
+    })();
   }, [isLoading, userToken, userId, lockIfEnabled]);
 
   // Depois da restauração: sessão que surge do nada é login explícito
@@ -102,6 +109,9 @@ function NativeBiometricGate({ children }: { children: ReactNode }) {
     const subscription = AppState.addEventListener('change', next => {
       if (next === 'background') {
         backgroundedAt.current = Date.now();
+        // Só com o app destravado: sair da tela de bloqueio e reabrir em
+        // seguida não pode contar como "estava em uso" e pular a digital.
+        if (userToken && state === 'open') void recordLastActive();
         return;
       }
       if (next !== 'active' || backgroundedAt.current === null) return;

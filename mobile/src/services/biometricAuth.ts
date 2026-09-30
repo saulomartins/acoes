@@ -36,6 +36,16 @@ export const wasBiometricAsked = async (userId: string) => (await storage.get(as
 
 export const markBiometricAsked = (userId: string) => storage.set(askedKey(userId), 'true');
 
+// Último momento em que o app estava destravado e em uso — gravado ao ir
+// para o segundo plano. Fica no aparelho (e não só em memória) porque o
+// Android costuma encerrar o app em segundo plano: sem isso, reabrir 10
+// segundos depois contava como "abrir do zero" e pedia a digital toda vez.
+const LAST_ACTIVE_KEY = 'biometricLastActiveAt';
+
+export const recordLastActive = () => storage.set(LAST_ACTIVE_KEY, String(Date.now()));
+
+export const getLastActiveAt = async () => Number((await storage.get(LAST_ACTIVE_KEY)) || 0) || null;
+
 // disableDeviceFallback: false deixa o sistema oferecer o PIN/padrão do
 // aparelho quando a biometria falha várias vezes — mesmo nível de proteção
 // do bloqueio de tela, e evita que um dedo machucado tranque o morador fora.
