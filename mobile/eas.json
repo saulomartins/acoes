@@ -15,7 +15,8 @@
       "android": { "buildType": "apk" },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://acoes-production.up.railway.app",
-        "EXPO_PUBLIC_EAS_PROJECT_ID": "6c015dce-36b8-4c36-841b-23ea66a334ee"
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "6c015dce-36b8-4c36-841b-23ea66a334ee",
+        "ANDROID_ABIS": "armeabi-v7a,arm64-v8a"
       }
     },
     "production-apk": {
@@ -25,7 +26,8 @@
       "android": { "buildType": "apk" },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://acoes-production.up.railway.app",
-        "EXPO_PUBLIC_EAS_PROJECT_ID": "6c015dce-36b8-4c36-841b-23ea66a334ee"
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "6c015dce-36b8-4c36-841b-23ea66a334ee",
+        "ANDROID_ABIS": "armeabi-v7a,arm64-v8a"
       }
     },
     "production": {

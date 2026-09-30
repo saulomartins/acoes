@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from 'fs';
 import { basename, resolve } from 'path';
 import dotenv from 'dotenv';
 import { Pool } from 'pg';
+import { pruneAndroidReleaseFiles } from '../services/mobileReleaseStorage';
 
 dotenv.config();
 
@@ -25,6 +26,7 @@ mkdirSync(directory, { recursive: true });
   );
   if (existing.rows[0]?.file_path) {
     await pool.query('update mobile_releases set active=true,published_at=now() where id=$1', [existing.rows[0].id]);
+    console.log('Pruned old APKs:', await pruneAndroidReleaseFiles((text, params) => pool.query(text, params), directory));
     await pool.end();
     console.log(`Android ${version} build ${buildNumber} already exists and was promoted.`);
     return;
@@ -46,6 +48,8 @@ mkdirSync(directory, { recursive: true });
         id,platform,version,build_number,release_notes,file_path,file_name,file_size,mime_type,active,published_at
       ) values($1,'android',$2,$3,$4,$5,$6,$7,'application/vnd.android.package-archive',true,now())
     `, [id, version, buildNumber, 'Versão oficial de produção do Lar em Dia.', filePath, basename(fileName), bytes.length]);
+    // Só os APKs mais recentes ficam no volume (ver mobileReleaseStorage.ts).
+    console.log('Pruned old APKs:', await pruneAndroidReleaseFiles((text, params) => pool.query(text, params), directory));
   } finally {
     await pool.end();
   }

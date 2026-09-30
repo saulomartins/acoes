@@ -28,6 +28,7 @@
     "plugins": [
       "expo-secure-store",
       "expo-updates",
+      "./plugins/withAndroidAbis",
       [
         "expo-local-authentication",
         {

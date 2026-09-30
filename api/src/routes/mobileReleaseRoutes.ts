@@ -7,9 +7,10 @@ import multer from 'multer';
 import { query } from '../db';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { authenticate, authorize } from '../middleware/auth';
+import { pruneAndroidReleaseFiles, releaseDirectoryPath } from '../services/mobileReleaseStorage';
 
 const router = Router();
-const releaseDirectory = resolve(process.env.MOBILE_RELEASES_DIR || (process.env.NODE_ENV === 'production' ? '/data/mobile-releases' : './data/mobile-releases'));
+const releaseDirectory = releaseDirectoryPath();
 mkdirSync(releaseDirectory, { recursive: true });
 
 const upload = multer({
@@ -100,6 +101,8 @@ router.post('/', authorize('admin_geral'), upload.single('file'), asyncHandler(a
     file?.path || null, file ? basename(file.originalname) : null, file?.size || null,
     file?.mimetype || null, req.user?.id,
   ]);
+  // Só os APKs mais recentes ficam no volume (ver mobileReleaseStorage.ts).
+  if (file) await pruneAndroidReleaseFiles(query, releaseDirectory).catch(error => console.warn('Failed to prune old APKs', error));
   return res.status(201).json({ id, message: `${platform === 'android' ? 'Android' : 'iOS'} ${version} publicado.` });
 }));
 
