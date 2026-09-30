@@ -7,8 +7,9 @@ import { join, resolve } from 'path';
 // volume encheu em 13/09/2026 (publicação falhou com ENOSPC) e estava em 79%
 // em 30/09 com 5 builds. Agora só os RELEASE_FILES_TO_KEEP mais recentes
 // ficam em disco — o atual e um de reserva para voltar rápido se o novo der
-// problema. As linhas antigas continuam em mobile_releases (histórico), só
-// sem arquivo e inativas.
+// problema. As linhas das versões antigas são apagadas junto (como o
+// "excluir versão" da tela de admin): mobile_releases exige arquivo ou link
+// externo em toda linha, então não dá para manter a linha sem o arquivo.
 export const RELEASE_FILES_TO_KEEP = 2;
 // Arquivo sem linha no banco só é apagado depois disso: o upload da tela
 // (multer) grava o arquivo antes de inserir a linha, e não pode ser apagado
@@ -37,7 +38,7 @@ export const pruneAndroidReleaseFiles = async (run: Run, directory = releaseDire
       removedFiles += 1;
       freedBytes += Number(row.file_size || 0);
     }
-    await run(`update mobile_releases set file_path=null,file_size=null,active=false where id=$1`, [row.id]);
+    await run(`delete from mobile_releases where id=$1`, [row.id]);
   }
 
   // Sobras de uploads que falharam ou builds apagados só do banco.

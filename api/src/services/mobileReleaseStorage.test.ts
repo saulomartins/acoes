@@ -7,15 +7,17 @@ import { pruneAndroidReleaseFiles } from './mobileReleaseStorage';
 type Row = { id: string; file_path: string | null; file_size: number | null; active: boolean; published_at: number };
 
 // Banco de mentira: responde ao select (ordenado como o SQL real) e aplica o
-// update de limpeza nas linhas.
+// delete da limpeza. Recusa update que deixe a linha sem arquivo e sem link,
+// como o check (external_url is not null or file_path is not null) do banco.
 const fakeDb = (rows: Row[]) => async (text: string, params?: unknown[]) => {
   if (text.startsWith('select')) {
     const withFile = rows.filter(row => row.file_path)
       .sort((a, b) => Number(b.active) - Number(a.active) || b.published_at - a.published_at);
     return { rows: withFile };
   }
-  const row = rows.find(item => item.id === params?.[0]);
-  if (row) Object.assign(row, { file_path: null, file_size: null, active: false });
+  if (text.startsWith('update') && /file_path=null/.test(text)) throw new Error('violates check constraint "mobile_releases_check"');
+  const index = rows.findIndex(item => item.id === params?.[0]);
+  if (text.startsWith('delete') && index >= 0) rows.splice(index, 1);
   return { rows: [] };
 };
 
@@ -31,15 +33,14 @@ const apk = (name: string, ageMs = 2 * 60 * 60 * 1000) => {
 };
 
 describe('pruneAndroidReleaseFiles', () => {
-  it('mantém só os 2 APKs mais recentes e desativa as linhas antigas', async () => {
+  it('mantém só os 2 APKs mais recentes e apaga as linhas antigas', async () => {
     directory = mkdtempSync(join(tmpdir(), 'releases-'));
     const rows: Row[] = [1, 2, 3, 4, 5].map(n => ({ id: `r${n}`, file_path: apk(`r${n}.apk`), file_size: 1024, active: true, published_at: n }));
     const result = await pruneAndroidReleaseFiles(fakeDb(rows), directory, 2);
     expect(result.removedFiles).toBe(3);
     expect(['r5', 'r4'].every(id => existsSync(join(directory, `${id}.apk`)))).toBe(true);
     expect(['r1', 'r2', 'r3'].some(id => existsSync(join(directory, `${id}.apk`)))).toBe(false);
-    expect(rows.filter(row => row.file_path).map(row => row.id).sort()).toEqual(['r4', 'r5']);
-    expect(rows.find(row => row.id === 'r1')?.active).toBe(false);
+    expect(rows.map(row => row.id).sort()).toEqual(['r4', 'r5']);
   });
 
   it('nunca apaga a versão ativa, mesmo com uma inativa publicada depois', async () => {
