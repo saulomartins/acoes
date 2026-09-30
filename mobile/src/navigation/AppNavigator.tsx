@@ -174,7 +174,7 @@ export default function AppNavigator() {
   // o perfil em "Entrar como", e não junto com o próprio login.
   const [deviceTourVersion,setDeviceTourVersion]=useState<string|null>(null);
   useEffect(()=>{let active=true;storage.get('tourSeenVersion').then(value=>{if(active)setDeviceTourVersion(value);});return()=>{active=false;};},[]);
-  const tourSteps=useMemo(()=>TOUR_STEPS.filter(step=>step.roles.includes(user?.role||'')&&(!step.feature||condominiumFeatures?.[step.feature]===true)&&(isWeb||!MANAGEMENT_ROUTES.has(step.route))),[condominiumFeatures,user?.role]);
+  const tourSteps=useMemo(()=>TOUR_STEPS.filter(step=>step.roles.includes(user?.role||'')&&(!step.feature||condominiumFeatures?.[step.feature]===true)&&(isWeb||(!MANAGEMENT_ROUTES.has(step.route)&&!step.webOnly))),[condominiumFeatures,user?.role]);
   const openTourStep=useCallback((index:number)=>{const step=tourSteps[index];if(step&&navigationRef.isReady())navigationRef.navigate(step.route as any);},[tourSteps]);
   const startTour=useCallback(()=>{if(!tourSteps.length)return;setTourIndex(0);setTourActive(true);setTimeout(()=>openTourStep(0),0);},[openTourStep,tourSteps.length]);
   const completeTour=useCallback(async()=>{

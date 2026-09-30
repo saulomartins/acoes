@@ -3,7 +3,7 @@
     "name": "Lar em Dia",
     "slug": "lar-em-dia",
     "scheme": "laremdia",
-    "version": "1.5.2",
+    "version": "1.6.0",
     "orientation": "portrait",
     "icon": "./assets/lar-em-dia-icon.png",
     "ios": {
@@ -28,6 +28,12 @@
     "plugins": [
       "expo-secure-store",
       "expo-updates",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "O Lar em Dia usa o Face ID para desbloquear o app sem precisar digitar a senha."
+        }
+      ],
       [
         "expo-notifications",
         {

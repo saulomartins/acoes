@@ -4,7 +4,9 @@ import type { FeatureKey } from '../context/AuthContext';
 // guard de role (RequireRole) e para decidir quais rotas são "de gestão" (não
 // existem no bundle nativo — ver MANAGEMENT_ROUTES abaixo e
 // navigation/ManagementStack.web.tsx / .native.tsx).
-export type TourStep = { route: string; title: string; description: string; roles: string[]; feature?: FeatureKey };
+// webOnly: passo que só existe no tour da versão web (a rota continua
+// registrada no app nativo, só não é apresentada).
+export type TourStep = { route: string; title: string; description: string; roles: string[]; feature?: FeatureKey; webOnly?: boolean };
 
 export const TOUR_STEPS: TourStep[] = [
   { route: 'Home', title: 'Início', description: 'Resumo das informações mais importantes e atalhos para as rotinas do condomínio.', roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'] },
@@ -42,7 +44,7 @@ export const TOUR_STEPS: TourStep[] = [
   { route: 'InfractionNotices', title: 'Notificações de infração', description: 'Acompanhamento de notificações, ciência, defesa e situação de cada processo.', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
   { route: 'Polls', title: 'Enquetes', description: 'Consultas criadas pela gestão para participação dos moradores ativos.', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'enquetes' },
   { route: 'SpaceReservations', title: 'Reserva de espaços', description: 'Calendário de disponibilidade e solicitações de reserva das áreas comuns.', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'reserva_espacos' },
-  { route: 'MobileReleases', title: 'Instalar aplicativo', description: 'Central com a versão mais recente do app para Android e iOS.', roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'] },
+  { route: 'MobileReleases', title: 'Instalar aplicativo', description: 'Central com a versão mais recente do app para Android e iOS.', roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'], webOnly: true },
 ];
 
 // Papéis permitidos por rota, para o guard de role (RequireRole). Rota

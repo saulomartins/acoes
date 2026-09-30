@@ -12,8 +12,12 @@ import { syncNotificationBadge } from '../services/pushNotifications';
 import { subscribeNotificationsChanged } from '../services/notificationEvents';
 import type { FeatureKey } from '../context/AuthContext';
 import { MANAGEMENT_ROUTES } from '../navigation/routeRoles';
+import { useBiometricSetting } from './BiometricLock';
+import { isStoreReviewEnabled, markReviewDone, openStoreReview, reviewStoreName } from '../services/storeReview';
 
-type Item = { label: string; route: string; symbol: string; roles: string[]; feature?: FeatureKey };
+// webOnly: item que só aparece no menu da versão web (ex.: "Instalar
+// aplicativo", sem sentido para quem já está dentro do app instalado).
+type Item = { label: string; route: string; symbol: string; roles: string[]; feature?: FeatureKey; webOnly?: boolean };
 type AndroidRelease = { id:string; version:string; buildNumber:string; releaseNotes:string|null; hasFile:boolean };
 
 const items: Item[] = [
@@ -56,7 +60,7 @@ const items: Item[] = [
   { label: 'Ocorrências', route: 'Occurrences', symbol: '⚑', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
   { label: 'Emitir notificação', route: 'InfractionNoticeIssue', symbol: '✎', roles: ['sindico', 'subsindico'], feature: 'regimento_ocorrencias' },
   { label: 'Notificações de infração', route: 'InfractionNotices', symbol: '⚠', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
-  { label: 'Instalar aplicativo', route: 'MobileReleases', symbol: '↓', roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'] },
+  { label: 'Instalar aplicativo', route: 'MobileReleases', symbol: '↓', roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'], webOnly: true },
 ];
 
 const roleLabels: Record<string, string> = { admin_geral: 'Administrador geral', sindico: 'Síndico', subsindico: 'Subsíndico', proprietario: 'Proprietário', inquilino: 'Inquilino' };
@@ -83,6 +87,12 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
   const [switchingProfile, setSwitchingProfile] = useState(false);
   const manualUrl = manualUrlForRole(user?.role);
   const openManual = useCallback(() => { if (manualUrl) Linking.openURL(manualUrl).catch(() => {}); }, [manualUrl]);
+  const biometric = useBiometricSetting();
+  const biometricLabel = `Desbloqueio por biometria: ${biometric.enabled ? 'ativado' : 'desativado'}`;
+  // Atalho permanente para avaliar, além do convite automático de
+  // StoreReviewPrompt — quem usa o atalho também não recebe mais o convite.
+  const canReview = Platform.OS !== 'web' && isStoreReviewEnabled();
+  const rateApp = () => { openStoreReview().then(opened => { if (opened) void markReviewDone(); }).catch(() => {}); };
   // No app nativo, rotas de gestão nem existem no Stack (ver ManagementStack
   // .web/.native.tsx) — tocar num item de menu dessas mostra este aviso em vez
   // de tentar navegar para uma tela que não foi empacotada no binário.
@@ -112,7 +122,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
   const [androidRelease, setAndroidRelease] = useState<AndroidRelease | null>(null);
   // condominiumFeatures === null (admin_geral ou ainda carregando) nunca
   // esconde nada por funcionalidade, só o papel filtra nesse caso.
-  const visible = items.filter((item) => item.roles.includes(user?.role || '') && (!item.feature || user?.role === 'admin_geral' || condominiumFeatures?.[item.feature] === true));
+  const visible = items.filter((item) => item.roles.includes(user?.role || '') && (Platform.OS === 'web' || !item.webOnly) && (!item.feature || user?.role === 'admin_geral' || condominiumFeatures?.[item.feature] === true));
   const mainItems = visible.filter((item) => !billingRoutes.includes(item.route) && !noticeRoutes.includes(item.route) && !bankRoutes.includes(item.route) && !regulationRoutes.includes(item.route) && !participationRoutes.includes(item.route) && !platformRoutes.includes(item.route));
   const bankItems = visible.filter((item) => bankRoutes.includes(item.route));
   const billingItems = visible.filter((item) => billingRoutes.includes(item.route));
@@ -460,6 +470,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                   )}
                 </View>
                 {manualUrl ? <Pressable onPress={openManual} accessibilityLabel="Manual do usuário" style={[styles.profileTourButton, styles.profileManualButton]}><Text style={styles.profileTourIcon}>📘</Text></Pressable> : null}
+                {biometric.available ? <Pressable onPress={() => void biometric.toggle()} accessibilityLabel={biometricLabel} style={[styles.profileTourButton, !biometric.enabled && styles.profileBiometricOff]}><Text style={styles.profileTourIcon}>{biometric.enabled ? '🔒' : '🔓'}</Text></Pressable> : null}
                 <Pressable onPress={startSystemTour} accessibilityLabel="Refazer tour" style={styles.profileTourButton}><Text style={styles.profileTourIcon}>?</Text></Pressable>
                 <Pressable onPress={() => signOut()}>
                   <Text style={styles.exit}>↪</Text>
@@ -607,6 +618,8 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                   </View>
                 ) : null}
                 {manualUrl ? <Pressable style={styles.mobileTourFooter} onPress={() => { setMobileMenuOpen(false); openManual(); }}><Text style={styles.mobileTourText}>📘 Manual do usuário</Text></Pressable> : null}
+                {canReview ? <Pressable style={styles.mobileTourFooter} onPress={() => { setMobileMenuOpen(false); rateApp(); }}><Text style={styles.mobileTourText}>⭐ Avaliar o app na {reviewStoreName}</Text></Pressable> : null}
+                {biometric.available ? <Pressable style={styles.mobileTourFooter} onPress={() => void biometric.toggle()}><Text style={styles.mobileTourText}>{biometric.enabled ? '🔒' : '🔓'} {biometricLabel}</Text></Pressable> : null}
                 <Pressable style={styles.mobileTourFooter} onPress={() => { setMobileMenuOpen(false); startSystemTour(); }}><Text style={styles.mobileTourText}>? Refazer tour do sistema</Text></Pressable>
                 <Pressable style={styles.mobileMenuFooter} onPress={() => { setMobileMenuOpen(false); signOut(); }}>
                   <Text style={styles.mobileMenuLogout}>Sair da conta</Text>
@@ -648,7 +661,7 @@ const styles = StyleSheet.create({
   subnavDotActive: { backgroundColor: colors.primary },
   subnavText: { color: '#6e7b88', fontSize: 14, fontWeight: '700' },
   profileAnchor: { marginTop: 'auto' },
-  profile: { borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 8, paddingTop: 16, flexDirection: 'row', alignItems: 'center', gap: 9 }, avatarLight: { width: 33, height: 33, borderRadius: 17, backgroundColor: '#dfe9f6', alignItems: 'center', justifyContent: 'center' }, avatarLightText: { color: colors.primary, fontSize: 14, fontWeight: '800' }, profileName: { color: colors.ink, fontSize: 14, fontWeight: '800' }, profileRole: { color: '#8190a0', fontSize: 12, marginTop: 2 },profileTourButton:{width:34,height:34,borderRadius:17,backgroundColor:colors.primary,alignItems:'center',justifyContent:'center',shadowColor:colors.primary,shadowOpacity:.22,shadowRadius:6,elevation:2},profileManualButton:{backgroundColor:colors.teal,shadowColor:colors.teal},profileTourIcon:{color:'#fff',fontSize:17,fontWeight:'900'}, exit: { color: colors.red, fontSize: 13, fontWeight: '800' },
+  profile: { borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 8, paddingTop: 16, flexDirection: 'row', alignItems: 'center', gap: 9 }, avatarLight: { width: 33, height: 33, borderRadius: 17, backgroundColor: '#dfe9f6', alignItems: 'center', justifyContent: 'center' }, avatarLightText: { color: colors.primary, fontSize: 14, fontWeight: '800' }, profileName: { color: colors.ink, fontSize: 14, fontWeight: '800' }, profileRole: { color: '#8190a0', fontSize: 12, marginTop: 2 },profileTourButton:{width:34,height:34,borderRadius:17,backgroundColor:colors.primary,alignItems:'center',justifyContent:'center',shadowColor:colors.primary,shadowOpacity:.22,shadowRadius:6,elevation:2},profileManualButton:{backgroundColor:colors.teal,shadowColor:colors.teal},profileBiometricOff:{backgroundColor:colors.muted,shadowColor:colors.muted},profileTourIcon:{color:'#fff',fontSize:17,fontWeight:'900'}, exit: { color: colors.red, fontSize: 13, fontWeight: '800' },
   profileSwitcher: { paddingHorizontal: 8, paddingVertical: 8, marginBottom: 8, gap: 4, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: colors.border, borderRadius: 12 },
   mobileProfileSwitcher: { paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: '#f9f9fa', gap: 4 },
   profileSwitcherTitle: { fontSize: 11, fontWeight: '800', color: colors.muted, textTransform: 'uppercase', marginBottom: 2 },
