@@ -253,6 +253,19 @@ export const openAuthenticatedPdf = async (path:string,token:string) => {
   setTimeout(()=>URL.revokeObjectURL(url),60000);
 };
 
+// Baixa um arquivo autenticado e devolve como File, sem salvar nem abrir —
+// para reenviar em seguida (ex.: extrato do banco anexado à prestação de
+// contas). Só na web: as telas que usam isto são de gestão, que não existem
+// no app nativo.
+export const fetchAuthenticatedFile = async(path:string,token:string,fileName:string):Promise<File> => {
+ if(Platform.OS!=='web')throw new Error('Disponível apenas na versão web.');
+ const accessToken=await authStorage.get('userToken')||token;
+ const response=await fetch(`${API_BASE_URL}${path}`,{headers:{Authorization:`Bearer ${accessToken}`}});
+ if(!response.ok){const data=await response.json().catch(()=>null);throw new Error(data?.message||'Falha ao baixar arquivo')}
+ const blob=await response.blob();
+ return new File([blob],fileName,{type:blob.type||'application/pdf'});
+};
+
 export const openAuthenticatedFile = async(path:string,token:string,fileName:string,mimeType:string) => {
  const accessToken=await authStorage.get('userToken')||token;
  if(Platform.OS==='web'){const response=await fetch(`${API_BASE_URL}${path}`,{headers:{Authorization:`Bearer ${accessToken}`}});if(!response.ok)throw new Error('Falha ao abrir anexo');const url=URL.createObjectURL(await response.blob());const popup=window.open(url,'_blank','noopener,noreferrer');if(!popup)throw new Error('Permita pop-ups para visualizar o anexo.');setTimeout(()=>URL.revokeObjectURL(url),60000);return;}

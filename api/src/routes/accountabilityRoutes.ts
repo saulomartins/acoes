@@ -9,6 +9,7 @@ import { query, withTransaction } from '../db';
 import { logAudit } from '../services/auditService';
 import { listInterExtrato, getInterExtratoPdf, getInterSaldo } from '../services/interService';
 import { getInterExtratoIntegration } from './invoiceRoutes';
+import { findOrCreateMonthFolder, uploadDriveFile, downloadDriveFile, deleteDriveFile } from '../services/googleDriveService';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -140,6 +141,27 @@ router.put('/:id/approval',asyncHandler(async(req,res)=>{
   return res.json({ok:true});
 }));
 
+// Extrato bancário do mês (accountability_report_statements): documento
+// sensível do condomínio, só para quem tem assento na homologação — síndico,
+// subsíndico e Conselho Fiscal 1/2 (resolveApprovalSeat). Os demais moradores
+// não recebem nem a informação de que existe um extrato.
+const canViewStatement=async(req:any)=>(await resolveApprovalSeat(req))!==null;
+const STATEMENT_FIELDS=['has_statement','statement_file_name','statement_mime_type','statement_source'];
+const hideStatement=(item:any)=>{if(item&&typeof item==='object')for(const field of STATEMENT_FIELDS)delete item[field]};
+const statementMimeTypes=['application/pdf','image/jpeg','image/png','image/webp'];
+
+router.get('/:id/statement',asyncHandler(async(req,res)=>{
+  if(!(await canViewStatement(req)))return res.status(403).json({message:'O extrato bancário é visível apenas para o síndico, o subsíndico e o Conselho Fiscal.'});
+  const result=await query<any>(`select s.file_name,s.mime_type,s.content,s.drive_file_id from accountability_report_statements s where s.report_id=$1 and s.condominium_id=$2`,[req.params.id,req.user?.condominiumId]);
+  const file=result.rows[0];if(!file)return res.status(404).json({message:'Extrato bancário não encontrado.'});
+  let content=file.content;
+  if(file.drive_file_id){try{content=await downloadDriveFile(file.drive_file_id)}catch(error:any){return res.status(502).json({message:error?.message||'Falha ao buscar o extrato no Google Drive.'})}}
+  res.setHeader('Content-Type',file.mime_type);
+  res.setHeader('Content-Disposition',`inline; filename*=UTF-8''${encodeURIComponent(file.file_name)}`);
+  res.setHeader('Cache-Control','private, no-store');
+  return res.send(content);
+}));
+
 router.use((req,res,next)=>req.method==='GET'||req.user?.role==='sindico'||req.user?.role==='subsindico'?next():res.status(403).json({message:'Permissão insuficiente.'}));
 router.use((req,_res,next)=>{if((req.method==='POST'||req.method==='PUT')&&monthKey(req.body?.referenceMonth)){req.body.periodStart=`${req.body.referenceMonth}-01`;req.body.periodEnd=monthEnd(req.body.referenceMonth)}next()});
 router.use((req,res,next)=>{if(!['POST','PUT'].includes(req.method)||!Array.isArray(req.body?.expenses))return next();for(const [index,item] of req.body.expenses.entries()){const raw=String(item.serviceDate||'');const match=raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);if(match)item.serviceDate=`${match[3]}-${match[2]}-${match[1]}`;if(!String(item.provider||'').trim())return res.status(400).json({message:`Informe a empresa ou pessoa da despesa ${index+1}.`});if(!String(item.purpose||'').trim())return res.status(400).json({message:`Informe o objetivo da despesa ${index+1}.`});if(!isoDate(item.serviceDate))return res.status(400).json({message:`Informe uma data válida na despesa ${index+1}. Use DD/MM/AAAA.`});if(!Number.isInteger(Number(item.amountCents))||Number(item.amountCents)<=0)return res.status(400).json({message:`Informe um valor maior que zero na despesa ${index+1}.`})}return next()});
@@ -162,10 +184,42 @@ const hydrate = async(id:string,condo:string) => {
     from accountability_expenses e
     left join accountability_expense_attachments r on r.expense_id=e.id and r.kind='receipt'
     left join accountability_expense_attachments p on p.expense_id=e.id and p.kind='proof'
-    where e.report_id=$1 order by e.position,e.created_at`,[id]); return {...report.rows[0],expenses:expenses.rows};
+    where e.report_id=$1 order by e.position,e.created_at`,[id]); const statement=await query<any>(`select file_name,mime_type,source from accountability_report_statements where report_id=$1`,[id]); const st=statement.rows[0]; return {...report.rows[0],expenses:expenses.rows,has_statement:Boolean(st),statement_file_name:st?.file_name||null,statement_mime_type:st?.mime_type||null,statement_source:st?.source||null};
 };
 
-router.get('/',asyncHandler(async(req,res)=>{if(!req.user?.condominiumId)return res.status(400).json({message:'Usuário sem condomínio.'});const result=await query<any>(`select a.*,c.name origin,coalesce(sum(e.amount_cents),0)::bigint total_expenses_cents,(a.received_amount_cents-coalesce(sum(e.amount_cents),0))::bigint balance_cents from accountability_reports a join condominiums c on c.id=a.condominium_id left join accountability_expenses e on e.report_id=a.id where a.condominium_id=$1 group by a.id,c.name order by a.reference_month desc`,[req.user.condominiumId]);return res.json({reports:result.rows})}));
+// Envia/substitui o extrato. O botão "Buscar extrato do banco" da tela baixa
+// o PDF do Inter (GET /extrato-pdf) e envia aqui com source=bank; sem
+// integração bancária, o síndico anexa o arquivo do banco (source=upload).
+router.post('/:id/statement',authorize('sindico','subsindico'),upload.single('file'),asyncHandler(async(req,res)=>{
+  if(!req.file||!statementMimeTypes.includes(req.file.mimetype))return res.status(400).json({message:'Envie o extrato em PDF, JPG, PNG ou WEBP de até 10 MB.'});
+  const condo=req.user?.condominiumId;
+  const report=await query<any>(`select a.id,a.reference_month::text reference_month,c.google_drive_folder_id from accountability_reports a join condominiums c on c.id=a.condominium_id where a.id=$1 and a.condominium_id=$2`,[req.params.id,condo]);
+  if(!report.rows[0])return res.status(404).json({message:'Prestação de contas não encontrada.'});
+  const source=(req.query.source??req.body?.source)==='bank'?'bank':'upload';
+  const rootFolderId=report.rows[0].google_drive_folder_id;
+  const previous=await query<{drive_file_id:string|null}>(`select drive_file_id from accountability_report_statements where report_id=$1`,[req.params.id]);
+  let driveFileId:string|null=null;let content:Buffer|null=req.file.buffer;
+  if(rootFolderId){
+    try{const folderId=await findOrCreateMonthFolder(rootFolderId,report.rows[0].reference_month);driveFileId=await uploadDriveFile(folderId,req.file.originalname,req.file.mimetype,req.file.buffer);content=null}
+    catch(error:any){return res.status(502).json({message:error?.message||'Falha ao enviar o extrato para o Google Drive. Verifique a pasta configurada para este condomínio.'})}
+  }
+  await query(`insert into accountability_report_statements(report_id,condominium_id,reference_month,file_name,mime_type,file_size,content,drive_file_id,source,uploaded_by) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    on conflict(report_id) do update set file_name=excluded.file_name,mime_type=excluded.mime_type,file_size=excluded.file_size,content=excluded.content,drive_file_id=excluded.drive_file_id,source=excluded.source,uploaded_by=excluded.uploaded_by,created_at=now()`,
+    [req.params.id,condo,report.rows[0].reference_month,req.file.originalname,req.file.mimetype,req.file.size,content,driveFileId,source,req.user?.id]);
+  if(previous.rows[0]?.drive_file_id&&previous.rows[0].drive_file_id!==driveFileId)await deleteDriveFile(previous.rows[0].drive_file_id);
+  await logAudit(req,'prestacao_contas','attachment_uploaded',`Anexou o extrato bancário da prestação de contas${source==='bank'?' (buscado no banco)':''}`,{entityId:req.params.id});
+  return res.status(201).json({message:'Extrato armazenado.'});
+}));
+
+router.delete('/:id/statement',authorize('sindico','subsindico'),asyncHandler(async(req,res)=>{
+  const existing=await query<{drive_file_id:string|null}>(`delete from accountability_report_statements where report_id=$1 and condominium_id=$2 returning drive_file_id`,[req.params.id,req.user?.condominiumId]);
+  if(!existing.rows[0])return res.status(404).json({message:'Extrato bancário não encontrado.'});
+  if(existing.rows[0].drive_file_id)await deleteDriveFile(existing.rows[0].drive_file_id);
+  await logAudit(req,'prestacao_contas','attachment_deleted','Excluiu o extrato bancário da prestação de contas',{entityId:req.params.id});
+  return res.status(204).send();
+}));
+
+router.get('/',asyncHandler(async(req,res)=>{if(!req.user?.condominiumId)return res.status(400).json({message:'Usuário sem condomínio.'});const result=await query<any>(`select a.*,c.name origin,coalesce(sum(e.amount_cents),0)::bigint total_expenses_cents,(a.received_amount_cents-coalesce(sum(e.amount_cents),0))::bigint balance_cents,exists(select 1 from accountability_report_statements s where s.report_id=a.id) has_statement from accountability_reports a join condominiums c on c.id=a.condominium_id left join accountability_expenses e on e.report_id=a.id where a.condominium_id=$1 group by a.id,c.name order by a.reference_month desc`,[req.user.condominiumId]);if(!(await canViewStatement(req)))result.rows.forEach(hideStatement);return res.json({reports:result.rows})}));
 
 router.post('/parse-pdf',authorize('sindico','subsindico'),upload.single('file'),asyncHandler(async(req,res)=>{
   if(!req.file||req.file.buffer.subarray(0,5).toString()!=='%PDF-')return res.status(400).json({message:'Envie um arquivo PDF válido.'});
@@ -251,7 +305,7 @@ router.get('/extrato-pdf',authorize('sindico','subsindico'),asyncHandler(async(r
   return res.send(pdfBuffer);
 }));
 
-router.get('/:id',asyncHandler(async(req,res)=>{const report=await hydrate(req.params.id,req.user!.condominiumId!);return report?res.json({report}):res.status(404).json({message:'Prestação de contas não encontrada.'})}));
+router.get('/:id',asyncHandler(async(req,res)=>{const report=await hydrate(req.params.id,req.user!.condominiumId!);if(!report)return res.status(404).json({message:'Prestação de contas não encontrada.'});if(!(await canViewStatement(req)))hideStatement(report);return res.json({report})}));
 
 router.post('/',asyncHandler(async(req,res)=>{const condo=req.user?.condominiumId;if(!condo)return res.status(400).json({message:'Usuário sem condomínio.'});const b=req.body||{};const expenses=Array.isArray(b.expenses)?b.expenses:[];if(!monthKey(b.referenceMonth)||!isoDate(b.periodStart)||!isoDate(b.periodEnd))return res.status(400).json({message:'Mês e período são obrigatórios.'});if(`${b.referenceMonth}-01`!==b.periodStart||b.periodEnd.slice(0,7)!==b.referenceMonth)return res.status(400).json({message:'O período deve pertencer ao mês e começar no primeiro dia.'});const nums=[b.paidUnits,b.exemptUnits,b.unpaidUnits,b.receivedAmountCents].map(Number);if(nums.some(n=>!Number.isInteger(n)||n<0))return res.status(400).json({message:'Quantidades e valor devem ser não negativos.'});if(!expenses.length||expenses.some((e:any)=>!String(e.provider||'').trim()||!String(e.purpose||'').trim()||!isoDate(e.serviceDate)||!Number.isInteger(Number(e.amountCents))||Number(e.amountCents)<=0))return res.status(400).json({message:'Informe ao menos uma despesa completa.'});const id=randomUUID();try{await withTransaction(async client=>{await client.query(`insert into accountability_reports(id,condominium_id,reference_month,period_start,period_end,paid_units,exempt_units,unpaid_units,received_amount_cents,source,source_file_name,created_by,city,sindico_name,subsindico_name,fiscal_council_1_name,fiscal_council_2_name) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,[id,condo,`${b.referenceMonth}-01`,b.periodStart,b.periodEnd,...nums,b.source==='pdf'?'pdf':'manual',b.sourceFileName||null,req.user?.id,shortText(b.city)||null,shortText(b.sindicoName)||null,shortText(b.subsindicoName)||null,shortText(b.fiscalCouncil1Name)||null,shortText(b.fiscalCouncil2Name)||null]);for(const [i,e] of expenses.entries())await client.query(`insert into accountability_expenses(id,report_id,provider,purpose,service_date,amount_cents,position) values($1,$2,$3,$4,$5,$6,$7)`,[randomUUID(),id,String(e.provider).trim(),String(e.purpose).trim(),e.serviceDate,Number(e.amountCents),i])})}catch(error:any){if(error?.code==='23505')return res.status(409).json({message:'Já existe uma prestação de contas para este mês.'});throw error}await logAudit(req,'prestacao_contas','created',`Criou a prestação de contas de ${b.referenceMonth}`,{entityId:id});return res.status(201).json({report:await hydrate(id,condo)})}));
 router.put('/:id',asyncHandler(async(req,res)=>{const condo=req.user?.condominiumId;const b=req.body||{};const expenses=Array.isArray(b.expenses)?b.expenses:[];if(!condo)return res.status(400).json({message:'Usuário sem condomínio.'});if(!monthKey(b.referenceMonth)||!isoDate(b.periodStart)||!isoDate(b.periodEnd))return res.status(400).json({message:'Mês e período são obrigatórios.'});const nums=[b.paidUnits,b.exemptUnits,b.unpaidUnits,b.receivedAmountCents].map(Number);if(nums.some(n=>!Number.isInteger(n)||n<0)||!expenses.length||expenses.some((e:any)=>!String(e.provider||'').trim()||!String(e.purpose||'').trim()||!isoDate(e.serviceDate)||!Number.isInteger(Number(e.amountCents))||Number(e.amountCents)<=0))return res.status(400).json({message:'Revise os valores e as despesas informadas.'});try{const updated=await withTransaction(async client=>{const report=await client.query(`update accountability_reports set reference_month=$1,period_start=$2,period_end=$3,paid_units=$4,exempt_units=$5,unpaid_units=$6,received_amount_cents=$7,city=$8,sindico_name=$9,subsindico_name=$10,fiscal_council_1_name=$11,fiscal_council_2_name=$12,updated_at=now() where id=$13 and condominium_id=$14 returning id`,[`${b.referenceMonth}-01`,b.periodStart,b.periodEnd,...nums,shortText(b.city)||null,shortText(b.sindicoName)||null,shortText(b.subsindicoName)||null,shortText(b.fiscalCouncil1Name)||null,shortText(b.fiscalCouncil2Name)||null,req.params.id,condo]);if(!report.rows[0])return false;const retained=expenses.map((e:any)=>e.id).filter(Boolean);await client.query(`delete from accountability_expenses where report_id=$1 and not(id=any($2::uuid[]))`,[req.params.id,retained]);for(const [i,e] of expenses.entries()){if(e.id)await client.query(`update accountability_expenses set provider=$1,purpose=$2,service_date=$3,amount_cents=$4,position=$5 where id=$6 and report_id=$7`,[String(e.provider).trim(),String(e.purpose).trim(),e.serviceDate,Number(e.amountCents),i,e.id,req.params.id]);else await client.query(`insert into accountability_expenses(id,report_id,provider,purpose,service_date,amount_cents,position) values($1,$2,$3,$4,$5,$6,$7)`,[randomUUID(),req.params.id,String(e.provider).trim(),String(e.purpose).trim(),e.serviceDate,Number(e.amountCents),i])}return true});if(!updated)return res.status(404).json({message:'Prestação de contas não encontrada.'})}catch(error:any){if(error?.code==='23505')return res.status(409).json({message:'Já existe uma prestação para esse mês.'});throw error}await logAudit(req,'prestacao_contas','updated',`Editou a prestação de contas de ${b.referenceMonth}`,{entityId:req.params.id});return res.json({report:await hydrate(req.params.id,condo)})}));

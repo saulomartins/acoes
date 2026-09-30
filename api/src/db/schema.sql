@@ -1506,3 +1506,25 @@ create table if not exists accountability_report_approvals (
   unique (report_id, seat)
 );
 create index if not exists accountability_report_approvals_report_idx on accountability_report_approvals(report_id);
+
+-- Extrato bancário do mês da prestação de contas — obrigatório para salvar
+-- uma prestação nova (a partir de 30/09/2026; as antigas aparecem como
+-- "extrato pendente"). Um por relatório. Mesmo armazenamento dos anexos de
+-- despesa: inline (content) ou no Google Drive do condomínio (drive_file_id).
+-- Visível só para síndico, subsíndico e Conselho Fiscal 1/2 — nunca para os
+-- demais moradores (ver GET /accountability/:id/statement).
+-- source: 'bank' = buscado pela integração bancária (Inter); 'upload' =
+-- arquivo enviado pelo síndico.
+create table if not exists accountability_report_statements (
+  report_id uuid primary key references accountability_reports(id) on delete cascade,
+  condominium_id uuid not null references condominiums(id) on delete cascade,
+  reference_month date not null,
+  file_name text not null,
+  mime_type text not null check (mime_type in ('application/pdf','image/jpeg','image/png','image/webp')),
+  file_size integer not null check (file_size > 0 and file_size <= 10485760),
+  content bytea,
+  drive_file_id text,
+  source text not null default 'upload' check (source in ('bank','upload')),
+  uploaded_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
