@@ -1,7 +1,17 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../ui/text';
-import { AuthContext } from '../context/AuthContext';
+import { AuthContext, InvalidBiometricLoginError } from '../context/AuthContext';
+import {
+  authenticateWithBiometrics,
+  BiometricLogin,
+  biometricLoginLabel,
+  BiometricKind,
+  discardBiometricLogin,
+  getBiometricKind,
+  getBiometricLogin,
+  isBiometricAvailable,
+} from '../services/biometricAuth';
 import { AppButton } from '../ui/components';
 import { colors, layout, shadow } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
@@ -11,11 +21,42 @@ export default function Login({ navigation }: any) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const { signIn, isLoading, authError } = useContext(AuthContext);
+  const { signIn, signInWithBiometrics, isLoading, authError } = useContext(AuthContext);
   const canSubmit = username.trim().length > 0 && password.length > 0 && !isLoading;
+  const [biometricLogin, setBiometricLogin] = useState<BiometricLogin | null>(null);
+  const [biometricKind, setBiometricKind] = useState<BiometricKind>('generic');
+
+  // Quem ativou a biometria pode entrar de novo por ela depois de "Sair"
+  // (credencial guardada no aparelho — ver services/biometricAuth.ts).
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    let active = true;
+    void (async () => {
+      const [stored, available, kind] = await Promise.all([getBiometricLogin(), isBiometricAvailable(), getBiometricKind()]);
+      if (!active) return;
+      setBiometricKind(kind);
+      setBiometricLogin(available ? stored : null);
+    })();
+    return () => { active = false; };
+  }, []);
 
   const handleSignIn = async () => {
     try { await signIn(username, password); } catch { /* displayed by context */ }
+  };
+
+  const handleBiometricSignIn = async () => {
+    if (!biometricLogin || !(await authenticateWithBiometrics('Entrar no Lar em Dia'))) return;
+    try {
+      await signInWithBiometrics(biometricLogin.token);
+    } catch (e) {
+      // Erro já exibido pelo contexto. Credencial recusada pelo servidor (ex.:
+      // senha trocada) some do aparelho; o próximo login com senha de quem
+      // deixou a biometria ligada gera outra automaticamente.
+      if (e instanceof InvalidBiometricLoginError) {
+        await discardBiometricLogin();
+        setBiometricLogin(null);
+      }
+    }
   };
 
   return (
@@ -49,6 +90,14 @@ export default function Login({ navigation }: any) {
               <Text style={styles.cardEyebrow}>BEM-VINDO DE VOLTA</Text>
               <Text style={styles.cardTitle}>Acesse sua conta</Text>
               <Text style={styles.cardSubtitle}>Entre com seus dados para continuar.</Text>
+
+              {biometricLogin ? (
+                <View style={styles.biometric}>
+                  <AppButton title={biometricLoginLabel[biometricKind]} onPress={() => void handleBiometricSignIn()} disabled={isLoading} />
+                  <Text style={styles.biometricAccount}>Entrar como {biometricLogin.name}</Text>
+                  <View style={styles.divider}><View style={styles.dividerLine} /><Text style={styles.dividerText}>ou use sua senha</Text><View style={styles.dividerLine} /></View>
+                </View>
+              ) : null}
 
               <Text style={styles.label}>Usuário, CPF ou e-mail</Text>
               <TextInput placeholder="Digite seu usuário, CPF ou e-mail" value={username} onChangeText={setUsername} style={styles.input} autoCapitalize="none" autoCorrect={false} placeholderTextColor="#99a3b5" />
@@ -87,5 +136,7 @@ const styles = StyleSheet.create({
   // O campo acima já traz marginBottom: 15; a dica sobe um pouco para ficar
   // colada no input a que se refere, sem encostar no rótulo seguinte.
   inputHint: { color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: -9, marginBottom: 15 }, errorBox: { backgroundColor: '#fff0f0', borderRadius: 8, padding: 10, marginBottom: 12 }, error: { color: colors.red, fontSize: 14, fontWeight: '700' },
+  biometric: { marginBottom: 6 }, biometricAccount: { color: colors.muted, fontSize: 13, textAlign: 'center', marginTop: 8 },
+  divider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, marginBottom: 16 }, dividerLine: { flex: 1, height: 1, backgroundColor: colors.border }, dividerText: { color: colors.muted, fontSize: 13, fontWeight: '700' },
   security: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, marginTop: 18 }, securityIcon: { fontSize: 14 }, securityText: { color: '#8a97a4', fontSize: 12, textAlign: 'center' },
 });

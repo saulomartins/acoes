@@ -115,6 +115,9 @@ router.post('/users/:id/force-logout', asyncHandler(async (req, res) => {
   const target = await loadAuthorizedTarget(req, res);
   if (!target) return;
   const revoked = await query(`update refresh_tokens set revoked_at=now() where user_id=$1 and revoked_at is null`, [target.id]);
+  // Também desliga o "Entrar com biometria": senão o aparelho entraria de
+  // novo sem senha logo depois do logout forçado.
+  await query(`update biometric_tokens set revoked_at=now() where user_id=$1 and revoked_at is null`, [target.id]);
   await logSupportAction(req, target, 'force_logout', `Forçou logout de ${target.full_name || target.username} (${revoked.rowCount} sessão(ões) revogada(s))`);
   return res.json({ message: `${revoked.rowCount} sessão(ões) revogada(s). Na próxima abertura do app, a pessoa precisará logar de novo.` });
 }));

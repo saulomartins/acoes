@@ -333,6 +333,53 @@ export const revokeRefreshToken = async (refreshToken: string) => {
 
 const hashResetToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
+// Credencial de "Entrar com biometria" do app nativo. A biometria em si é
+// conferida pelo aparelho; aqui o servidor só troca este token aleatório
+// (guardado no SecureStore) por uma sessão nova, como se fosse um login.
+// Vale BIOMETRIC_TOKEN_TTL_DAYS desde o último uso e cai sozinha quando a
+// senha muda (password_fingerprint) ou o login é desabilitado.
+const BIOMETRIC_TOKEN_TTL_DAYS = 180;
+const hashBiometricToken = (token: string) => createHash('sha256').update(token).digest('hex');
+const passwordFingerprint = (passwordHash: string) => createHash('sha256').update(passwordHash).digest('hex');
+
+export const createBiometricToken = async (userId: string) => {
+  const user = await query<{ password_hash: string }>(`select password_hash from users where id=$1 and login_enabled=true`, [userId]);
+  if (!user.rows[0]) return null;
+  const token = randomBytes(32).toString('hex');
+  await query(
+    `insert into biometric_tokens(id,user_id,token_hash,password_fingerprint,expires_at)
+     values($1,$2,$3,$4,now() + make_interval(days => $5))`,
+    [randomUUID(), userId, hashBiometricToken(token), passwordFingerprint(user.rows[0].password_hash), BIOMETRIC_TOKEN_TTL_DAYS],
+  );
+  return token;
+};
+
+export const loginWithBiometricToken = async (token: string) => {
+  const result = await query<DbUser & { biometric_id: string; password_fingerprint: string }>(
+    `select b.id biometric_id, b.password_fingerprint, u.id, u.username, u.password_hash, u.role, u.condominium_id, u.full_name, u.must_change_password, u.terms_accepted_version, u.terms_accepted_at, u.tour_completed_version, u.tour_completed_at, c.name condominium_name
+     from biometric_tokens b
+     join users u on u.id=b.user_id
+     left join condominiums c on c.id=u.condominium_id
+     where b.token_hash=$1 and b.revoked_at is null and b.expires_at>now() and u.login_enabled=true`,
+    [hashBiometricToken(token)],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  if (row.password_fingerprint !== passwordFingerprint(row.password_hash)) {
+    await query(`update biometric_tokens set revoked_at=now() where id=$1`, [row.biometric_id]);
+    return null;
+  }
+  await query(
+    `update biometric_tokens set last_used_at=now(), expires_at=now() + make_interval(days => $2) where id=$1`,
+    [row.biometric_id, BIOMETRIC_TOKEN_TTL_DAYS],
+  );
+  return createSession(publicUser(row));
+};
+
+export const revokeBiometricToken = async (token: string) => {
+  await query(`update biometric_tokens set revoked_at=now() where token_hash=$1 and revoked_at is null`, [hashBiometricToken(token)]);
+};
+
 export const requestPasswordReset = async (email: string) => {
   const normalizedEmail = email.trim().toLowerCase();
   const users = await query<{ id: string; username: string; full_name: string | null; email: string }>(

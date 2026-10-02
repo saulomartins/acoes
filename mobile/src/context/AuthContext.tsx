@@ -74,6 +74,11 @@ type AuthContextType = {
   // "Tentar novamente" da tela de suspensão: pergunta de novo à API.
   recheckPlatformAccess: () => Promise<void>;
   signIn: (username: string, password: string) => Promise<void>;
+  // "Entrar com biometria" na tela de login: a biometria já foi conferida
+  // pelo aparelho; aqui só troca a credencial guardada por uma sessão.
+  // Rejeita com InvalidBiometricLoginError quando o servidor não aceita mais
+  // a credencial (aí ela deve ser descartada do aparelho).
+  signInWithBiometrics: (biometricToken: string) => Promise<void>;
   signOut: () => Promise<void>;
   signUp: (username: string, password: string) => Promise<void>;
   updateUser: (user: AuthUser) => Promise<void>;
@@ -127,16 +132,19 @@ const clearAuth = async () => {
 
 const PUSH_TOKEN_KEY = 'expoPushToken';
 
-const requestAuth = async (path: '/auth/login' | '/auth/register', username: string, password: string) => {
+export class InvalidBiometricLoginError extends Error {}
+
+const requestAuth = async (path: '/auth/login' | '/auth/register' | '/auth/biometric/login', body: Record<string, string>) => {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify(body),
   });
 
   const data = (await response.json().catch(() => null)) as AuthResponse | { message?: string } | null;
   if (!response.ok) {
     const message = data && 'message' in data && data.message ? data.message : 'Falha na autenticacao';
+    if (path === '/auth/biometric/login' && response.status === 401) throw new InvalidBiometricLoginError(message);
     throw new Error(message);
   }
 
@@ -195,6 +203,7 @@ export const AuthContext = createContext<AuthContextType>({
   platformSuspendedMessage: null,
   recheckPlatformAccess: async () => {},
   signIn: async () => {},
+  signInWithBiometrics: async () => {},
   signOut: async () => {},
   signUp: async () => {},
   updateUser: async () => {},
@@ -402,11 +411,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(response.user);
   };
 
-  const signIn = async (username: string, password: string) => {
+  const signInWith = async (request: () => Promise<AuthResponse>) => {
     setIsLoading(true);
     setAuthError(null);
     try {
-      const response = await requestAuth('/auth/login', username.trim(), password);
+      const response = await request();
       await applyAuthResponse(response);
       // Login explícito (não retomada de sessão): se a pessoa tem mais de um
       // perfil, o AppNavigator mostra a tela "Entrar como" antes do painel.
@@ -422,11 +431,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const signIn = (username: string, password: string) =>
+    signInWith(() => requestAuth('/auth/login', { username: username.trim(), password }));
+
+  const signInWithBiometrics = (biometricToken: string) =>
+    signInWith(() => requestAuth('/auth/biometric/login', { biometricToken }));
+
   const signUp = async (username: string, password: string) => {
     setIsLoading(true);
     setAuthError(null);
     try {
-      const response = await requestAuth('/auth/register', username.trim(), password);
+      const response = await requestAuth('/auth/register', { username: username.trim(), password });
       await applyAuthResponse(response);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Falha ao registrar';
@@ -501,7 +516,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, userToken, isLoading, authError, pushStatus, pushError, condominiumFeatures, profiles, needsProfileSelection, nativeAccessBlocked, platformSuspendedMessage, recheckPlatformAccess, signIn, signOut, signUp, updateUser, switchProfile, selectProfile }}>
+    <AuthContext.Provider value={{ user, userToken, isLoading, authError, pushStatus, pushError, condominiumFeatures, profiles, needsProfileSelection, nativeAccessBlocked, platformSuspendedMessage, recheckPlatformAccess, signIn, signInWithBiometrics, signOut, signUp, updateUser, switchProfile, selectProfile }}>
       {children}
     </AuthContext.Provider>
   );

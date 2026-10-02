@@ -9,12 +9,15 @@ import { AuthContext } from '../context/AuthContext';
 import {
   authenticateWithBiometrics,
   BiometricKind,
+  forgetBiometricLogin,
   getBiometricKind,
+  getBiometricLogin,
   getLastActiveAt,
   isBiometricAvailable,
   isBiometricEnabled,
   markBiometricAsked,
   recordLastActive,
+  registerBiometricLogin,
   setBiometricEnabled,
   wasBiometricAsked,
 } from '../services/biometricAuth';
@@ -54,6 +57,7 @@ function NativeBiometricGate({ children }: { children: ReactNode }) {
   const previousToken = useRef<string | null>(null);
   const backgroundedAt = useRef<number | null>(null);
   const prompting = useRef(false);
+  const loginChecked = useRef<string | null>(null);
   const userId = user?.id ?? null;
 
   useEffect(() => { void getBiometricKind().then(setKind); }, []);
@@ -122,6 +126,20 @@ function NativeBiometricGate({ children }: { children: ReactNode }) {
     return () => subscription.remove();
   }, [userToken, userId, state, lockIfEnabled]);
 
+  // Quem ativou a biometria antes de existir o login por biometria (ou cuja
+  // ativação ficou sem rede) ganha a credencial assim que entra no app — sem
+  // perguntar de novo, a biometria já foi confirmada naquela ativação. Só
+  // quando o aparelho não tem credencial nenhuma: a de outro morador não é
+  // trocada sem ele pedir.
+  useEffect(() => {
+    if (state !== 'open' || !userToken || !user || loginChecked.current === user.id) return;
+    loginChecked.current = user.id;
+    void (async () => {
+      if (!(await isBiometricEnabled(user.id)) || (await getBiometricLogin())) return;
+      await registerBiometricLogin(user, userToken);
+    })();
+  }, [state, userToken, user]);
+
   const covered = !!userToken && state !== 'open';
   const copy = kindCopy[kind];
 
@@ -145,7 +163,7 @@ function NativeBiometricGate({ children }: { children: ReactNode }) {
           </View>
         </View>
       ) : null}
-      {userId ? <BiometricOfferModal visible={offerVisible} kind={kind} userId={userId} onClose={() => setOfferVisible(false)} /> : null}
+      {user && userToken ? <BiometricOfferModal visible={offerVisible} kind={kind} user={user} accessToken={userToken} onClose={() => setOfferVisible(false)} /> : null}
       {/* Mora aqui para nunca abrir por cima da trava nem do convite da
           biometria — um convite por vez. */}
       <StoreReviewPrompt blocked={covered || offerVisible} />
@@ -158,7 +176,9 @@ type OfferStep = 'ask' | 'confirming' | 'failed' | 'done';
 // Convite para ativar a biometria, mostrado uma vez logo após o login com
 // senha. Substitui o Alert nativo, que não permitia explicar o que muda nem
 // mostrar erro/sucesso da confirmação.
-function BiometricOfferModal({ visible, kind, userId, onClose }: { visible: boolean; kind: BiometricKind; userId: string; onClose: () => void }) {
+type BiometricUser = Parameters<typeof registerBiometricLogin>[0];
+
+function BiometricOfferModal({ visible, kind, user, accessToken, onClose }: { visible: boolean; kind: BiometricKind; user: BiometricUser; accessToken: string; onClose: () => void }) {
   const [step, setStep] = useState<OfferStep>('ask');
   const copy = kindCopy[kind];
 
@@ -166,12 +186,12 @@ function BiometricOfferModal({ visible, kind, userId, onClose }: { visible: bool
 
   const activate = async () => {
     setStep('confirming');
-    setStep((await enableBiometrics(userId)) ? 'done' : 'failed');
+    setStep((await enableBiometrics(user, accessToken)) ? 'done' : 'failed');
   };
 
   if (step === 'done') {
     return (
-      <PromptSheet visible={visible} onClose={onClose} icon="✓" tone="success" title="Biometria ativada" subtitle={`Na próxima vez que abrir o Lar em Dia, é só usar ${copy.noun}.`}>
+      <PromptSheet visible={visible} onClose={onClose} icon="✓" tone="success" title="Biometria ativada" subtitle={`Para abrir o Lar em Dia, e até para entrar de novo depois de sair, é só usar ${copy.noun}.`}>
         <AppButton title="Continuar" onPress={onClose} />
       </PromptSheet>
     );
@@ -188,17 +208,19 @@ function BiometricOfferModal({ visible, kind, userId, onClose }: { visible: bool
 }
 
 // Confirma a biometria antes de ligar: garante que funciona neste aparelho e
-// que quem está ativando é o dono da digital/rosto cadastrado.
-export const enableBiometrics = async (userId: string) => {
+// que quem está ativando é o dono da digital/rosto cadastrado. Liga as duas
+// coisas juntas: o desbloqueio e o login por biometria depois de "Sair".
+export const enableBiometrics = async (user: BiometricUser, accessToken: string) => {
   if (!(await authenticateWithBiometrics('Confirme para ativar a biometria'))) return false;
-  await setBiometricEnabled(userId, true);
+  await setBiometricEnabled(user.id, true);
+  await registerBiometricLogin(user, accessToken);
   return true;
 };
 
 // Estado do interruptor "Desbloqueio por biometria" do menu. available fica
 // false na web e em aparelho sem biometria cadastrada — aí o item nem aparece.
 export const useBiometricSetting = () => {
-  const { user } = useContext(AuthContext);
+  const { user, userToken } = useContext(AuthContext);
   const userId = user?.id ?? null;
   const [available, setAvailable] = useState(false);
   const [enabled, setEnabled] = useState(false);
@@ -215,14 +237,15 @@ export const useBiometricSetting = () => {
   }, [userId]);
 
   const toggle = useCallback(async () => {
-    if (!userId) return;
+    if (!user || !userToken) return;
     if (enabled) {
-      await setBiometricEnabled(userId, false);
+      await setBiometricEnabled(user.id, false);
+      await forgetBiometricLogin(user.id);
       setEnabled(false);
       return;
     }
-    if (await enableBiometrics(userId)) setEnabled(true);
-  }, [enabled, userId]);
+    if (await enableBiometrics(user, userToken)) setEnabled(true);
+  }, [enabled, user, userToken]);
 
   return { available, enabled, toggle };
 };

@@ -1,11 +1,14 @@
 import * as LocalAuthentication from 'expo-local-authentication';
 import { Platform } from 'react-native';
+import { API_BASE_URL, apiRequest } from '../api/client';
 import { storage } from '../context/AuthContext';
 
-// Desbloqueio por biometria (digital/rosto) do app nativo. A biometria nunca
-// substitui a senha no servidor: ela só libera a sessão (refresh token) que
-// já está guardada no SecureStore deste aparelho. Se a sessão acabar no
-// servidor, o morador volta para o login com senha como sempre.
+// Biometria (digital/rosto) do app nativo, em dois papéis:
+// - desbloqueio: libera a sessão (refresh token) já guardada no SecureStore;
+// - login: depois de "Sair", troca a credencial de biometria guardada no
+//   aparelho (ver getBiometricLogin) por uma sessão nova.
+// A senha nunca fica no aparelho. Se o servidor recusar a credencial, o
+// morador volta para o login com senha como sempre.
 //
 // A preferência é por usuário e por aparelho (chave com o id do usuário), e
 // fica fora de clearAuth() de propósito: sair da conta não deve desligar a
@@ -35,6 +38,57 @@ export const setBiometricEnabled = async (userId: string, enabled: boolean) => {
 export const wasBiometricAsked = async (userId: string) => (await storage.get(askedKey(userId))) === 'true';
 
 export const markBiometricAsked = (userId: string) => storage.set(askedKey(userId), 'true');
+
+// Credencial de "Entrar com biometria" (api: POST /auth/biometric). É o que
+// permite entrar pela digital depois de "Sair", quando já não existe sessão
+// para destravar. Uma por aparelho — a do último morador que ativou — e, como
+// a preferência acima, fica fora de clearAuth() de propósito.
+const LOGIN_KEY = 'biometricLogin';
+export type BiometricLogin = { userId: string; name: string; token: string };
+
+export const getBiometricLogin = async (): Promise<BiometricLogin | null> => {
+  try {
+    const stored = await storage.get(LOGIN_KEY);
+    return stored ? (JSON.parse(stored) as BiometricLogin) : null;
+  } catch {
+    return null;
+  }
+};
+
+// Pede ao servidor uma credencial nova para este usuário e guarda no
+// aparelho, revogando a anterior (mesmo que seja de outra pessoa). Falha de
+// rede só deixa sem o login por biometria; o desbloqueio continua valendo e
+// o BiometricGate tenta de novo na próxima abertura.
+export const registerBiometricLogin = async (user: { id: string; username: string; fullName?: string | null }, accessToken: string) => {
+  try {
+    const previous = await getBiometricLogin();
+    const data = await apiRequest<{ biometricToken: string }>('/auth/biometric', accessToken, {
+      method: 'POST',
+      body: JSON.stringify({ replaceToken: previous?.token }),
+    });
+    const name = user.fullName?.trim().split(/\s+/)[0] || user.username;
+    await storage.set(LOGIN_KEY, JSON.stringify({ userId: user.id, name, token: data.biometricToken }));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// Desliga o login por biometria deste usuário neste aparelho (e no servidor).
+export const forgetBiometricLogin = async (userId: string) => {
+  const current = await getBiometricLogin();
+  if (!current || current.userId !== userId) return;
+  await storage.delete(LOGIN_KEY);
+  await fetch(`${API_BASE_URL}/auth/biometric/revoke`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ biometricToken: current.token }),
+  }).catch(() => null);
+};
+
+// O servidor recusou a credencial (senha trocada, conta desativada, logout
+// forçado pelo suporte): só some do aparelho, sem chamada nenhuma.
+export const discardBiometricLogin = () => storage.delete(LOGIN_KEY);
 
 // Último momento em que o app estava destravado e em uso — gravado ao ir
 // para o segundo plano. Fica no aparelho (e não só em memória) porque o
@@ -77,4 +131,11 @@ export const getBiometricKind = async (): Promise<BiometricKind> => {
     // cai no genérico
   }
   return 'generic';
+};
+
+// Texto do botão da tela de login.
+export const biometricLoginLabel: Record<BiometricKind, string> = {
+  fingerprint: 'Entrar com a digital',
+  face: Platform.OS === 'ios' ? 'Entrar com Face ID' : 'Entrar com o rosto',
+  generic: 'Entrar com biometria',
 };

@@ -329,6 +329,24 @@ alter table refresh_tokens add column if not exists active_profile_id uuid refer
 -- validateRefreshSession em authService.ts).
 alter table refresh_tokens add column if not exists replaced_by uuid references refresh_tokens(id) on delete set null;
 
+-- "Entrar com biometria" no app nativo: credencial do aparelho, separada da
+-- sessão, que sobrevive ao "Sair" (que continua revogando a sessão de
+-- verdade). password_fingerprint é um hash do password_hash da época da
+-- ativação — qualquer troca de senha (pelo morador, pelo link de
+-- recuperação ou pela administração) invalida a credencial sem precisar
+-- lembrar de revogá-la em cada um desses lugares. Ver authService.ts.
+create table if not exists biometric_tokens (
+  id uuid primary key,
+  user_id uuid not null references users(id) on delete cascade,
+  token_hash text not null unique,
+  password_fingerprint text not null,
+  expires_at timestamptz not null,
+  last_used_at timestamptz,
+  revoked_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists biometric_tokens_user_idx on biometric_tokens(user_id);
+
 create table if not exists password_reset_tokens (
   id uuid primary key,
   user_id uuid not null references users(id) on delete cascade,

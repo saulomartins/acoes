@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { authenticate, forgetPlatformRestriction } from '../middleware/auth';
 import { isPlatformRestricted, RESIDENT_SUSPENDED_MESSAGE } from '../services/platformSuspensionService';
-import { AMBIGUOUS_LOGIN, changePassword, listProfiles, login, refresh, register, requestPasswordReset, resetPassword, revokeRefreshToken, switchProfile } from '../services/authService';
+import { AMBIGUOUS_LOGIN, changePassword, createBiometricToken, listProfiles, login, loginWithBiometricToken, refresh, register, requestPasswordReset, resetPassword, revokeBiometricToken, revokeRefreshToken, switchProfile } from '../services/authService';
 import { query } from '../db';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { FEATURE_KEYS, type FeatureKey } from '../services/featureCatalog';
@@ -175,6 +175,33 @@ router.post('/logout', async (req, res) => {
     return res.status(204).send();
   }
 });
+
+// "Entrar com biometria" (app nativo). Ativar exige estar logado; a
+// credencial devolvida fica no aparelho e sobrevive ao /logout. Quem ativa
+// de novo (ou troca de conta no aparelho) manda a anterior em
+// `replaceToken` para ela não ficar válida esquecida no servidor.
+router.post('/biometric', authenticate, asyncHandler(async (req, res) => {
+  const { replaceToken } = req.body ?? {};
+  if (replaceToken && typeof replaceToken === 'string') await revokeBiometricToken(replaceToken);
+  const biometricToken = await createBiometricToken(req.user!.id);
+  if (!biometricToken) return res.status(404).json({ message: 'Usuário não encontrado.' });
+  return res.status(201).json({ biometricToken });
+}));
+
+router.post('/biometric/login', limit(20, 15 * 60_000), asyncHandler(async (req, res) => {
+  const { biometricToken } = req.body ?? {};
+  if (!biometricToken || typeof biometricToken !== 'string') return res.status(400).json({ message: 'biometricToken is required' });
+  const response = await loginWithBiometricToken(biometricToken);
+  if (!response) return res.status(401).json({ message: 'A entrada por biometria não vale mais neste aparelho. Entre com sua senha.' });
+  return res.json(response);
+}));
+
+// Sem `authenticate`: ter o token já é a prova (mesmo padrão de /logout).
+router.post('/biometric/revoke', asyncHandler(async (req, res) => {
+  const { biometricToken } = req.body ?? {};
+  if (biometricToken && typeof biometricToken === 'string') await revokeBiometricToken(biometricToken);
+  return res.status(204).send();
+}));
 
 router.get('/profiles', authenticate, asyncHandler(async (req, res) => {
   return res.json({ profiles: await listProfiles(req.user!.id) });
