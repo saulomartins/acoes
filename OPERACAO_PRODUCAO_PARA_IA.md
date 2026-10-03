@@ -1254,3 +1254,30 @@ Commits `5509bd9` e `f641c78`. Só a API (o web não mudou).
   perfis `preview` e `production-apk` compilam só `armeabi-v7a,arm64-v8a`,
   sem x86/x86_64. Vale a partir do próximo APK. O AAB (`production`) segue
   com as 4 arquiteturas.
+
+## Publicação de 03/10/2026 — senha visível, texto do WhatsApp e novo nada consta
+
+Commits `c9ac958`, `4843145`, `613077c`, `94722ed` e `98221b2`. API e web.
+Sem mudança em `api/src/db/schema.sql` desde `78d9b63` (já aplicado em
+02/10), então o passo 3 não foi necessário.
+
+- API: `railway up` a partir de `externals` → deployment
+  `f08150dc-e2c3-4d46-bbdd-4cf8e4b0d9a1`, `SUCCESS`, boot limpo.
+  Nova dependência: `qrcode`, usada no QR code do PDF.
+- Web: deploy `https://594c51d8.lar-em-dia.pages.dev`; `gestaolaremdia.com`
+  servindo `AppEntry-e3e5bd1e11ab91e4111253d381ec5d11.js`.
+- Smoke: `/health` 200, site 200, `/verificar/X` 200,
+  `/clearances/verify/<código inexistente>` 404, como esperado.
+- Android: AAB 1.6.3 (versionCode 43) gerado no EAS com a correção de senha.
+  Falta enviar à Play Console.
+
+### O que mudou
+- Campos de nova senha (primeiro acesso e recuperação): o texto não tinha cor,
+  e no Android com tema escuro as bolinhas ficavam brancas sobre fundo branco.
+  Agora há `PasswordInput` com Mostrar/Ocultar e cor padrão no `TextInput` base.
+- Comunicado de débito por WhatsApp em tom cordial: primeiro nome, meses por
+  extenso (Agosto-2026) e pedido de comprovante.
+- Nada consta: texto de "Declaração de quitação de débitos condominiais",
+  menção ao subsíndico "no exercício das atribuições de Síndico(a)", sem linha
+  de assinatura, com QR code para `/verificar/CÓDIGO` e datas no fuso de
+  São Paulo. O hash não mudou, então os códigos já emitidos continuam válidos.
