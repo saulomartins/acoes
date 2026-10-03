@@ -176,12 +176,14 @@ router.get('/:id/document', asyncHandler(async (req, res) => {
   if (!request) return res.status(404).json({ message: 'Declaração não encontrada.' });
   if (request.status !== 'issued') return res.status(409).json({ message: 'Esta declaração ainda não foi emitida.' });
 
+  const requester = await query<{ role: string }>(`select role from users where id = $1`, [request.requested_by]);
   const verifyUrl = `${config.webUrl.replace(/\/$/, '')}/verificar/${request.verification_code}`;
   const pdf = await buildClearancePdf({
     condominiumName: request.condominium_name, condominiumAddress: request.condominium_address,
     condominiumCnpj: request.condominium_cnpj, issuerName: request.issuer_name, issuerCpf: request.issuer_cpf,
     issuerRole: request.issuer_role, requesterName: request.requester_name, requesterCpf: request.requester_cpf,
     unitLabel: request.unit_label, issuedAt: new Date(request.issued_at), verificationCode: request.verification_code,
+    requesterRole: requester.rows[0]?.role || null,
   }, verifyUrl);
 
   res.setHeader('Content-Type', 'application/pdf');
