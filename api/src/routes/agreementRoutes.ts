@@ -26,6 +26,11 @@ const isValidDate = (value: string) => {
 };
 const daysBetween = (from: string, to: string) => Math.max(0, Math.floor((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86400000));
 const addMonths = (date: string, months: number) => { const value = new Date(`${date}T12:00:00Z`); value.setUTCMonth(value.getUTCMonth() + months); return value.toISOString().slice(0, 10); };
+const MONTH_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+// "2026-08" -> "Agosto-2026", no formato usado nos comunicados de débito.
+const monthLabel = (yearMonth: string) => `${MONTH_NAMES[Number(yearMonth.slice(5, 7)) - 1]}-${yearMonth.slice(0, 4)}`;
+// Primeiro nome com só a inicial maiúscula ("VITOR LEONARDO" -> "Vitor").
+const firstName = (name: string) => { const first = String(name || '').trim().split(/\s+/)[0] || ''; return first.charAt(0).toLocaleUpperCase('pt-BR') + first.slice(1).toLocaleLowerCase('pt-BR'); };
 const money = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const digits = (value: unknown) => String(value ?? '').replace(/\D/g, '');
 const formatPhoneDisplay = (value: string) => {
@@ -134,8 +139,10 @@ router.post('/communicate-debt', authorize('sindico', 'subsindico'), asyncHandle
   if (!debts.rows.length) return res.status(400).json({ message: 'Nenhum débito em aberto foi encontrado.' });
   const today = new Date().toISOString().slice(0, 10);
   const total = debts.rows.reduce((sum: number, row: any) => { const late = isoDate(row.due_date) < today ? daysBetween(isoDate(row.due_date), today) : 0; return sum + Number(row.amount_cents) + (late ? Math.round(Number(row.amount_cents) * .02) + Math.round(Number(row.amount_cents) * .000333 * late) : 0); }, 0);
-  const references = debts.rows.map((row: any) => isoDate(row.reference_month || row.due_date).slice(0, 7).split('-').reverse().join('/')).join(', ');
-  const message = `Olá, ${person.rows[0].full_name || person.rows[0].username}. Identificamos débito(s) do apartamento ${person.rows[0].unit || ''}, referência(s) ${references}. Valor atualizado em ${today.split('-').reverse().join('/')}: ${money(total)}. Entre em contato com a administração para regularização ou negociação.\n\nFale com a administração pelo WhatsApp: ${formatPhoneDisplay(condominiumPhone)}`;
+  const months = [...new Set(debts.rows.map((row: any) => isoDate(row.reference_month || row.due_date).slice(0, 7)))].sort() as string[];
+  const references = months.map(monthLabel);
+  const referencesText = references.length > 1 ? `aos meses de ${references.slice(0, -1).join(', ')} e ${references[references.length - 1]}` : `ao mês de ${references[0]}`;
+  const message = `${firstName(person.rows[0].full_name || person.rows[0].username)},\n\nEstou realizando a verificação dos pagamentos referentes ${referencesText} e, até o momento, não identificamos o recebimento do seu pagamento. O valor atualizado em ${today.split('-').reverse().join('/')} é de ${money(total)}.\n\nCaso já tenha efetuado o pagamento, por favor, entre em contato e envie o comprovante para que possamos atualizar o sistema corretamente.\n\nWhatsApp da administração: ${formatPhoneDisplay(condominiumPhone)}\n\nAgradeço a atenção!!`;
   const recipients = await recipientsFor(condominiumId, userId, person.rows[0].unit_id);
   await notify({ condominiumId, senderId, recipients, title: 'Comunicado de débito condominial', body: message });
   const personPhone = digits(person.rows[0].phone);
