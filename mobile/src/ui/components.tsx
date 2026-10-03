@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, type TextInputProps, View } from 'react-native';
 import { Text, TextInput } from './text';
 import { colors, layout, shadow } from './theme';
@@ -34,6 +34,34 @@ export const TextField = ({ label, hint, required, style, ...props }: TextInputP
     <TextInput placeholderTextColor={colors.placeholder} {...props} style={[styles.fieldInput, style]} />
   </Field>
 );
+
+// Campo de senha com "Mostrar/Ocultar". A cor do texto é explícita porque, sem
+// ela, Android com tema escuro desenha as bolinhas em branco sobre o fundo
+// branco — o usuário digitava e não via nada.
+export const PasswordInput = ({ style, ...props }: Omit<TextInputProps, 'secureTextEntry'>) => {
+  const [visible, setVisible] = useState(false);
+  return (
+    <View style={styles.passwordField}>
+      <TextInput
+        placeholderTextColor={colors.placeholder}
+        autoCapitalize="none"
+        autoCorrect={false}
+        {...props}
+        secureTextEntry={!visible}
+        style={[styles.passwordInput, style]}
+      />
+      <Pressable
+        onPress={() => setVisible(v => !v)}
+        style={styles.passwordToggle}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={visible ? 'Ocultar senha' : 'Mostrar senha'}
+      >
+        <Text style={styles.passwordToggleText}>{visible ? 'Ocultar' : 'Mostrar'}</Text>
+      </Pressable>
+    </View>
+  );
+};
 
 type ButtonProps = {
   title: string;
@@ -107,6 +135,10 @@ export const AppDialog = ({ visible, title, message, tone = 'info', confirmLabel
 );
 
 const styles = StyleSheet.create({
+  passwordField: { position: 'relative', justifyContent: 'center', marginBottom: 15 },
+  passwordInput: { minHeight: 52, borderWidth: 1, borderColor: '#dbe1e7', borderRadius: layout.controlRadius, backgroundColor: '#fff', color: colors.ink, paddingHorizontal: 13, paddingRight: 80, fontSize: 16 },
+  passwordToggle: { position: 'absolute', right: 13, top: 0, bottom: 0, justifyContent: 'center', paddingHorizontal: 4 },
+  passwordToggleText: { color: colors.primary, fontSize: 13, fontWeight: '800' },
   field: { marginBottom: 14 },
   fieldLabel: { color: colors.ink, fontSize: 14.5, fontWeight: '800', marginBottom: 6 },
   fieldRequired: { color: colors.red },

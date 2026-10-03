@@ -1,9 +1,9 @@
 import React, { useContext, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { Text, TextInput } from '../ui/text';
+import { Text } from '../ui/text';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
-import { AppButton } from '../ui/components';
+import { AppButton, PasswordInput } from '../ui/components';
 import { colors, layout, shadow } from '../ui/theme';
 
 export default function ForcePasswordChange() {
@@ -33,8 +33,8 @@ export default function ForcePasswordChange() {
   return <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled"><View style={styles.card}>
     <Text style={styles.eyebrow}>PRIMEIRO ACESSO</Text><Text style={styles.title}>Crie uma nova senha</Text>
     <Text style={styles.subtitle}>Por segurança, você precisa trocar a senha inicial antes de continuar. Use pelo menos 8 caracteres.</Text>
-    <Text style={styles.label}>Nova senha</Text><TextInput value={password} onChangeText={setPassword} secureTextEntry style={styles.input} />
-    <Text style={styles.label}>Confirmar nova senha</Text><TextInput value={confirmation} onChangeText={setConfirmation} secureTextEntry style={styles.input} />
+    <Text style={styles.label}>Nova senha</Text><PasswordInput value={password} onChangeText={setPassword} />
+    <Text style={styles.label}>Confirmar nova senha</Text><PasswordInput value={confirmation} onChangeText={setConfirmation} />
     {confirmation && confirmation !== password ? <Text style={styles.mismatch}>As senhas não são iguais.</Text> : null}
     {error ? <View style={styles.error}><Text style={styles.errorText}>{error}</Text></View> : null}
     <AppButton title={loading ? 'Alterando...' : 'Alterar senha'} onPress={submit} disabled={loading || !valid} />
@@ -50,7 +50,6 @@ const styles = StyleSheet.create({
   title: { color: colors.ink, fontSize: 27, fontWeight: '900', marginTop: 8 },
   subtitle: { color: colors.muted, fontSize: 15, lineHeight: 22, marginTop: 7, marginBottom: 24 },
   label: { color: colors.ink, fontWeight: '800', marginBottom: 7 },
-  input: { minHeight: 52, borderWidth: 1, borderColor: '#dbe1e7', borderRadius: layout.controlRadius, paddingHorizontal: 13, fontSize: 16, marginBottom: 15 },
   error: { backgroundColor: '#fff0f0', padding: 11, borderRadius: 8, marginBottom: 12 },
   errorText: { color: colors.red, fontWeight: '700' },
   mismatch: { color: colors.red, marginTop: -8, marginBottom: 12 },

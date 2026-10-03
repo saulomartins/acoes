@@ -1,6 +1,6 @@
 import React from 'react';
 import { Text as RNText, TextInput as RNTextInput, type TextInputProps, type TextProps } from 'react-native';
-import { MAX_FONT_SCALE } from './theme';
+import { colors, MAX_FONT_SCALE } from './theme';
 
 // Text e TextInput do app inteiro passam por aqui em vez de virem direto do
 // react-native. O motivo é o "tamanho da fonte" do sistema: o Android deixa o
@@ -19,6 +19,9 @@ export const Text = ({ maxFontSizeMultiplier = MAX_FONT_SCALE, ...props }: TextP
   <RNText maxFontSizeMultiplier={maxFontSizeMultiplier} {...props} />
 );
 
-export const TextInput = ({ maxFontSizeMultiplier = MAX_FONT_SCALE, ...props }: TextInputProps) => (
-  <RNTextInput maxFontSizeMultiplier={maxFontSizeMultiplier} {...props} />
+// A cor padrão do texto também é fixada aqui: sem ela, Android com tema escuro
+// usa texto branco e campos sem "color" no estilo ficam invisíveis sobre o fundo
+// branco (inclusive as bolinhas de senha). Um "color" no style continua vencendo.
+export const TextInput = ({ maxFontSizeMultiplier = MAX_FONT_SCALE, style, ...props }: TextInputProps) => (
+  <RNTextInput maxFontSizeMultiplier={maxFontSizeMultiplier} style={[{ color: colors.ink }, style]} {...props} />
 );
