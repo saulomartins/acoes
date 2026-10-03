@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import QRCode from 'qrcode';
 import { createHash, randomBytes } from 'crypto';
 
 export type ClearanceDocumentData = {
@@ -79,6 +80,9 @@ export const buildClearancePdf = async (data: ClearanceDocumentData, verifyUrl: 
   doc.moveDown(2.2);
 
   const cargo = roleLabel[data.issuerRole] || data.issuerRole;
+  // A representação legal do condomínio é do síndico; quando quem emite é o
+  // subsíndico, o texto deixa claro que ele age no lugar do síndico.
+  const actingAs = data.issuerRole === 'subsindico' ? ', no exercício das atribuições de Síndico(a)' : '';
   const issued = data.issuedAt;
   const unit = data.unitLabel || '—';
   const holder = data.requesterRole === 'inquilino' ? 'ocupada por' : 'de titularidade de';
@@ -88,7 +92,7 @@ export const buildClearancePdf = async (data: ClearanceDocumentData, verifyUrl: 
   doc.text(
     `${data.condominiumName}${data.condominiumCnpj ? `, inscrito no CNPJ sob o nº ${data.condominiumCnpj}` : ''}` +
     `${data.condominiumAddress ? `, situado na ${data.condominiumAddress}` : ''}, neste ato representado por seu(sua) ${cargo}, ` +
-    `${data.issuerName}${data.issuerCpf ? `, portador(a) do CPF nº ${data.issuerCpf}` : ''}, DECLARA, para os devidos fins e a quem ` +
+    `${data.issuerName}${data.issuerCpf ? `, portador(a) do CPF nº ${data.issuerCpf}` : ''}${actingAs}, DECLARA, para os devidos fins e a quem ` +
     `possa interessar, que a unidade ${unit}, ${holder} ${data.requesterName}${data.requesterCpf ? `, CPF nº ${data.requesterCpf}` : ''}, ` +
     `encontra-se integralmente quite com suas obrigações condominiais até a presente data.`,
     left, doc.y, paragraph,
@@ -108,29 +112,35 @@ export const buildClearancePdf = async (data: ClearanceDocumentData, verifyUrl: 
   const city = cityFromAddress(data.condominiumAddress);
   doc.text(`${city ? `${city}, ` : ''}${longDate(issued)}.`, left, doc.y, { width, align: 'right' });
 
-  // Assinatura.
-  doc.moveDown(4.5);
-  const lineWidth = 260;
-  const lineX = left + (width - lineWidth) / 2;
-  doc.moveTo(lineX, doc.y).lineTo(lineX + lineWidth, doc.y).lineWidth(0.8).strokeColor(INK).stroke();
-  doc.moveDown(0.5);
+  // Identificação de quem emitiu. Sem linha de assinatura: o documento é
+  // eletrônico e a validade vem do código verificador do rodapé.
+  doc.moveDown(3);
   doc.font('Helvetica-Bold').fontSize(11.5).text(data.issuerName.toUpperCase(), left, doc.y, { width, align: 'center' });
   doc.font('Helvetica').fontSize(10.5).text(`${cargo} – ${data.condominiumName.toUpperCase()}`, { width, align: 'center' });
   if (data.issuerCpf) doc.text(`CPF nº ${data.issuerCpf}`, { width, align: 'center' });
 
   // Rodapé de autenticidade — é isso que dá validade prática ao documento
-  // sem certificado digital: qualquer um confere na página pública. Fica
-  // preso ao pé da página; a margem inferior é zerada para o pdfkit não
-  // abrir uma segunda página ao escrever ali.
-  const boxHeight = 62;
+  // sem certificado digital: qualquer um confere na página pública, lendo o
+  // QR code ou digitando o código. Fica preso ao pé da página; a margem
+  // inferior é zerada para o pdfkit não abrir uma segunda página ali.
+  const boxHeight = 96;
   const boxY = doc.page.height - margin + 8 - boxHeight;
+  const qrSize = 76;
+  const pad = (boxHeight - qrSize) / 2;
+  const qr = await QRCode.toBuffer(verifyUrl, { type: 'png', margin: 0, width: 300, errorCorrectionLevel: 'M', color: { dark: INK, light: '#ffffff' } });
   doc.page.margins.bottom = 0;
   doc.roundedRect(left, boxY, width, boxHeight, 6).fillColor('#f3f6f6').fill();
-  doc.fillColor(MUTED).font('Helvetica').fontSize(8.5)
-    .text('Documento emitido eletronicamente pelo sistema Lar em Dia.', left + 12, boxY + 10, { width: width - 24, align: 'center' });
-  doc.fillColor(INK).font('Helvetica-Bold').text(`Código verificador: ${data.verificationCode}`, { width: width - 24, align: 'center' });
-  doc.fillColor(MUTED).font('Helvetica').text(`Confira a autenticidade em ${verifyUrl}`, { width: width - 24, align: 'center' });
-  doc.text(`Emitido em ${issued.toLocaleString('pt-BR', { timeZone: TIME_ZONE })} · SHA-256: ${hashDocument(data).slice(0, 32)}...`, { width: width - 24, align: 'center' });
+  doc.rect(left + pad - 3, boxY + pad - 3, qrSize + 6, qrSize + 6).fillColor('#ffffff').fill();
+  doc.image(qr, left + pad, boxY + pad, { width: qrSize, height: qrSize });
+  const textX = left + pad + qrSize + 16;
+  const textWidth = width - (textX - left) - 14;
+  doc.fillColor(INK).font('Helvetica-Bold').fontSize(9.5).text('Verifique a autenticidade deste documento', textX, boxY + 15, { width: textWidth });
+  doc.moveDown(0.25).fillColor(MUTED).font('Helvetica').fontSize(8.5)
+    .text('Aponte a câmera do celular para o QR code ou acesse o endereço abaixo e informe o código verificador.', { width: textWidth });
+  doc.moveDown(0.25).fillColor(INK).font('Helvetica-Bold').text(`Código verificador: ${data.verificationCode}`, { width: textWidth });
+  doc.fillColor(MUTED).font('Helvetica').text(verifyUrl, { width: textWidth, link: verifyUrl });
+  doc.text(`Emitido eletronicamente pelo Lar em Dia em ${issued.toLocaleString('pt-BR', { timeZone: TIME_ZONE })}`, { width: textWidth });
+  doc.text(`SHA-256: ${hashDocument(data).slice(0, 32)}...`, { width: textWidth });
 
   doc.end();
   return done;
