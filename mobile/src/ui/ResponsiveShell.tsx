@@ -57,6 +57,8 @@ const items: Item[] = [
   // (condominium_id nulo). Por isso ele fica de fora — o catálogo de rotas em
   // AppNavigator já o excluía, era só o menu que continuava mostrando.
   { label: 'Artigos do regimento', route: 'RegulationArticles', symbol: '📖', roles: ['sindico', 'subsindico'], feature: 'regimento_ocorrencias' },
+  // Mesma seção para o morador, em modo leitura (e presente no app nativo).
+  { label: 'Regimento interno', route: 'Regulation', symbol: '📖', roles: ['proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
   { label: 'Ocorrências', route: 'Occurrences', symbol: '⚑', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
   { label: 'Emitir notificação', route: 'InfractionNoticeIssue', symbol: '✎', roles: ['sindico', 'subsindico'], feature: 'regimento_ocorrencias' },
   { label: 'Notificações de infração', route: 'InfractionNotices', symbol: '⚠', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
@@ -72,7 +74,7 @@ const manualUrlForRole = (role: string | undefined) => role && manualPathByRole[
 const billingRoutes = ['Invoices', 'Debts', 'AgreementHistory', 'BillingSettings', 'UnitExtraCharges', 'UnitConsumption'];
 const noticeRoutes = ['Communications', 'Reports'];
 const bankRoutes = ['Banks', 'BankConfigurations', 'BankLink', 'BankIntegration', 'BankIntegrationGuide'];
-const regulationRoutes = ['RegulationArticles', 'Occurrences', 'InfractionNoticeIssue', 'InfractionNotices'];
+const regulationRoutes = ['RegulationArticles', 'Regulation', 'Occurrences', 'InfractionNoticeIssue', 'InfractionNotices'];
 const participationRoutes = ['Polls', 'SpaceReservations'];
 const platformRoutes = ['Condominiums', 'PlatformPlans', 'PlatformRevenue', 'PlatformReceipts', 'AuditLog', 'GoogleDriveIntegrationGuide'];
 

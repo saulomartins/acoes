@@ -106,6 +106,7 @@ const buildMenuStructure = (): MenuItem[] => [
     feature: 'regimento_ocorrencias',
     submenu: [
       { title: 'Artigos do regimento', shortTitle: 'Regimento', description: '', route: 'RegulationArticles', symbol: '📖', accent: colors.amber, roles: ['sindico', 'subsindico'], feature: 'regimento_ocorrencias' },
+      { title: 'Regimento interno', shortTitle: 'Regimento', description: '', route: 'Regulation', symbol: '📖', accent: colors.amber, roles: ['proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
       { title: 'Ocorrências', shortTitle: 'Ocorrências', description: '', route: 'Occurrences', symbol: '⚑', accent: colors.teal, roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
       { title: 'Emitir notificação', shortTitle: 'Emitir notificação', description: '', route: 'InfractionNoticeIssue', symbol: '✎', accent: colors.red, roles: ['sindico', 'subsindico'], feature: 'regimento_ocorrencias' },
       { title: 'Notificações de infração', shortTitle: 'Notificações', description: '', route: 'InfractionNotices', symbol: '⚠', accent: colors.primary, roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },

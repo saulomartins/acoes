@@ -18,6 +18,7 @@ import Reports from '../screens/Reports';
 import Accountability from '../screens/Accountability';
 import MobileReleases from '../screens/MobileReleases';
 import Occurrences from '../screens/Occurrences';
+import Regulation from '../screens/Regulation';
 import InfractionNotices from '../screens/InfractionNotices';
 import Polls from '../screens/Polls';
 import LegalDocument from '../screens/LegalDocument';
@@ -80,6 +81,7 @@ type RootStackParamList = {
   GoogleDriveIntegrationGuide: undefined;
   Support: undefined;
   RegulationArticles: undefined;
+  Regulation: undefined;
   Occurrences: undefined;
   InfractionNoticeIssue: { occurrenceId?: string; unitId?: string } | undefined;
   InfractionNotices: undefined;
@@ -136,6 +138,7 @@ const ReportsScreen = withRoleGuard(withResponsiveShell(Reports, 'Reports'), 'Re
 const AccountabilityScreen = withRoleGuard(withResponsiveShell(Accountability, 'Accountability'), 'Accountability');
 const MobileReleasesScreen = withRoleGuard(withResponsiveShell(MobileReleases, 'MobileReleases'), 'MobileReleases');
 const OccurrencesScreen = withRoleGuard(withResponsiveShell(Occurrences, 'Occurrences'), 'Occurrences');
+const RegulationScreen = withRoleGuard(withResponsiveShell(Regulation, 'Regulation'), 'Regulation');
 const InfractionNoticesScreen = withRoleGuard(withResponsiveShell(InfractionNotices, 'InfractionNotices'), 'InfractionNotices');
 const PollsScreen = withRoleGuard(withResponsiveShell(Polls, 'Polls'), 'Polls');
 const SpaceReservationsScreen = withRoleGuard(withResponsiveShell(SpaceReservations, 'SpaceReservations'), 'SpaceReservations');
@@ -275,6 +278,7 @@ export default function AppNavigator() {
               <Stack.Screen name="Reports" component={ReportsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Accountability" component={AccountabilityScreen} options={{ headerShown: false }} />
               <Stack.Screen name="MobileReleases" component={MobileReleasesScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Regulation" component={RegulationScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Occurrences" component={OccurrencesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="InfractionNotices" component={InfractionNoticesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Polls" component={PollsScreen} options={{ headerShown: false }} />

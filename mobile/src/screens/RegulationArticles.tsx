@@ -1,7 +1,8 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../ui/text';
-import { apiRequest } from '../api/client';
+import * as DocumentPicker from 'expo-document-picker';
+import { apiRequest, apiUpload, openAuthenticatedFile } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
 import { AppButton, AppDialog, EmptyState, Panel } from '../ui/components';
 import { colors, layout } from '../ui/theme';
@@ -17,6 +18,8 @@ type Article = {
   reiteration_daily_percent: string; acknowledgment_tolerance_days: number | null; active: boolean;
 };
 type Condominium = { id: string; name: string };
+type RegulationDocument = { fileName: string; fileSize: number; uploadedAt: string };
+const fileSizeLabel = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1).replace('.', ',')} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 type Dialog = { title: string; message: string; tone: 'info' | 'success' | 'error'; confirmLabel?: string; cancelLabel?: string; onConfirm?: () => void } | null;
 
 const emptyForm = {
@@ -32,6 +35,8 @@ export default function RegulationArticles({ navigation }: any) {
   const [condominiums, setCondominiums] = useState<Condominium[]>([]);
   const [condominiumId, setCondominiumId] = useState('');
   const [articles, setArticles] = useState<Article[]>([]);
+  const [regulationDocument, setRegulationDocument] = useState<RegulationDocument | null>(null);
+  const [documentBusy, setDocumentBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -42,9 +47,10 @@ export default function RegulationArticles({ navigation }: any) {
   const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
   const tourSteps: TourStep[] = [
     { key: 'condominium', title: 'Selecionar condomínio', description: 'Essa etapa só aparece pra administradores da plataforma (admin_geral), que cuidam de vários condomínios ao mesmo tempo — escolha aqui qual condomínio você quer configurar antes de ver ou cadastrar artigos. Síndico e subsíndico não veem esse seletor: o sistema já sabe qual é o condomínio deles.' },
+    { key: 'document', title: 'Regimento interno em PDF', description: 'Envie aqui o PDF do regimento interno do condomínio (até 20 MB). Fica um arquivo por condomínio: ao enviar outro, ele substitui o anterior. "Abrir PDF" mostra o arquivo guardado e "Excluir PDF" remove. Isso não cria nem altera artigos — os artigos abaixo continuam sendo cadastrados à parte, porque é deles que saem multa, prazo e juros das notificações.' },
     { key: 'template', title: 'Aplicar modelo inicial', description: 'Só aparece quando o condomínio ainda não tem nenhum artigo cadastrado. Cria de uma vez um conjunto de artigos prontos (totalmente editáveis depois) como ponto de partida. Só funciona em condomínios sem nenhum artigo — se já existir pelo menos um cadastrado, a aplicação é bloqueada.' },
     { key: 'create', title: 'Cadastrar artigo do regimento', description: 'Preencha o número do artigo, a descrição da infração coberta, a multa base (% sobre a taxa condominial da unidade) e o prazo de pagamento em dias corridos. Juros de mora (% ao mês) e multa diária por reincidência contínua são opcionais. O índice de correção monetária pode ser Fixo (você digita o % ao mês) ou IGPM/INPC (cujo percentual mensal é cadastrado à parte em Índices econômicos). A tolerância de ciência (dias após o envio) é opcional: se preenchida, notificações emitidas com este artigo recebem ciência automática depois desse prazo, mesmo que o morador não abra o app.' },
-    { key: 'list', title: 'Artigos cadastrados', description: 'Cada card mostra multa, prazo, juros, correção e reincidência configurados. "Editar" só muda a configuração viva do artigo: notificações já emitidas guardam sua própria cópia das regras no momento da emissão e nunca são reescritas por uma edição posterior. "Desativar" apenas impede o uso do artigo em novas notificações — notificações antigas continuam intactas, e dá pra reativar quando quiser.' },
+    { key: 'list', title: 'Artigos cadastrados', description: 'Cada card mostra multa, prazo, juros, correção e reincidência configurados. "Editar" só muda a configuração viva do artigo: notificações já emitidas guardam sua própria cópia das regras no momento da emissão e nunca são reescritas por uma edição posterior. "Desativar" apenas impede o uso do artigo em novas notificações — notificações antigas continuam intactas, e dá pra reativar quando quiser. "Excluir" apaga o artigo de vez e só funciona se ele nunca foi usado em uma notificação de infração; se já foi, use "Desativar".' },
   ];
 
   useEffect(() => {
@@ -60,8 +66,13 @@ export default function RegulationArticles({ navigation }: any) {
     setLoading(true); setError('');
     try {
       const query = isAdminGeral ? `?active=all&condominiumId=${condominiumId}` : '?active=all';
-      const data = await apiRequest<{ articles: Article[] }>(`/regulation-articles${query}`, userToken);
+      const [data, documentData] = await Promise.all([
+        apiRequest<{ articles: Article[] }>(`/regulation-articles${query}`, userToken),
+        // Falha ao consultar o PDF não pode impedir a lista de artigos de abrir.
+        apiRequest<{ document: RegulationDocument | null }>('/regulation-articles/document/info', userToken).catch(() => ({ document: null })),
+      ]);
       setArticles(data.articles);
+      setRegulationDocument(documentData.document);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Falha ao carregar os artigos do regimento.');
     } finally {
@@ -150,6 +161,78 @@ export default function RegulationArticles({ navigation }: any) {
     confirmLabel: article.active ? 'Desativar' : 'Reativar',
     cancelLabel: 'Voltar',
     onConfirm: () => { setDialog(null); toggleActive(article); },
+  });
+
+  const deleteArticle = async (article: Article) => {
+    if (!userToken) return;
+    setLoading(true); setError('');
+    try {
+      await apiRequest(`/regulation-articles/${article.id}`, userToken, { method: 'DELETE' });
+      await load();
+    } catch (e) {
+      setDialog({ title: 'Não foi possível excluir', message: e instanceof Error ? e.message : 'Falha ao excluir o artigo.', tone: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const confirmDelete = (article: Article) => setDialog({
+    title: 'Excluir artigo',
+    message: `Excluir "${article.article_number}" definitivamente? Só é possível excluir um artigo que nunca foi usado em notificação de infração. Esta ação não pode ser desfeita.`,
+    tone: 'error',
+    confirmLabel: 'Excluir',
+    cancelLabel: 'Voltar',
+    onConfirm: () => { setDialog(null); deleteArticle(article); },
+  });
+
+  const uploadDocument = async () => {
+    if (!userToken) return;
+    const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true });
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    setDocumentBusy(true); setError('');
+    try {
+      await apiUpload('/regulation-articles/document', userToken, Platform.OS === 'web' && asset.file ? asset.file : { uri: asset.uri, name: asset.name, mimeType: asset.mimeType });
+      await load();
+    } catch (e) {
+      setDialog({ title: 'Não foi possível enviar', message: e instanceof Error ? e.message : 'Falha ao enviar o PDF do regimento.', tone: 'error' });
+    } finally {
+      setDocumentBusy(false);
+    }
+  };
+
+  const openDocument = async () => {
+    if (!userToken || !regulationDocument) return;
+    setDocumentBusy(true);
+    try {
+      await openAuthenticatedFile('/regulation-articles/document', userToken, regulationDocument.fileName, 'application/pdf');
+    } catch (e) {
+      setDialog({ title: 'Não foi possível abrir', message: e instanceof Error ? e.message : 'Falha ao abrir o PDF do regimento.', tone: 'error' });
+    } finally {
+      setDocumentBusy(false);
+    }
+  };
+
+  const deleteDocument = async () => {
+    if (!userToken) return;
+    setDocumentBusy(true);
+    try {
+      await apiRequest('/regulation-articles/document', userToken, { method: 'DELETE' });
+      await load();
+    } catch (e) {
+      setDialog({ title: 'Não foi possível excluir', message: e instanceof Error ? e.message : 'Falha ao excluir o PDF do regimento.', tone: 'error' });
+    } finally {
+      setDocumentBusy(false);
+    }
+  };
+
+  const confirmDeleteDocument = () => setDialog({
+    title: 'Excluir PDF do regimento',
+    message: `Excluir o arquivo "${regulationDocument?.fileName}"? Os artigos cadastrados não são afetados.`,
+    tone: 'error',
+    confirmLabel: 'Excluir',
+    cancelLabel: 'Voltar',
+    onConfirm: () => { setDialog(null); deleteDocument(); },
   });
 
   const applyTemplate = async () => {
@@ -263,6 +346,25 @@ export default function RegulationArticles({ navigation }: any) {
           <EmptyState title="Selecione um condomínio" description="Escolha um condomínio acima para ver e cadastrar os artigos do regimento dele." />
         ) : (
           <>
+            <View ref={registerSection('document')} style={[isActive('document') && s.tourHighlight]}>
+            <Panel>
+              <Text style={s.panelTitle}>Regimento interno em PDF</Text>
+              {regulationDocument ? (
+                <>
+                  <Text style={s.documentName}>{regulationDocument.fileName}</Text>
+                  <Text style={s.hint}>{fileSizeLabel(regulationDocument.fileSize)} · enviado em {new Date(regulationDocument.uploadedAt).toLocaleDateString('pt-BR')}</Text>
+                </>
+              ) : (
+                <Text style={s.hint}>Nenhum arquivo enviado. Envie o PDF do regimento interno do condomínio (até 20 MB) para deixá-lo guardado no sistema.</Text>
+              )}
+              <View style={s.formActions}>
+                {regulationDocument ? <View style={s.formActionButton}><AppButton title="Abrir PDF" onPress={openDocument} disabled={documentBusy} /></View> : null}
+                <View style={s.formActionButton}><AppButton title={regulationDocument ? 'Substituir PDF' : 'Enviar PDF do regimento'} variant={regulationDocument ? 'secondary' : 'primary'} onPress={uploadDocument} loading={documentBusy} /></View>
+                {regulationDocument ? <View style={s.formActionButton}><AppButton title="Excluir PDF" variant="danger" onPress={confirmDeleteDocument} disabled={documentBusy} /></View> : null}
+              </View>
+            </Panel>
+            </View>
+
             {!loading && articles.length === 0 ? (
               <View ref={registerSection('template')} style={[isActive('template') && s.tourHighlight]}>
               <Panel>
@@ -307,7 +409,8 @@ export default function RegulationArticles({ navigation }: any) {
                         </View>
                         <View style={s.formActions}>
                           <View style={s.formActionButton}><AppButton title="Editar" variant="secondary" onPress={() => startEdit(article)} /></View>
-                          <View style={s.formActionButton}><AppButton title={article.active ? 'Desativar' : 'Reativar'} variant="danger" onPress={() => confirmToggle(article)} /></View>
+                          <View style={s.formActionButton}><AppButton title={article.active ? 'Desativar' : 'Reativar'} variant="secondary" onPress={() => confirmToggle(article)} /></View>
+                          <View style={s.formActionButton}><AppButton title="Excluir" variant="danger" onPress={() => confirmDelete(article)} disabled={loading} /></View>
                         </View>
                       </>
                     )}
@@ -350,6 +453,7 @@ const s = StyleSheet.create({
   fixedBox: { marginTop: 4 },
   formActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
   formActionButton: { minWidth: 160, flexGrow: 1 },
+  documentName: { color: colors.ink, fontWeight: '800', fontSize: 15 },
   card: { backgroundColor: '#fff', borderWidth: 1, borderColor: colors.border, borderRadius: layout.radius, padding: 16 },
   cardInactive: { backgroundColor: '#f7f7f8' },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

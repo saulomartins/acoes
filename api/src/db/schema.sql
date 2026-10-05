@@ -1327,6 +1327,20 @@ create table if not exists regulation_articles (
 );
 create index if not exists regulation_articles_condo_idx on regulation_articles(condominium_id, active, article_number);
 
+-- PDF do regimento interno, um por condomínio. Mesmo armazenamento dos anexos
+-- da prestação de contas: no Google Drive do condomínio quando há pasta
+-- configurada (drive_file_id), senão inline (content). Qualquer usuário do
+-- condomínio pode abrir; só síndico/subsíndico enviam, substituem ou excluem.
+create table if not exists regulation_documents (
+  condominium_id uuid primary key references condominiums(id) on delete cascade,
+  file_name text not null,
+  file_size integer not null check (file_size > 0 and file_size <= 20971520),
+  content bytea,
+  drive_file_id text,
+  uploaded_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists occurrences (
   id uuid primary key default gen_random_uuid(),
   condominium_id uuid not null references condominiums(id) on delete cascade,
