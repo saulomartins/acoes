@@ -1281,3 +1281,51 @@ Sem mudança em `api/src/db/schema.sql` desde `78d9b63` (já aplicado em
   menção ao subsíndico "no exercício das atribuições de Síndico(a)", sem linha
   de assinatura, com QR code para `/verificar/CÓDIGO` e datas no fuso de
   São Paulo. O hash não mudou, então os códigos já emitidos continuam válidos.
+
+## Publicação de 05/10/2026 — acordo judicial, editar acordo, regimento em PDF, Android 1.7.0
+
+Commits `e0fb778` a `b2062ef`. API, web e AAB.
+
+- Banco (passo 3, rodado pelo usuário no painel do Railway antes da API):
+  `debt_agreements.paid_before_cents` e `discount_cents`, e a tabela
+  `regulation_documents`.
+- API: `railway up` a partir de `externals` → deployment
+  `7f844bd2-40fe-48c6-8839-ca19b7c37c54`, `SUCCESS`, boot limpo. Durante o dia
+  houve deploys intermediários (`602de183`, `2a15af62`, `91884657`).
+- Web: deploy `https://edc6c95f.lar-em-dia.pages.dev`; `gestaolaremdia.com`
+  servindo `AppEntry-bbe5536ee029733a9f37e8d3b78053d7.js`.
+- Smoke: `/health` 200, site 200, `/regulation-articles/document/info` sem
+  token 401 (rota nova existe).
+- Android: AAB 1.7.0 (versionCode 44), build EAS
+  `ac7a3885-79cf-468d-91f8-da3f3bfb5fc0`.
+
+### O editor de consultas do Railway acrescenta `LIMIT`
+
+Colar um bloco `do $$ ... $$` ou vários comandos de uma vez em Postgres → Data
+→ Query falha com `syntax error at or near "LIMIT"`. Rodar um comando por vez
+e sem ponto e vírgula no final. Por isso o bloco `do $$` de `discount_cents`
+em `schema.sql` foi aplicado em produção como cinco comandos simples (add
+column, update, set default, set not null).
+
+### O que mudou
+- Acordo judicial (débito antigo com `negotiation_type='judicial'`) dispensa o
+  aceite do responsável: o síndico confere as parcelas e emite direto. Acordo
+  comum continua exigindo aceite. O "Gerar boletos" virou "Conferir valores e
+  boletos" para todos os acordos.
+- Editar acordo: dívida original − valor pago até o momento − redução
+  negociada = valor em aberto. Com boleto emitido o valor em aberto fica
+  travado. A dívida original só é editável no acordo de débito antigo.
+- Gestão de cobranças: débito antigo (`invoice_type='legacy'`) não é mais
+  listado; filtro de mês virou seletor de mês/ano (`MonthPicker`).
+- Botões que emitem boleto no banco usam a variante `attention` (âmbar).
+  Histórico de competências com status em português.
+- Regimento: PDF por condomínio, exclusão de artigo nunca usado e tela
+  "Regimento interno" em modo leitura para proprietário e inquilino (rota
+  `Regulation`, presente no app nativo).
+
+### Pendências conhecidas
+- Painel financeiro e Análise de cobranças ainda contam o débito antigo como
+  boleto em aberto.
+- Troca de banco: boletos não guardam de qual configuração bancária vieram, o
+  PDF do boleto não é armazenado e o vínculo "a partir de um período" apaga
+  boletos anteriores. Proposta discutida em 05/10, ainda não implementada.
