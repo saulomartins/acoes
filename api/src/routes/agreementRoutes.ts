@@ -486,7 +486,9 @@ router.patch('/:id', authorize('sindico', 'subsindico'), asyncHandler(async (req
 // (quantidade e primeiro vencimento também podem mudar). Se o responsável já
 // tinha aceitado e as condições mudaram, o acordo volta a aguardar aceite —
 // exceto o judicial, que dispensa aceite.
-// Com boleto emitido: o valor em aberto fica travado; só dá para corrigir a
+// Acordo ativo não é editável (só excluído, com todos os boletos cancelados).
+// Com boleto emitido num acordo ainda não ativo (emissão que parou no meio):
+// o valor em aberto fica travado; só dá para corrigir a
 // dívida original e quanto da diferença foi pagamento e quanto foi redução.
 //
 // A dívida original só é editável no acordo de débito antigo (legacyColumn);
@@ -501,7 +503,12 @@ router.put('/:id/terms', authorize('sindico', 'subsindico'), asyncHandler(async 
   const result = await query<any>(`select a.*,${judicialColumns},${legacyColumn} from debt_agreements a where a.id=$1 and a.condominium_id=$2`, [agreementId, condominiumId]);
   const agreement = result.rows[0];
   if (!agreement) return res.status(404).json({ message: 'Acordo não encontrado.' });
-  if (!['draft', 'sent', 'accepted', 'active', 'at_risk'].includes(agreement.status) || agreement.cancellation_reason) {
+  // Acordo ativo (boletos emitidos e em andamento) não é mais editável: para
+  // mudar as condições é preciso cancelar todos os boletos e excluir o acordo.
+  if (['active', 'at_risk'].includes(agreement.status)) {
+    return res.status(409).json({ message: 'Acordo ativo não pode ser editado. Para refazê-lo, cancele todos os boletos do acordo e exclua-o.' });
+  }
+  if (!['draft', 'sent', 'accepted'].includes(agreement.status) || agreement.cancellation_reason) {
     return res.status(409).json({ message: 'Este acordo está encerrado e não pode mais ser editado.' });
   }
 
