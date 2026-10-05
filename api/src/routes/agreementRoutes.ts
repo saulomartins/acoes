@@ -69,6 +69,11 @@ const notify = async (input: { condominiumId: string; senderId: string; recipien
 const judicialItems = `from debt_agreement_items ji join invoices jv on jv.id=ji.invoice_id where ji.agreement_id=a.id and jv.negotiation_type='judicial'`;
 const judicialColumns = `exists(select 1 ${judicialItems}) judicial,(select max(jv.judicial_process_number) ${judicialItems}) judicial_process_number`;
 
+// Acordo de débito antigo: um único débito incluído, lançado manualmente
+// (invoice_type='legacy'). Só nele a dívida original é um valor digitado — nos
+// demais ela é a soma calculada dos débitos incluídos.
+const legacyColumn = `(select case when count(*)=1 and bool_and(lv.invoice_type='legacy') then (array_agg(lv.id))[1] end from debt_agreement_items li join invoices lv on lv.id=li.invoice_id where li.agreement_id=a.id) legacy_invoice_id`;
+
 const recipientsFor = async (condominiumId: string, debtorUserId: string, unitId?: string | null) => {
   const result = await query<{ id: string }>(`select id from users where condominium_id=$1 and login_enabled=true and (id=$2 or ($3::uuid is not null and unit_id=$3))`, [condominiumId, debtorUserId, unitId || null]);
   return result.rows.map(row => row.id);
@@ -108,7 +113,7 @@ router.get('/', asyncHandler(async (req, res) => {
     );
   }
 
-  const result = await query<any>(`select a.*,coalesce(u.full_name,u.username) debtor_name,${judicialColumns},
+  const result = await query<any>(`select a.*,coalesce(u.full_name,u.username) debtor_name,${judicialColumns},${legacyColumn},
       coalesce(nullif(concat_ws(' - ',b.name,un.number),''),u.unit,'Sem apartamento') apartment,
       coalesce(jsonb_agg(distinct jsonb_build_object('invoiceId',ai.invoice_id,'referenceMonth',coalesce(oi.reference_month,oi.due_date),'dueDate',oi.due_date,'principalCents',ai.principal_cents,'fineCents',ai.fine_cents,'interestCents',ai.interest_cents,'frozenTotalCents',ai.frozen_total_cents,'frozenAt',ai.frozen_at)) filter(where ai.invoice_id is not null),'[]') items,
       coalesce(jsonb_agg(distinct jsonb_build_object('id',p.id,'number',p.installment_number,'amountCents',p.amount_cents,'dueDate',p.due_date,'invoiceId',p.invoice_id,'status',pi.status,'canceledAt',p.canceled_at,'cancellationReason',p.cancellation_reason)) filter(where p.id is not null),'[]') installments
@@ -481,22 +486,29 @@ router.patch('/:id', authorize('sindico', 'subsindico'), asyncHandler(async (req
 // (quantidade e primeiro vencimento também podem mudar). Se o responsável já
 // tinha aceitado e as condições mudaram, o acordo volta a aguardar aceite —
 // exceto o judicial, que dispensa aceite.
-// Com boleto emitido: o valor em aberto fica travado; só dá para corrigir
-// quanto da diferença foi pagamento e quanto foi redução.
+// Com boleto emitido: o valor em aberto fica travado; só dá para corrigir a
+// dívida original e quanto da diferença foi pagamento e quanto foi redução.
+//
+// A dívida original só é editável no acordo de débito antigo (legacyColumn);
+// a correção também vai para o débito lançado, com registro em
+// invoice_adjustments, para ele não divergir do acordo se este for desfeito.
 router.put('/:id/terms', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
   const condominiumId = req.user?.condominiumId as string;
   const agreementId = String(req.params.id || '');
   const reason = String(req.body?.reason || '').trim();
   if (!reason) return res.status(400).json({ message: 'Informe o motivo da edição do acordo.' });
 
-  const result = await query<any>(`select a.*,${judicialColumns} from debt_agreements a where a.id=$1 and a.condominium_id=$2`, [agreementId, condominiumId]);
+  const result = await query<any>(`select a.*,${judicialColumns},${legacyColumn} from debt_agreements a where a.id=$1 and a.condominium_id=$2`, [agreementId, condominiumId]);
   const agreement = result.rows[0];
   if (!agreement) return res.status(404).json({ message: 'Acordo não encontrado.' });
   if (!['draft', 'sent', 'accepted', 'active', 'at_risk'].includes(agreement.status) || agreement.cancellation_reason) {
     return res.status(409).json({ message: 'Este acordo está encerrado e não pode mais ser editado.' });
   }
 
-  const original = Number(agreement.original_total_cents);
+  const previousOriginal = Number(agreement.original_total_cents);
+  const original = Math.round(Number(req.body?.originalTotalCents ?? previousOriginal));
+  if (!Number.isInteger(original) || original <= 0) return res.status(400).json({ message: 'Informe uma dívida original válida.' });
+  if (original !== previousOriginal && !agreement.legacy_invoice_id) return res.status(409).json({ message: 'A dívida original deste acordo é a soma dos débitos incluídos e não pode ser alterada aqui.' });
   const paidBefore = Math.round(Number(req.body?.paidBeforeCents ?? agreement.paid_before_cents));
   const discount = Math.round(Number(req.body?.discountCents ?? agreement.discount_cents));
   if (!Number.isInteger(paidBefore) || paidBefore < 0) return res.status(400).json({ message: 'Informe um valor pago até o momento válido.' });
@@ -508,11 +520,27 @@ router.put('/:id/terms', authorize('sindico', 'subsindico'), asyncHandler(async 
   const installments = await query<any>(`select id,invoice_id from debt_agreement_installments where agreement_id=$1`, [agreementId]);
   const hasIssued = installments.rows.some((row: any) => row.invoice_id);
   const code = agreementId.slice(0, 8).toUpperCase();
-  const summary = `pago ${money(Number(agreement.paid_before_cents))} → ${money(paidBefore)}, redução ${money(Number(agreement.discount_cents))} → ${money(discount)}, em aberto ${money(previousOpen)} → ${money(open)}`;
+  // Mantém o débito antigo igual ao acordo: principal = dívida original e
+  // total congelado = valor em aberto (é o que Gestão de débitos soma).
+  const syncLegacyDebt = async (client: { query: (text: string, params?: unknown[]) => Promise<unknown> }) => {
+    if (!agreement.legacy_invoice_id) return;
+    await client.query(`update debt_agreement_items set principal_cents=$1,frozen_total_cents=$2 where agreement_id=$3`, [original, open, agreementId]);
+    if (original === previousOriginal) return;
+    await client.query(
+      `insert into invoice_adjustments(invoice_id,condominium_id,type,amount_cents,previous_amount_cents,previous_due_date,previous_status,reason,created_by)
+       select id,condominium_id,'edit',$2::int,amount_cents,due_date,status,$3::text,$4::uuid from invoices where id=$1`,
+      [agreement.legacy_invoice_id, original, `Dívida original corrigida na edição do acordo ${code}: ${reason}`, req.user?.id],
+    );
+    await client.query(`update invoices set amount_cents=$1 where id=$2`, [original, agreement.legacy_invoice_id]);
+  };
+  const summary = `original ${money(previousOriginal)} → ${money(original)}, pago ${money(Number(agreement.paid_before_cents))} → ${money(paidBefore)}, redução ${money(Number(agreement.discount_cents))} → ${money(discount)}, em aberto ${money(previousOpen)} → ${money(open)}`;
 
   if (hasIssued) {
-    if (open !== previousOpen) return res.status(409).json({ message: `Este acordo já tem boleto emitido, então o valor em aberto (${money(previousOpen)}) não pode mudar. Ajuste valor pago e redução de forma que a soma continue ${money(original - previousOpen)}.` });
-    await query(`update debt_agreements set paid_before_cents=$1,discount_cents=$2,updated_at=now() where id=$3`, [paidBefore, discount, agreementId]);
+    if (open !== previousOpen) return res.status(409).json({ message: `Este acordo já tem boleto emitido, então o valor em aberto (${money(previousOpen)}) não pode mudar. Ajuste os valores de forma que dívida original − valor pago − redução continue ${money(previousOpen)}.` });
+    await withTransaction(async client => {
+      await client.query(`update debt_agreements set original_total_cents=$1,paid_before_cents=$2,discount_cents=$3,updated_at=now() where id=$4`, [original, paidBefore, discount, agreementId]);
+      await syncLegacyDebt(client);
+    });
     await logAudit(req, 'historico_acordos', 'updated', `Editou o acordo ${code} (${summary}). Motivo: ${reason}`, { entityId: agreementId });
     return res.json({ message: 'Acordo atualizado.' });
   }
@@ -528,9 +556,10 @@ router.put('/:id/terms', authorize('sindico', 'subsindico'), asyncHandler(async 
 
   await withTransaction(async client => {
     await client.query(
-      `update debt_agreements set paid_before_cents=$1,discount_cents=$2,negotiated_total_cents=$3,installment_count=$4,first_due_date=$5,updated_at=now()${needsNewAcceptance ? `,status='sent',sent_at=now(),accepted_at=null,accepted_by=null` : ''} where id=$6`,
-      [paidBefore, discount, open, installmentCount, firstDueDate, agreementId],
+      `update debt_agreements set paid_before_cents=$1,discount_cents=$2,negotiated_total_cents=$3,installment_count=$4,first_due_date=$5,original_total_cents=$7,updated_at=now()${needsNewAcceptance ? `,status='sent',sent_at=now(),accepted_at=null,accepted_by=null` : ''} where id=$6`,
+      [paidBefore, discount, open, installmentCount, firstDueDate, agreementId, original],
     );
+    await syncLegacyDebt(client);
     if (!conditionsChanged) return;
     await client.query(`delete from debt_agreement_installments where agreement_id=$1`, [agreementId]);
     for (let index = 0; index < installmentCount; index++) {
@@ -538,14 +567,6 @@ router.put('/:id/terms', authorize('sindico', 'subsindico'), asyncHandler(async 
       const amount = base + (index === installmentCount - 1 ? open - base * installmentCount : 0);
       await client.query(`insert into debt_agreement_installments(id,agreement_id,installment_number,amount_cents,due_date) values($1,$2,$3,$4,$5)`, [randomUUID(), agreementId, index + 1, amount, addMonths(firstDueDate, index)]);
     }
-    // Débito antigo já negociado: o item guarda o valor do acordo como total
-    // congelado (é o que Gestão de débitos soma), então acompanha a edição.
-    await client.query(
-      `update debt_agreement_items ai set frozen_total_cents=$1 where ai.agreement_id=$2
-         and (select count(*) from debt_agreement_items x where x.agreement_id=$2)=1
-         and exists(select 1 from invoices i where i.id=ai.invoice_id and i.invoice_type='legacy')`,
-      [open, agreementId],
-    );
   });
 
   if (conditionsChanged && ['sent', 'accepted'].includes(agreement.status)) {
