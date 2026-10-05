@@ -68,7 +68,8 @@ type ButtonProps = {
   onPress: () => void;
   disabled?: boolean;
   loading?: boolean;
-  variant?: 'primary' | 'secondary' | 'danger';
+  // 'attention' = emite boleto no banco (ver colors.attention).
+  variant?: 'primary' | 'secondary' | 'danger' | 'attention';
 };
 
 export const AppButton = ({ title, onPress, disabled, loading, variant = 'primary' }: ButtonProps) => (
@@ -79,13 +80,14 @@ export const AppButton = ({ title, onPress, disabled, loading, variant = 'primar
       styles.button,
       variant === 'secondary' && styles.secondaryButton,
       variant === 'danger' && styles.dangerButton,
+      variant === 'attention' && styles.attentionButton,
       (disabled || loading) && styles.disabledButton,
       pressed && !disabled && !loading && styles.pressed,
     ]}
   >
     <View style={styles.buttonContent}>
       {loading ? <ActivityIndicator size="small" color="#fff" style={styles.buttonSpinner} /> : null}
-      <Text style={[styles.buttonText, (disabled || loading) && styles.disabledButtonText]}>{title}</Text>
+      <Text style={[styles.buttonText, variant === 'attention' && styles.attentionButtonText, (disabled || loading) && styles.disabledButtonText]}>{title}</Text>
     </View>
   </Pressable>
 );
@@ -109,6 +111,8 @@ type DialogProps = {
   onConfirm?: () => void;
   onClose: () => void;
   scrollable?: boolean;
+  // Confirmação que emite boleto no banco: mesmo destaque do botão que abriu o diálogo.
+  confirmVariant?: 'attention';
 };
 
 // A altura do card e a rolagem da mensagem são sempre ativas (não só quando
@@ -116,7 +120,7 @@ type DialogProps = {
 // um endpoint) não pode empurrar os botões de ação pra fora da tela, pois aí
 // não sobra como fechar o diálogo. `scrollable` agora só controla o
 // alinhamento do texto (esquerda para listas, centro para mensagens curtas).
-export const AppDialog = ({ visible, title, message, tone = 'info', confirmLabel = 'Entendi', cancelLabel, onConfirm, onClose, scrollable = false }: DialogProps) => (
+export const AppDialog = ({ visible, title, message, tone = 'info', confirmLabel = 'Entendi', cancelLabel, onConfirm, onClose, scrollable = false, confirmVariant }: DialogProps) => (
   <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
     <View style={styles.dialogBackdrop}>
       <View style={[styles.dialogCard, styles.dialogCardScrollable]}>
@@ -127,7 +131,7 @@ export const AppDialog = ({ visible, title, message, tone = 'info', confirmLabel
         <ScrollView style={styles.dialogMessageScroll}><Text style={[styles.dialogMessage, scrollable && styles.dialogMessageLeft]}>{message}</Text></ScrollView>
         <View style={styles.dialogActions}>
           {cancelLabel ? <Pressable onPress={onClose} style={styles.dialogCancel}><Text style={styles.dialogCancelText}>{cancelLabel}</Text></Pressable> : null}
-          <Pressable onPress={onConfirm || onClose} style={[styles.dialogConfirm, tone === 'error' && styles.dialogConfirmError]}><Text style={styles.dialogConfirmText}>{confirmLabel}</Text></Pressable>
+          <Pressable onPress={onConfirm || onClose} style={[styles.dialogConfirm, tone === 'error' && styles.dialogConfirmError, confirmVariant === 'attention' && styles.dialogConfirmAttention]}><Text style={[styles.dialogConfirmText, confirmVariant === 'attention' && styles.attentionButtonText]}>{confirmLabel}</Text></Pressable>
         </View>
       </View>
     </View>
@@ -171,6 +175,13 @@ const styles = StyleSheet.create({
   },
   dangerButton: {
     backgroundColor: colors.red,
+  },
+  attentionButton: {
+    backgroundColor: colors.attention,
+    shadowColor: colors.attention,
+  },
+  attentionButtonText: {
+    color: colors.attentionInk,
   },
   disabledButton: {
     backgroundColor: '#aeb9c7',
@@ -238,5 +249,6 @@ const styles = StyleSheet.create({
   dialogCancelText: { color: colors.ink, fontWeight: '800' },
   dialogConfirm: { minHeight: 52, paddingHorizontal: 18, borderRadius: 8, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   dialogConfirmError: { backgroundColor: colors.red },
+  dialogConfirmAttention: { backgroundColor: colors.attention },
   dialogConfirmText: { color: '#fff', fontWeight: '900' },
 });

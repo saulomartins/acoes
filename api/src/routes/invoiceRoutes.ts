@@ -348,6 +348,10 @@ router.get('/', asyncHandler(async (req, res) => {
        and ($2::uuid is null or invoices.condominium_id = $2)
        and ($3::text is null or invoices.status = $3::invoice_status)
        and invoices.deleted_at is null
+       -- Débito antigo (lançado manualmente, sem boleto) é dívida, não cobrança:
+       -- fica só em Gestão de débitos. Aqui ele aparecia como um "boleto" do
+       -- valor total da dívida e inflava o total da referência.
+       and invoices.invoice_type <> 'legacy'
      order by invoices.due_date desc, invoices.created_at desc`;
   const invoicesParams = [scopedUserId || null, scopedCondominiumId || null, status || null, representedUnitIds];
 

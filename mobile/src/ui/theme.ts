@@ -9,6 +9,10 @@ export const colors = {
   primaryDark: '#194d9d',
   green: '#0f927f',
   amber: '#d89a2b',
+  // Ação que emite boleto de verdade no banco: âmbar forte com texto escuro,
+  // diferente do azul (ação comum), do verde (secundária) e do vermelho (excluir).
+  attention: '#f5a524',
+  attentionInk: '#3a2600',
   red: '#d65454',
   teal: '#159b8b',
   lilac: '#7c3aed',
