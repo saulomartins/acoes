@@ -783,19 +783,28 @@ router.post('/legacy', authorize('sindico', 'subsindico'), asyncHandler(async (r
       return res.status(400).json({ message: 'Informe a data da primeira parcela do débito já negociado.' });
     }
 
+    // negotiatedTotal é o valor em aberto (o que ainda será parcelado). O que já foi pago antes de o
+    // débito entrar no sistema é informado à parte; só o que sobrar da diferença é redução negociada.
+    const paidBefore = Math.round(Number(req.body?.paidBeforeCents || 0));
+    if (!Number.isInteger(paidBefore) || paidBefore < 0) {
+      return res.status(400).json({ message: 'Informe um valor pago até o momento válido.' });
+    }
+    const discount = Math.max(0, Math.round(Number(amountCents)) - paidBefore - negotiatedTotal);
+
     const agreementId = randomUUID();
     await withTransaction(async client => {
       await client.query(
         `insert into debt_agreements (
            id, condominium_id, debtor_user_id, unit_id, created_by, status,
            original_total_cents, negotiated_total_cents, installment_count, first_due_date,
-           notes, sent_at
+           notes, sent_at, paid_before_cents, discount_cents
          )
-         values ($1,$2,$3,$4,$5,'sent',$6,$7,$8,$9,$10,now())`,
+         values ($1,$2,$3,$4,$5,'sent',$6,$7,$8,$9,$10,now(),$11,$12)`,
         [
           agreementId, condominiumId, userId, person.rows[0].unit_id, req.user?.id,
           Math.round(Number(amountCents)), negotiatedTotal, count, firstDueDate,
           'Débito antigo negociado registrado retroativamente no sistema.',
+          paidBefore, discount,
         ],
       );
       await client.query(

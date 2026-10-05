@@ -443,6 +443,24 @@ alter table debt_agreements add column if not exists days_late_at_cancellation i
 alter table debt_agreements add column if not exists fine_percent_at_cancellation numeric;
 alter table debt_agreements add column if not exists daily_interest_percent_at_cancellation numeric;
 
+-- Composição do acordo: dívida original − valor já pago antes de o acordo
+-- entrar no sistema (paid_before_cents) − redução efetivamente negociada
+-- (discount_cents) = valor em aberto, que é o negotiated_total_cents e o que
+-- as parcelas somam. Antes a tela mostrava como "redução" a simples diferença
+-- original − negociado, o que tratava pagamento já feito como desconto. O
+-- bloco só roda uma vez: os acordos que já existiam recebem essa diferença
+-- como redução, para os números continuarem fechando até serem editados.
+alter table debt_agreements add column if not exists paid_before_cents integer not null default 0 check (paid_before_cents >= 0);
+do $$ begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_name='debt_agreements' and column_name='discount_cents'
+  ) then
+    alter table debt_agreements add column discount_cents integer not null default 0 check (discount_cents >= 0);
+    update debt_agreements set discount_cents = greatest(0, original_total_cents - negotiated_total_cents);
+  end if;
+end $$;
+
 create table if not exists debt_agreement_items (
   agreement_id uuid not null references debt_agreements(id) on delete cascade,
   invoice_id uuid not null references invoices(id) on delete restrict,

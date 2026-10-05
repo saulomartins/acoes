@@ -17,6 +17,8 @@ type Agreement = {
   apartment: string;
   original_total_cents: number;
   negotiated_total_cents: number;
+  paid_before_cents?: number;
+  discount_cents?: number;
   installment_count: number;
   agreement_date: string;
   accepted_date: string | null;
@@ -172,12 +174,12 @@ export default function AgreementHistory({ navigation }: any) {
   const managerTourSteps:TourStep[]=[
     {key:'summary',title:'Resumo geral',description:'Total de acordos no histórico, quantos foram quitados, quantos foram rompidos (o morador não honrou as parcelas) e a soma de tudo que foi efetivamente negociado, já considerando o desconto dado em relação à dívida original.'},
     {key:'filters',title:'Buscar e filtrar',description:'Pesquise por apartamento ou pelo nome do responsável, e filtre por situação: rascunho, aguardando aceite, aceito, ativo, sob risco, rompido, quitado, recusado, expirado ou cancelado. Combine os dois pra achar um acordo específico rapidamente.'},
-    {key:'agreements',title:'Acordos por apartamento',description:'Os acordos aparecem agrupados por apartamento, do mais recente pro mais antigo. Toque em "Ver detalhes" pra abrir o resumo completo: dívida original, valor negociado, cada parcela com sua situação (paga, vencida, cancelada) e, se houver, o motivo do cancelamento ou observações registradas. Se um acordo ativo tiver todas as parcelas canceladas, dá pra justificar o cancelamento total dele por ali.'},
+    {key:'agreements',title:'Acordos por apartamento',description:'Os acordos aparecem agrupados por apartamento, do mais recente pro mais antigo. Toque em "Ver detalhes" pra abrir o resumo completo: dívida original, valor pago, redução, valor em aberto, cada parcela com sua situação (paga, vencida, cancelada) e, se houver, o motivo do cancelamento ou observações registradas. Se um acordo ativo tiver todas as parcelas canceladas, dá pra justificar o cancelamento total dele por ali.'},
   ];
   const residentTourSteps:TourStep[]=[
     {key:'summary',title:'Resumo geral',description:'Quantos acordos você já fez no total, quantos já foram quitados, quantos foram rompidos e o valor total que você negociou — já com o desconto obtido em relação à dívida original.'},
     {key:'filters',title:'Filtrar por situação',description:'Filtre seus acordos por situação: aguardando seu aceite, ativo, sob risco de rompimento, quitado, rompido, recusado, expirado ou cancelado.'},
-    {key:'agreements',title:'Seus acordos',description:'Toque em "Ver detalhes" pra ver a dívida original, o valor negociado, todas as parcelas com data de vencimento e situação (paga, vencida, cancelada), além de observações e o motivo de um eventual cancelamento.'},
+    {key:'agreements',title:'Seus acordos',description:'Toque em "Ver detalhes" pra ver a dívida original, o valor em aberto, todas as parcelas com data de vencimento e situação (paga, vencida, cancelada), além de observações e o motivo de um eventual cancelamento.'},
     {key:'ownedElsewhere',title:'Apartamentos que você acompanha',description:'Se você é proprietário de outra unidade além da que mora, os acordos de débito dela aparecem aqui só pra consulta — quem responde pela cobrança é o morador/inquilino daquele apartamento, então não há nenhuma ação por aqui.'},
   ];
   const tourSteps=manager?managerTourSteps:residentTourSteps;
@@ -307,8 +309,20 @@ export default function AgreementHistory({ navigation }: any) {
                       <Text style={styles.valueLabel}>Dívida original</Text>
                       <Text style={styles.valueText}>{money(detailsAgreement.original_total_cents)}</Text>
                     </View>
+                    {Number(detailsAgreement.paid_before_cents || 0) > 0 ? (
+                      <View style={styles.valueBox}>
+                        <Text style={styles.valueLabel}>Valor pago até o momento</Text>
+                        <Text style={styles.valueText}>{money(Number(detailsAgreement.paid_before_cents))}</Text>
+                      </View>
+                    ) : null}
+                    {Number(detailsAgreement.discount_cents || 0) > 0 ? (
+                      <View style={styles.valueBox}>
+                        <Text style={styles.valueLabel}>Redução negociada</Text>
+                        <Text style={styles.valueText}>{money(Number(detailsAgreement.discount_cents))}</Text>
+                      </View>
+                    ) : null}
                     <View style={styles.valueBox}>
-                      <Text style={styles.valueLabel}>Valor negociado</Text>
+                      <Text style={styles.valueLabel}>Valor em aberto</Text>
                       <Text style={styles.valueTextStrong}>{money(detailsAgreement.negotiated_total_cents)}</Text>
                     </View>
                     {detailsAgreement.recalculated_total_cents ? (

@@ -48,7 +48,7 @@ type DebtRow = {
   adjustments?: DebtAdjustment[];
   ownedElsewhere?: boolean;
 };
-type Agreement = { id:string;status:string;debtor_name:string;apartment:string;original_total_cents:number;negotiated_total_cents:number;installment_count:number;first_due_date:string;valid_until:string|null;sent_at:string|null;accepted_at:string|null;breached_at:string|null;breach_reason:string|null;notes:string|null;cancellation_reason:string|null;judicial?:boolean;judicial_process_number?:string|null;installments:Array<{id:string;number:number;amountCents:number;dueDate:string;invoiceId:string|null;status:string|null;canceledAt?:string|null;cancellationReason?:string|null}>;items:Array<{invoiceId:string;referenceMonth:string;dueDate:string;principalCents:number;fineCents:number;interestCents:number;frozenTotalCents:number;frozenAt:string}> };
+type Agreement = { id:string;status:string;debtor_name:string;apartment:string;original_total_cents:number;negotiated_total_cents:number;paid_before_cents?:number;discount_cents?:number;installment_count:number;first_due_date:string;valid_until:string|null;sent_at:string|null;accepted_at:string|null;breached_at:string|null;breach_reason:string|null;notes:string|null;cancellation_reason:string|null;judicial?:boolean;judicial_process_number?:string|null;installments:Array<{id:string;number:number;amountCents:number;dueDate:string;invoiceId:string|null;status:string|null;canceledAt?:string|null;cancellationReason?:string|null}>;items:Array<{invoiceId:string;referenceMonth:string;dueDate:string;principalCents:number;fineCents:number;interestCents:number;frozenTotalCents:number;frozenAt:string}> };
 type DebtData = {
   scope: 'person' | 'condominium';
   person: Person & { cpf: string };
@@ -87,6 +87,8 @@ const agreementStatus:Record<string,string>={draft:'Rascunho',sent:'Aguardando s
 // 'sent' muda de texto conforme quem lê e o tipo do acordo: o acordo judicial
 // dispensa o aceite, e para o síndico quem aceita é o responsável, não ele.
 const agreementStatusLabel=(agreement:Agreement,manager:boolean)=>agreement.status!=='sent'?(agreementStatus[agreement.status]||agreement.status):agreement.judicial?(manager?'Acordo judicial · conferir e gerar boletos':'Acordo judicial · aguardando boletos'):manager?'Aguardando aceite do responsável':agreementStatus.sent;
+const canEditAgreement=(agreement:Agreement)=>['draft','sent','accepted','active','at_risk'].includes(agreement.status)&&!agreement.cancellation_reason;
+const hasIssuedInstallment=(agreement:Agreement)=>(agreement.installments||[]).some(item=>Boolean(item.invoiceId));
 const canIssueAgreement=(agreement:Agreement)=>agreement.status==='accepted'||(agreement.status==='sent'&&agreement.judicial===true);
 const installmentStatus=(status:string|null,invoiceId:string|null,canceledAt?:string|null)=>canceledAt?'Cancelada':!invoiceId?'Aguardando emissão':status==='paid'?'Pago':status==='overdue'?'Vencido':status==='canceled'?'Cancelado':'Em aberto';
 const canCancelInstallment=(item:{invoiceId:string|null;status:string|null;canceledAt?:string|null})=>!item.canceledAt&&(!item.invoiceId||['paid','canceled'].includes(item.status||''));
@@ -117,6 +119,13 @@ export default function Debts({ navigation }: any) {
   const [detailsPerson,setDetailsPerson]=useState<PersonGroup|null>(null);
   const [detailsInstallmentsAgreement,setDetailsInstallmentsAgreement]=useState<Agreement|null>(null);
   const [reviewingAgreement,setReviewingAgreement]=useState<Agreement|null>(null);
+  const [editingAgreement,setEditingAgreement]=useState<Agreement|null>(null);
+  const [agreementPaidBefore,setAgreementPaidBefore]=useState('');
+  const [agreementDiscount,setAgreementDiscount]=useState('');
+  const [agreementInstallments,setAgreementInstallments]=useState('');
+  const [agreementFirstDueDate,setAgreementFirstDueDate]=useState('');
+  const [agreementEditReason,setAgreementEditReason]=useState('');
+  const [agreementEditError,setAgreementEditError]=useState('');
   const [notice,setNotice]=useState('');
   const [unitSearch,setUnitSearch]=useState('');
   const [onlyOpen,setOnlyOpen]=useState(false);
@@ -133,6 +142,7 @@ export default function Debts({ navigation }: any) {
   const [legacyNotes,setLegacyNotes]=useState('');
   const [legacyAlreadyNegotiated,setLegacyAlreadyNegotiated]=useState(false);
   const [legacyNegotiatedTotal,setLegacyNegotiatedTotal]=useState('');
+  const [legacyPaidBefore,setLegacyPaidBefore]=useState('');
   const [legacyInstallments,setLegacyInstallments]=useState('1');
   const [legacyFirstDueDate,setLegacyFirstDueDate]=useState('');
   const [legacySubmitting,setLegacySubmitting]=useState(false);
@@ -268,6 +278,7 @@ export default function Debts({ navigation }: any) {
     setLegacyAmount('');
     setLegacyDueDate('');
     setLegacyNegotiationType('none');
+    setLegacyPaidBefore('');
     setLegacyProcessNumber('');
     setLegacyNotes('');
     setLegacyAlreadyNegotiated(false);
@@ -331,6 +342,7 @@ export default function Debts({ navigation }: any) {
       const firstDueDateIso = brazilianDateToIso(legacyFirstDueDate);
       if (!firstDueDateIso) { setError('Informe a data da primeira parcela do débito já negociado.'); return; }
       body.negotiatedTotalCents = currencyToCents(legacyNegotiatedTotal);
+      body.paidBeforeCents = currencyToCents(legacyPaidBefore);
       body.installmentCount = Number(legacyInstallments);
       body.firstDueDate = firstDueDateIso;
     }
@@ -352,6 +364,20 @@ export default function Debts({ navigation }: any) {
   const communicate=async(unit:string,person:PersonGroup)=>{if(!userToken)return;const open=person.rows.filter(row=>row.open);if(!open.length)return;setLoading(true);setError('');setNotice('');try{const result=await apiRequest<{whatsappUrl:string|null;sentAutomatically:boolean}>('/agreements/communicate-debt',userToken,{method:'POST',body:JSON.stringify({userId:person.payerId,invoiceIds:open.map(row=>row.id)})});if(result.sentAutomatically){setNotice('Mensagem enviada automaticamente pelo WhatsApp oficial do condomínio.')}else if(result.whatsappUrl){await Linking.openURL(result.whatsappUrl)}await load()}catch(reason){setError(reason instanceof Error?reason.message:'Falha ao preparar a comunicação.')}finally{setLoading(false)}};
   const createAgreement=async(unit:string,person:PersonGroup)=>{if(!userToken)return;const dueDateIso=brazilianDateToIso(firstDueDate);if(!dueDateIso){setError('Informe o primeiro vencimento no formato DD/MM/AAAA.');return}const open=person.rows.filter(row=>row.open);if(!open.length)return;setLoading(true);try{await apiRequest('/agreements',userToken,{method:'POST',body:JSON.stringify({debtorUserId:person.payerId,invoiceIds:open.map(row=>row.id),installmentCount:Number(installments),firstDueDate:dueDateIso,notes:`Negociação dos débitos do apartamento ${unit} (${roleLabel(person.payerRole)})`})});setNegotiating(null);await load()}catch(reason){setError(reason instanceof Error?reason.message:'Falha ao criar a proposta.')}finally{setLoading(false)}};
   const agreementAction=async(agreement:Agreement,action:'send'|'accept'|'issue')=>{if(!userToken)return;setLoading(true);try{const response=await apiRequest<{message?:string}>(`/agreements/${agreement.id}/${action}`,userToken,{method:'POST'});if(action==='issue'&&response?.message){setError('');setNotice(response.message)}await load()}catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível atualizar o acordo.')}finally{setLoading(false)}};
+  const openEditAgreement=(agreement:Agreement)=>{setEditingAgreement(agreement);setAgreementPaidBefore(money(Number(agreement.paid_before_cents||0)));setAgreementDiscount(money(Number(agreement.discount_cents||0)));setAgreementInstallments(String(agreement.installment_count));setAgreementFirstDueDate(formatBrazilianDate(agreement.first_due_date));setAgreementEditReason('');setAgreementEditError('')};
+  const submitEditAgreement=async()=>{
+    if(!editingAgreement||!userToken)return;
+    const locked=hasIssuedInstallment(editingAgreement);
+    const firstDueDateIso=brazilianDateToIso(agreementFirstDueDate);
+    if(!locked&&!firstDueDateIso){setAgreementEditError('Informe o primeiro vencimento no formato DD/MM/AAAA.');return}
+    setLoading(true);setAgreementEditError('');
+    try{
+      const body:any={paidBeforeCents:currencyToCents(agreementPaidBefore),discountCents:currencyToCents(agreementDiscount),reason:agreementEditReason.trim()};
+      if(!locked){body.installmentCount=Number(agreementInstallments);body.firstDueDate=firstDueDateIso}
+      const response=await apiRequest<{message?:string}>(`/agreements/${editingAgreement.id}/terms`,userToken,{method:'PUT',body:JSON.stringify(body)});
+      setEditingAgreement(null);setError('');setNotice(response?.message||'Acordo atualizado.');await load();
+    }catch(reason){setAgreementEditError(reason instanceof Error?reason.message:'Não foi possível editar o acordo.')}finally{setLoading(false)}
+  };
   const issueReviewedAgreement=async()=>{if(!reviewingAgreement)return;const agreement=reviewingAgreement;setReviewingAgreement(null);await agreementAction(agreement,'issue')};
   
   const submitCancellation=async()=>{if(!justifyingAgreement||!userToken)return;setLoading(true);try{await apiRequest(`/agreements/${justifyingAgreement}/mark-all-canceled`,userToken,{method:'POST',body:JSON.stringify({cancellationReason:justification,recalculateValue:shouldRecalculate})});setJustifyingAgreement(null);setJustification('');setShouldRecalculate(false);await load()}catch(reason){setError(reason instanceof Error?reason.message:'Falha ao registrar cancelamento.')}finally{setLoading(false)}};
@@ -487,14 +513,14 @@ export default function Debts({ navigation }: any) {
           <View style={styles.summaryTotal}><Text {...summaryValueProps} style={styles.summaryTotalValue}>{money(data.totals.updatedTotalCents)}</Text><Text {...summaryLabelProps} style={styles.summaryTotalLabel}>total atualizado do condomínio</Text></View>
         </View>
 
-        {agreements.length?<View ref={registerSection('agreements')} style={[styles.agreements,isActive('agreements')&&styles.tourHighlight]}><Text style={styles.sectionTitle}>Propostas e acordos</Text><Text style={styles.sectionHint}>{manager?'Acompanhe propostas, aceites e emissão das parcelas.':'Consulte abaixo todos os valores, débitos incluídos, vencimentos e situação do seu acordo.'}</Text>{agreements.map(agreement=>{const discount=Math.max(0,agreement.original_total_cents-agreement.negotiated_total_cents);const orderedItems=[...(agreement.items||[])].sort((a,b)=>b.referenceMonth.localeCompare(a.referenceMonth));const orderedInstallments=[...(agreement.installments||[])].sort((a,b)=>a.number-b.number);const paid=orderedInstallments.filter(item=>item.status==='paid').length;return <View key={agreement.id} style={[styles.agreementCard,agreement.status==='breached'&&styles.agreementCardDanger]}>
+        {agreements.length?<View ref={registerSection('agreements')} style={[styles.agreements,isActive('agreements')&&styles.tourHighlight]}><Text style={styles.sectionTitle}>Propostas e acordos</Text><Text style={styles.sectionHint}>{manager?'Acompanhe propostas, aceites e emissão das parcelas.':'Consulte abaixo todos os valores, débitos incluídos, vencimentos e situação do seu acordo.'}</Text>{agreements.map(agreement=>{const discount=Number(agreement.discount_cents||0);const paidBefore=Number(agreement.paid_before_cents||0);const orderedItems=[...(agreement.items||[])].sort((a,b)=>b.referenceMonth.localeCompare(a.referenceMonth));const orderedInstallments=[...(agreement.installments||[])].sort((a,b)=>a.number-b.number);const paid=orderedInstallments.filter(item=>item.status==='paid').length;return <View key={agreement.id} style={[styles.agreementCard,agreement.status==='breached'&&styles.agreementCardDanger]}>
           <View style={styles.agreementHeader}><View style={styles.grow}><Text style={styles.agreementCode}>ACORDO {agreement.id.slice(0,8).toUpperCase()}</Text><Text style={styles.agreementTitle}>{agreement.apartment} · {agreement.debtor_name}</Text></View><Text style={[styles.agreementStatus,agreement.status==='breached'&&styles.agreementStatusDanger,agreement.status==='settled'&&styles.agreementStatusSuccess]}>{agreementStatusLabel(agreement,manager)}</Text></View>
-          <View style={styles.agreementValues}><View style={styles.agreementValueBox}><Text style={styles.valueLabel}>Dívida original</Text><Text style={styles.valueText}>{money(agreement.original_total_cents)}</Text></View><View style={styles.agreementValueBox}><Text style={styles.valueLabel}>Valor negociado</Text><Text style={styles.valueStrong}>{money(agreement.negotiated_total_cents)}</Text></View><View style={styles.agreementValueBox}><Text style={styles.valueLabel}>Condição</Text><Text style={styles.valueText}>{agreement.installment_count} parcela(s)</Text></View>{discount>0?<View style={styles.agreementValueBox}><Text style={styles.valueLabel}>Redução negociada</Text><Text style={styles.discountValue}>{money(discount)}</Text></View>:null}</View>
+          <View style={styles.agreementValues}><View style={styles.agreementValueBox}><Text style={styles.valueLabel}>Dívida original</Text><Text style={styles.valueText}>{money(agreement.original_total_cents)}</Text></View>{paidBefore>0?<View style={styles.agreementValueBox}><Text style={styles.valueLabel}>Valor pago até o momento</Text><Text style={styles.valueText}>{money(paidBefore)}</Text></View>:null}{discount>0?<View style={styles.agreementValueBox}><Text style={styles.valueLabel}>Redução negociada</Text><Text style={styles.discountValue}>{money(discount)}</Text></View>:null}<View style={styles.agreementValueBox}><Text style={styles.valueLabel}>Valor em aberto</Text><Text style={styles.valueStrong}>{money(agreement.negotiated_total_cents)}</Text></View><View style={styles.agreementValueBox}><Text style={styles.valueLabel}>Condição</Text><Text style={styles.valueText}>{agreement.installment_count} parcela(s)</Text></View></View>
           <View style={styles.agreementInfo}><Text style={styles.infoText}>Primeiro vencimento: <Text style={styles.infoStrong}>{formatBrazilianDate(agreement.first_due_date)}</Text></Text>{agreement.valid_until?<Text style={styles.infoText}>Proposta válida até: <Text style={styles.infoStrong}>{formatBrazilianDate(agreement.valid_until)}</Text></Text>:null}{agreement.accepted_at?<Text style={styles.infoText}>Aceito em: <Text style={styles.infoStrong}>{formatBrazilianDate(agreement.accepted_at)}</Text></Text>:null}{agreement.judicial?<Text style={styles.infoText}>Acordo judicial: <Text style={styles.infoStrong}>{agreement.judicial_process_number?`processo ${agreement.judicial_process_number}`:'aceite dispensado'}</Text></Text>:null}{agreement.notes?<Text style={styles.infoText}>Observação: <Text style={styles.infoStrong}>{agreement.notes}</Text></Text>:null}</View>
           {orderedItems.length?<View style={styles.agreementSection}><Text style={styles.agreementSectionTitle}>Débitos incluídos no acordo</Text>{orderedItems.map(item=><View key={item.invoiceId} style={styles.detailRow}><View style={styles.grow}><Text style={styles.detailTitle}>Referência {formatBrazilianMonth(item.referenceMonth)}</Text><Text style={styles.detailMeta}>Vencimento original {formatBrazilianDate(item.dueDate)} · cálculo congelado em {formatBrazilianDate(item.frozenAt)}</Text></View><View style={styles.detailAmounts}><Text style={styles.detailMeta}>Taxa {money(item.principalCents)} + encargos {money(item.fineCents+item.interestCents)}</Text><Text style={styles.detailTotal}>{money(item.frozenTotalCents)}</Text></View></View>)}</View>:null}
           <Pressable onPress={()=>setDetailsInstallmentsAgreement(agreement)} style={styles.installmentTrigger}><View style={styles.installmentHeader}><Text style={styles.agreementSectionTitle}>Parcelas do acordo</Text><Text style={styles.progress}>{paid}/{agreement.installment_count} paga(s)</Text></View><Text style={styles.debtChevron}>Ver parcelas ›</Text></Pressable>
           {agreement.status==='breached'?<View style={styles.breachBox}><Text style={styles.breachTitle}>Acordo rompido</Text><Text style={styles.breachText}>{agreement.breach_reason||'As condições do acordo não foram cumpridas.'} Os débitos originais voltaram a receber atualização de multa e mora.</Text></View>:null}
-          <View style={styles.agreementActions}>{manager&&agreement.status==='draft'?<View style={styles.smallAction}><AppButton title="Enviar proposta" onPress={()=>agreementAction(agreement,'send')} disabled={loading}/></View>:null}{!manager&&agreement.status==='sent'&&!agreement.judicial?<View style={styles.acceptAction}><AppButton title="Li as condições e aceito o acordo" onPress={()=>agreementAction(agreement,'accept')} disabled={loading}/></View>:null}{manager&&canIssueAgreement(agreement)?<View style={styles.smallAction}><AppButton title="Conferir valores e boletos" onPress={()=>setReviewingAgreement(agreement)} disabled={loading}/></View>:null}{manager&&canDeleteAgreement(agreement)?<View style={styles.smallAction}><AppButton title="Excluir acordo" onPress={()=>{setJustifyingAgreement(agreement.id);setJustification('');setShouldRecalculate(false)}} disabled={loading}/></View>:null}</View>
+          <View style={styles.agreementActions}>{manager&&agreement.status==='draft'?<View style={styles.smallAction}><AppButton title="Enviar proposta" onPress={()=>agreementAction(agreement,'send')} disabled={loading}/></View>:null}{!manager&&agreement.status==='sent'&&!agreement.judicial?<View style={styles.acceptAction}><AppButton title="Li as condições e aceito o acordo" onPress={()=>agreementAction(agreement,'accept')} disabled={loading}/></View>:null}{manager&&canIssueAgreement(agreement)?<View style={styles.smallAction}><AppButton title="Conferir valores e boletos" onPress={()=>setReviewingAgreement(agreement)} disabled={loading}/></View>:null}{manager&&canEditAgreement(agreement)?<View style={styles.smallAction}><AppButton title="Editar acordo" onPress={()=>openEditAgreement(agreement)} disabled={loading}/></View>:null}{manager&&canDeleteAgreement(agreement)?<View style={styles.smallAction}><AppButton title="Excluir acordo" onPress={()=>{setJustifyingAgreement(agreement.id);setJustification('');setShouldRecalculate(false)}} disabled={loading}/></View>:null}</View>
         </View>})}</View>:null}
 
         <View ref={registerSection('units')} style={[styles.unitsSection,isActive('units')&&styles.tourHighlight]}>
@@ -641,11 +667,11 @@ export default function Debts({ navigation }: any) {
                 <ScrollView contentContainerStyle={styles.installmentModalList} style={styles.modalScrollBody}>
                   <View style={styles.agreementInfo}>
                     <Text style={styles.infoText}>Responsável: <Text style={styles.infoStrong}>{reviewingAgreement.apartment} · {reviewingAgreement.debtor_name}</Text></Text>
-                    <Text style={styles.infoText}>Dívida original: <Text style={styles.infoStrong}>{money(reviewingAgreement.original_total_cents)}</Text> · Valor negociado: <Text style={styles.infoStrong}>{money(reviewingAgreement.negotiated_total_cents)}</Text></Text>
+                    <Text style={styles.infoText}>Dívida original: <Text style={styles.infoStrong}>{money(reviewingAgreement.original_total_cents)}</Text>{Number(reviewingAgreement.paid_before_cents||0)>0?<> · Valor pago até o momento: <Text style={styles.infoStrong}>{money(Number(reviewingAgreement.paid_before_cents))}</Text></>:null}{Number(reviewingAgreement.discount_cents||0)>0?<> · Redução negociada: <Text style={styles.infoStrong}>{money(Number(reviewingAgreement.discount_cents))}</Text></>:null} · Valor em aberto: <Text style={styles.infoStrong}>{money(reviewingAgreement.negotiated_total_cents)}</Text></Text>
                     {reviewingAgreement.judicial?<Text style={styles.infoText}>Acordo judicial{reviewingAgreement.judicial_process_number?` (processo ${reviewingAgreement.judicial_process_number})`:''}: <Text style={styles.infoStrong}>o aceite do responsável no aplicativo é dispensado.</Text></Text>:null}
                     <Text style={styles.infoText}>Boletos a gerar: <Text style={styles.infoStrong}>{pending.length} · total {money(pendingTotal)}</Text></Text>
                   </View>
-                  {mismatch?<View style={styles.breachBox}><Text style={styles.breachTitle}>Soma diferente do valor negociado</Text><Text style={styles.breachText}>As parcelas somam {money(pendingTotal)}, mas o valor negociado é {money(reviewingAgreement.negotiated_total_cents)}. Confira antes de gerar.</Text></View>:null}
+                  {mismatch?<View style={styles.breachBox}><Text style={styles.breachTitle}>Soma diferente do valor em aberto</Text><Text style={styles.breachText}>As parcelas somam {money(pendingTotal)}, mas o valor em aberto é {money(reviewingAgreement.negotiated_total_cents)}. Confira antes de gerar.</Text></View>:null}
                   {pending.map(item=>(
                     <View key={item.id} style={styles.detailRow}>
                       <View style={styles.grow}>
@@ -661,6 +687,50 @@ export default function Debts({ navigation }: any) {
                 <View style={styles.modalActions}>
                   <Pressable onPress={() => setReviewingAgreement(null)} style={styles.cancelButton}><Text style={styles.cancelButtonText}>Voltar</Text></Pressable>
                   <Pressable onPress={issueReviewedAgreement} disabled={loading||!pending.length} style={[styles.submitButton,(loading||!pending.length)&&styles.submitButtonDisabled]}><Text style={styles.submitButtonText}>{loading?'Gerando...':`Gerar ${pending.length} boleto(s)`}</Text></Pressable>
+                </View>
+              </>;
+            })()}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!editingAgreement} transparent animationType="fade" onRequestClose={()=>setEditingAgreement(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            {editingAgreement && (() => {
+              const locked=hasIssuedInstallment(editingAgreement);
+              const openCents=editingAgreement.original_total_cents-currencyToCents(agreementPaidBefore)-currencyToCents(agreementDiscount);
+              const lockedMismatch=locked&&openCents!==editingAgreement.negotiated_total_cents;
+              const count=Number(agreementInstallments);
+              const invalid=openCents<=0||lockedMismatch||!agreementEditReason.trim()||(!locked&&(!Number.isInteger(count)||count<1||count>60||!brazilianDateToIso(agreementFirstDueDate)));
+              const needsNewAcceptance=!locked&&editingAgreement.status==='accepted'&&!editingAgreement.judicial;
+              return <>
+                <Text style={styles.modalTitle}>Editar acordo · {editingAgreement.id.slice(0,8).toUpperCase()}</Text>
+                <Text style={styles.infoText}>Dívida original: <Text style={styles.infoStrong}>{money(editingAgreement.original_total_cents)}</Text></Text>
+                <Text style={styles.fieldLabel}>Valor pago até o momento</Text>
+                <TextInput value={agreementPaidBefore} onChangeText={value=>setAgreementPaidBefore(maskCurrency(value))} placeholder="R$ 0,00" keyboardType="number-pad" style={styles.input}/>
+                <Text style={styles.fieldLabel}>Redução negociada</Text>
+                <TextInput value={agreementDiscount} onChangeText={value=>setAgreementDiscount(maskCurrency(value))} placeholder="R$ 0,00" keyboardType="number-pad" style={styles.input}/>
+                <Text style={styles.infoText}>Valor em aberto: <Text style={styles.infoStrong}>{money(Math.max(0,openCents))}</Text> (dívida original − valor pago − redução)</Text>
+                {openCents<=0?<Text style={styles.legacyHint}>Valor pago e redução não podem zerar ou ultrapassar a dívida original.</Text>:null}
+                {locked?<Text style={styles.legacyHint}>Este acordo já tem boleto emitido: o valor em aberto ({money(editingAgreement.negotiated_total_cents)}), as parcelas e os vencimentos não mudam. Você pode corrigir apenas quanto foi pago e quanto foi redução.</Text>:<View style={styles.formRow}>
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>Quantidade de parcelas</Text>
+                    <TextInput value={agreementInstallments} onChangeText={setAgreementInstallments} keyboardType="number-pad" style={styles.input}/>
+                  </View>
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>Primeira parcela</Text>
+                    <TextInput value={agreementFirstDueDate} onChangeText={value=>setAgreementFirstDueDate(maskBrazilianDate(value))} placeholder="DD/MM/AAAA" keyboardType="number-pad" maxLength={10} style={styles.input}/>
+                  </View>
+                </View>}
+                {lockedMismatch&&openCents>0?<Text style={styles.legacyHint}>Valor pago e redução precisam somar {money(editingAgreement.original_total_cents-editingAgreement.negotiated_total_cents)} para o valor em aberto continuar igual.</Text>:null}
+                {!locked?<Text style={styles.legacyHint}>Ao mudar o valor em aberto, a quantidade de parcelas ou o primeiro vencimento, as parcelas são refeitas em valores iguais.{needsNewAcceptance?' Como o responsável já aceitou, ele precisará aceitar de novo as novas condições.':''}</Text>:null}
+                <Text style={styles.fieldLabel}>Motivo da edição</Text>
+                <TextInput value={agreementEditReason} onChangeText={setAgreementEditReason} placeholder="Por que este acordo está sendo editado?" multiline numberOfLines={2} style={styles.justificationInput}/>
+                {agreementEditError?<Text style={styles.error}>{agreementEditError}</Text>:null}
+                <View style={styles.modalActions}>
+                  <Pressable onPress={()=>setEditingAgreement(null)} style={styles.cancelButton}><Text style={styles.cancelButtonText}>Cancelar</Text></Pressable>
+                  <Pressable onPress={submitEditAgreement} disabled={loading||invalid} style={[styles.submitButton,(loading||invalid)&&styles.submitButtonDisabled]}><Text style={styles.submitButtonText}>{loading?'Salvando...':'Salvar alterações'}</Text></Pressable>
                 </View>
               </>;
             })()}
@@ -876,8 +946,11 @@ export default function Debts({ navigation }: any) {
 
                   {legacyAlreadyNegotiated ? (
                     <>
-                      <Text style={styles.fieldLabel}>Valor negociado</Text>
+                      <Text style={styles.fieldLabel}>Valor pago até o momento (opcional)</Text>
+                      <TextInput value={legacyPaidBefore} onChangeText={value => setLegacyPaidBefore(maskCurrency(value))} placeholder="R$ 0,00" keyboardType="number-pad" style={styles.input} />
+                      <Text style={styles.fieldLabel}>Valor em aberto (a parcelar)</Text>
                       <TextInput value={legacyNegotiatedTotal} onChangeText={value => setLegacyNegotiatedTotal(maskCurrency(value))} placeholder="R$ 0,00" keyboardType="number-pad" style={styles.input} />
+                      {currencyToCents(legacyAmount)-currencyToCents(legacyPaidBefore)-currencyToCents(legacyNegotiatedTotal)>0&&currencyToCents(legacyNegotiatedTotal)>0?<Text style={styles.legacyHint}>Redução negociada: {money(currencyToCents(legacyAmount)-currencyToCents(legacyPaidBefore)-currencyToCents(legacyNegotiatedTotal))} (dívida original − valor pago − valor em aberto).</Text>:null}
                       <View style={styles.formRow}>
                         <View style={styles.field}>
                           <Text style={styles.fieldLabel}>Quantidade de parcelas</Text>

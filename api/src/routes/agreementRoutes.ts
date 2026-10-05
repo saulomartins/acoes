@@ -197,7 +197,7 @@ router.post('/', authorize('sindico', 'subsindico'), asyncHandler(async (req, re
   const negotiatedTotal = Number.isInteger(Number(req.body?.negotiatedTotalCents)) && Number(req.body.negotiatedTotalCents) > 0 ? Number(req.body.negotiatedTotalCents) : originalTotal;
   const agreement = await withTransaction(async client => {
     const id = randomUUID();
-    await client.query(`insert into debt_agreements(id,condominium_id,debtor_user_id,unit_id,created_by,original_total_cents,negotiated_total_cents,installment_count,first_due_date,notes,valid_until) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, [id, condominiumId, debtorUserId, snapshots[0].unit_id, req.user?.id, originalTotal, negotiatedTotal, installmentCount, firstDueDate, String(req.body?.notes || '').trim() || null, validUntil]);
+    await client.query(`insert into debt_agreements(id,condominium_id,debtor_user_id,unit_id,created_by,original_total_cents,negotiated_total_cents,discount_cents,installment_count,first_due_date,notes,valid_until) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [id, condominiumId, debtorUserId, snapshots[0].unit_id, req.user?.id, originalTotal, negotiatedTotal, Math.max(0, originalTotal - negotiatedTotal), installmentCount, firstDueDate, String(req.body?.notes || '').trim() || null, validUntil]);
     for (const row of snapshots) await client.query(`insert into debt_agreement_items(agreement_id,invoice_id,principal_cents,fine_cents,interest_cents,frozen_total_cents,frozen_at) values($1,$2,$3,$4,$5,$6,$7)`, [id, row.id, row.principal, row.fine, row.interest, row.total, asOf]);
     for (let index = 0; index < installmentCount; index++) { const base = Math.floor(negotiatedTotal / installmentCount); const amount = base + (index === installmentCount - 1 ? negotiatedTotal - base * installmentCount : 0); await client.query(`insert into debt_agreement_installments(id,agreement_id,installment_number,amount_cents,due_date) values($1,$2,$3,$4,$5)`, [randomUUID(), id, index + 1, amount, addMonths(firstDueDate, index)]); }
     return { id, originalTotal, negotiatedTotal };
@@ -470,6 +470,91 @@ router.patch('/:id', authorize('sindico', 'subsindico'), asyncHandler(async (req
   const updated = await query<any>(`update debt_agreements set notes=$1,valid_until=$2,updated_at=now() where id=$3 returning *`, [notes, validUntil, agreementId]);
   await logAudit(req, 'historico_acordos', 'updated', `Editou a proposta de acordo ${agreementId.slice(0, 8).toUpperCase()}`, { entityId: agreementId });
   return res.json({ agreement: updated.rows[0], message: 'Proposta atualizada.' });
+}));
+
+// Edita a composição do acordo: dívida original − valor pago até o momento −
+// redução negociada = valor em aberto (negotiated_total_cents, o que as
+// parcelas somam). Existe porque a dívida muitas vezes entra no sistema depois
+// da negociação, com parte já paga — e esse pagamento não é desconto.
+//
+// Sem boleto emitido: o valor em aberto pode mudar e as parcelas são refeitas
+// (quantidade e primeiro vencimento também podem mudar). Se o responsável já
+// tinha aceitado e as condições mudaram, o acordo volta a aguardar aceite —
+// exceto o judicial, que dispensa aceite.
+// Com boleto emitido: o valor em aberto fica travado; só dá para corrigir
+// quanto da diferença foi pagamento e quanto foi redução.
+router.put('/:id/terms', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.condominiumId as string;
+  const agreementId = String(req.params.id || '');
+  const reason = String(req.body?.reason || '').trim();
+  if (!reason) return res.status(400).json({ message: 'Informe o motivo da edição do acordo.' });
+
+  const result = await query<any>(`select a.*,${judicialColumns} from debt_agreements a where a.id=$1 and a.condominium_id=$2`, [agreementId, condominiumId]);
+  const agreement = result.rows[0];
+  if (!agreement) return res.status(404).json({ message: 'Acordo não encontrado.' });
+  if (!['draft', 'sent', 'accepted', 'active', 'at_risk'].includes(agreement.status) || agreement.cancellation_reason) {
+    return res.status(409).json({ message: 'Este acordo está encerrado e não pode mais ser editado.' });
+  }
+
+  const original = Number(agreement.original_total_cents);
+  const paidBefore = Math.round(Number(req.body?.paidBeforeCents ?? agreement.paid_before_cents));
+  const discount = Math.round(Number(req.body?.discountCents ?? agreement.discount_cents));
+  if (!Number.isInteger(paidBefore) || paidBefore < 0) return res.status(400).json({ message: 'Informe um valor pago até o momento válido.' });
+  if (!Number.isInteger(discount) || discount < 0) return res.status(400).json({ message: 'Informe uma redução negociada válida.' });
+  const open = original - paidBefore - discount;
+  if (open <= 0) return res.status(400).json({ message: `Valor pago e redução somam ${money(paidBefore + discount)}, o que não deixa valor em aberto sobre a dívida original de ${money(original)}.` });
+
+  const previousOpen = Number(agreement.negotiated_total_cents);
+  const installments = await query<any>(`select id,invoice_id from debt_agreement_installments where agreement_id=$1`, [agreementId]);
+  const hasIssued = installments.rows.some((row: any) => row.invoice_id);
+  const code = agreementId.slice(0, 8).toUpperCase();
+  const summary = `pago ${money(Number(agreement.paid_before_cents))} → ${money(paidBefore)}, redução ${money(Number(agreement.discount_cents))} → ${money(discount)}, em aberto ${money(previousOpen)} → ${money(open)}`;
+
+  if (hasIssued) {
+    if (open !== previousOpen) return res.status(409).json({ message: `Este acordo já tem boleto emitido, então o valor em aberto (${money(previousOpen)}) não pode mudar. Ajuste valor pago e redução de forma que a soma continue ${money(original - previousOpen)}.` });
+    await query(`update debt_agreements set paid_before_cents=$1,discount_cents=$2,updated_at=now() where id=$3`, [paidBefore, discount, agreementId]);
+    await logAudit(req, 'historico_acordos', 'updated', `Editou o acordo ${code} (${summary}). Motivo: ${reason}`, { entityId: agreementId });
+    return res.json({ message: 'Acordo atualizado.' });
+  }
+
+  const installmentCount = Number(req.body?.installmentCount ?? agreement.installment_count);
+  const firstDueDate = String(req.body?.firstDueDate ?? isoDate(agreement.first_due_date));
+  if (!Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > 60) return res.status(400).json({ message: 'Informe a quantidade de parcelas (1 a 60).' });
+  if (!isValidDate(firstDueDate)) return res.status(400).json({ message: 'Informe um primeiro vencimento válido.' });
+  if (open < installmentCount) return res.status(400).json({ message: 'O valor em aberto é pequeno demais para essa quantidade de parcelas.' });
+
+  const conditionsChanged = open !== previousOpen || installmentCount !== Number(agreement.installment_count) || firstDueDate !== isoDate(agreement.first_due_date);
+  const needsNewAcceptance = conditionsChanged && agreement.status === 'accepted' && !agreement.judicial;
+
+  await withTransaction(async client => {
+    await client.query(
+      `update debt_agreements set paid_before_cents=$1,discount_cents=$2,negotiated_total_cents=$3,installment_count=$4,first_due_date=$5,updated_at=now()${needsNewAcceptance ? `,status='sent',sent_at=now(),accepted_at=null,accepted_by=null` : ''} where id=$6`,
+      [paidBefore, discount, open, installmentCount, firstDueDate, agreementId],
+    );
+    if (!conditionsChanged) return;
+    await client.query(`delete from debt_agreement_installments where agreement_id=$1`, [agreementId]);
+    for (let index = 0; index < installmentCount; index++) {
+      const base = Math.floor(open / installmentCount);
+      const amount = base + (index === installmentCount - 1 ? open - base * installmentCount : 0);
+      await client.query(`insert into debt_agreement_installments(id,agreement_id,installment_number,amount_cents,due_date) values($1,$2,$3,$4,$5)`, [randomUUID(), agreementId, index + 1, amount, addMonths(firstDueDate, index)]);
+    }
+    // Débito antigo já negociado: o item guarda o valor do acordo como total
+    // congelado (é o que Gestão de débitos soma), então acompanha a edição.
+    await client.query(
+      `update debt_agreement_items ai set frozen_total_cents=$1 where ai.agreement_id=$2
+         and (select count(*) from debt_agreement_items x where x.agreement_id=$2)=1
+         and exists(select 1 from invoices i where i.id=ai.invoice_id and i.invoice_type='legacy')`,
+      [open, agreementId],
+    );
+  });
+
+  if (conditionsChanged && ['sent', 'accepted'].includes(agreement.status)) {
+    const recipients = await recipientsFor(condominiumId, agreement.debtor_user_id, agreement.unit_id);
+    const body = `As condições do acordo ${code} foram atualizadas: ${money(open)} em aberto, em ${installmentCount} parcela(s), com primeiro vencimento em ${firstDueDate.split('-').reverse().join('/')}.${agreement.judicial ? '' : ' Acesse o aplicativo para consultar e aceitar.'}`;
+    await notify({ condominiumId, senderId: req.user?.id as string, recipients, title: 'Acordo de débito atualizado', body });
+  }
+  await logAudit(req, 'historico_acordos', 'updated', `Editou o acordo ${code} (${summary}; ${installmentCount} parcela(s), 1º vencimento ${firstDueDate}). Motivo: ${reason}`, { entityId: agreementId });
+  return res.json({ message: needsNewAcceptance ? 'Acordo atualizado. Como as condições mudaram, o responsável precisa aceitar novamente.' : 'Acordo atualizado.' });
 }));
 
 // Edita valor/vencimento de uma parcela que ainda não foi emitida no banco
