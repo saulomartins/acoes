@@ -62,6 +62,13 @@ const notify = async (input: { condominiumId: string; senderId: string; recipien
   });
 };
 
+// Acordo judicial = acordo que inclui um débito antigo registrado como
+// negociação judicial (invoices.negotiation_type). As condições já foram
+// definidas no processo, então a emissão das parcelas não depende do aceite
+// do responsável no aplicativo (ver POST /:id/issue).
+const judicialItems = `from debt_agreement_items ji join invoices jv on jv.id=ji.invoice_id where ji.agreement_id=a.id and jv.negotiation_type='judicial'`;
+const judicialColumns = `exists(select 1 ${judicialItems}) judicial,(select max(jv.judicial_process_number) ${judicialItems}) judicial_process_number`;
+
 const recipientsFor = async (condominiumId: string, debtorUserId: string, unitId?: string | null) => {
   const result = await query<{ id: string }>(`select id from users where condominium_id=$1 and login_enabled=true and (id=$2 or ($3::uuid is not null and unit_id=$3))`, [condominiumId, debtorUserId, unitId || null]);
   return result.rows.map(row => row.id);
@@ -101,7 +108,7 @@ router.get('/', asyncHandler(async (req, res) => {
     );
   }
 
-  const result = await query<any>(`select a.*,coalesce(u.full_name,u.username) debtor_name,
+  const result = await query<any>(`select a.*,coalesce(u.full_name,u.username) debtor_name,${judicialColumns},
       coalesce(nullif(concat_ws(' - ',b.name,un.number),''),u.unit,'Sem apartamento') apartment,
       coalesce(jsonb_agg(distinct jsonb_build_object('invoiceId',ai.invoice_id,'referenceMonth',coalesce(oi.reference_month,oi.due_date),'dueDate',oi.due_date,'principalCents',ai.principal_cents,'fineCents',ai.fine_cents,'interestCents',ai.interest_cents,'frozenTotalCents',ai.frozen_total_cents,'frozenAt',ai.frozen_at)) filter(where ai.invoice_id is not null),'[]') items,
       coalesce(jsonb_agg(distinct jsonb_build_object('id',p.id,'number',p.installment_number,'amountCents',p.amount_cents,'dueDate',p.due_date,'invoiceId',p.invoice_id,'status',pi.status,'canceledAt',p.canceled_at,'cancellationReason',p.cancellation_reason)) filter(where p.id is not null),'[]') installments
@@ -216,10 +223,18 @@ router.post('/:id/accept', asyncHandler(async (req, res) => {
 }));
 
 router.post('/:id/issue', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
-  const agreementResult = await query<any>(`select a.*,u.full_name,u.username,u.cpf,u.email,u.phone,u.street,u.address_number,u.address_complement,u.neighborhood,u.city,u.state,u.postal_code,u.unit from debt_agreements a join users u on u.id=a.debtor_user_id where a.id=$1 and a.condominium_id=$2 and a.status in ('accepted','active')`, [req.params.id, req.user?.condominiumId]);
+  const agreementResult = await query<any>(`select a.*,u.full_name,u.username,u.cpf,u.email,u.phone,u.street,u.address_number,u.address_complement,u.neighborhood,u.city,u.state,u.postal_code,u.unit,${judicialColumns} from debt_agreements a join users u on u.id=a.debtor_user_id where a.id=$1 and a.condominium_id=$2 and (a.status in ('accepted','active') or (a.status='sent' and exists(select 1 ${judicialItems})))`, [req.params.id, req.user?.condominiumId]);
   const agreement = agreementResult.rows[0]; if (!agreement) return res.status(409).json({ message: 'O acordo precisa estar aceito para emitir parcelas.' });
   if (!agreement.full_name || !agreement.cpf || !agreement.street || !agreement.address_number || !agreement.neighborhood || !agreement.city || !agreement.state || !agreement.postal_code) return res.status(400).json({ message: 'Complete nome, CPF e endereço do responsável antes da emissão.' });
-  const installments = await query<any>(`select * from debt_agreement_installments where agreement_id=$1 and invoice_id is null order by installment_number`, [agreement.id]);
+  // Acordo judicial ainda 'sent': o aceite é dispensado e registrado aqui, na
+  // primeira emissão, para que as regras que partem de accepted_at (congelamento
+  // dos débitos, rompimento por nova taxa vencida) valham a partir de agora.
+  if (agreement.status === 'sent') {
+    await query(`update debt_agreements set status='accepted',accepted_at=now(),updated_at=now() where id=$1 and status='sent'`, [agreement.id]);
+    await logAudit(req, 'historico_acordos', 'updated', `Dispensou o aceite do responsável no acordo ${agreement.id.slice(0, 8).toUpperCase()} por se tratar de acordo judicial${agreement.judicial_process_number ? ` (processo ${agreement.judicial_process_number})` : ''}`, { entityId: agreement.id });
+  }
+  // Parcela cancelada sem boleto (canceled_at) não pode ser emitida.
+  const installments = await query<any>(`select * from debt_agreement_installments where agreement_id=$1 and invoice_id is null and canceled_at is null order by installment_number`, [agreement.id]);
   const integration = await getInterIntegration(agreement.condominium_id); const issued = [];
   for (const installment of installments.rows) {
     const description = `Acordo ${agreement.id.slice(0, 8).toUpperCase()} - parcela ${installment.installment_number}/${agreement.installment_count}`;
@@ -287,7 +302,7 @@ router.get('/:id/details', asyncHandler(async (req, res) => {
   const ownedUnitIds = manager ? [] : await getOwnedUnitIds(userId);
 
   const result = await query<any>(`
-    select a.*, 
+    select a.*, ${judicialColumns},
       coalesce(u.full_name, u.username) debtor_name,
       coalesce(nullif(concat_ws(' - ', b.name, un.number), ''), u.unit, 'Sem apartamento') apartment,
       coalesce(jsonb_agg(distinct jsonb_build_object(

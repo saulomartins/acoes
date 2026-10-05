@@ -816,8 +816,11 @@ router.post('/legacy', authorize('sindico', 'subsindico'), asyncHandler(async (r
 
     // O acordo fica com status 'sent': o responsável precisa aceitar explicitamente (dar ciência) em
     // Gestão de débitos antes que qualquer boleto possa ser gerado — nenhum boleto é emitido sem esse aceite.
-    const title = 'Proposta de acordo de débito antigo';
-    const body = `Foi registrada uma proposta de acordo para um débito antigo (${count} parcela(s), total de ${money(negotiatedTotal)}), referente a um débito de ${money(Math.round(Number(amountCents)))} vencido em ${dueDate.split('-').reverse().join('/')}. Acesse Gestão de débitos e aceite o acordo para que as parcelas possam ser emitidas.`;
+    // Exceção: acordo judicial. As condições já foram definidas no processo, então o síndico confere e
+    // emite as parcelas sem depender do aceite no aplicativo (ver POST /agreements/:id/issue).
+    const judicial = negotiationType === 'judicial';
+    const title = judicial ? 'Acordo judicial de débito antigo registrado' : 'Proposta de acordo de débito antigo';
+    const body = `Foi registrad${judicial ? 'o um acordo judicial' : 'a uma proposta de acordo'} para um débito antigo (${count} parcela(s), total de ${money(negotiatedTotal)}), referente a um débito de ${money(Math.round(Number(amountCents)))} vencido em ${dueDate.split('-').reverse().join('/')}. ${judicial ? 'Por se tratar de acordo judicial, as parcelas serão emitidas pela administração sem necessidade de aceite no aplicativo. Acompanhe em Gestão de débitos.' : 'Acesse Gestão de débitos e aceite o acordo para que as parcelas possam ser emitidas.'}`;
 
     const devices = await query<{ fcm_token: string }>(`select distinct fcm_token from device_tokens where user_id = $1`, [userId]);
     const tokens = devices.rows.map(row => row.fcm_token).filter(Boolean);
@@ -841,7 +844,9 @@ router.post('/legacy', authorize('sindico', 'subsindico'), asyncHandler(async (r
 
   await logAudit(req, 'gestao_cobrancas', 'created', `Registrou débito antigo (${money(Math.round(Number(amountCents)))})`, { entityId: invoiceId });
   return res.status(201).json({
-    message: agreement ? 'Débito antigo cadastrado. A proposta de acordo aguarda o aceite do responsável antes da emissão dos boletos.' : 'Débito antigo cadastrado.',
+    message: !agreement ? 'Débito antigo cadastrado.'
+      : negotiationType === 'judicial' ? 'Débito antigo cadastrado. Por ser acordo judicial, confira os valores e gere os boletos em Propostas e acordos — o aceite do responsável é dispensado.'
+      : 'Débito antigo cadastrado. A proposta de acordo aguarda o aceite do responsável antes da emissão dos boletos.',
     invoiceId,
     agreement,
   });
