@@ -29,6 +29,9 @@ describe('pillSearchService', () => {
 
   it('não devolve nada para assunto fora da base', () => {
     expect(searchPills('receita de bolo de chocolate')).toEqual([]);
+    // "contratar" tem o mesmo radical de "contra"/"contrato": não pode cair em obras ou locação.
+    expect(searchPills('como contratar o sistema?')).toEqual([]);
+    expect(searchPills('como contratar?')).toEqual([]);
     expect(searchPills('   ')).toEqual([]);
   });
 

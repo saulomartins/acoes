@@ -15,6 +15,9 @@ const STOPWORDS = new Set([
   'onde', 'como', 'porque', 'sobre', 'isso', 'esse', 'essa', 'este', 'esta', 'tem', 'ter', 'ser', 'sao', 'foi',
   'pode', 'podem', 'posso', 'deve', 'devo', 'fazer', 'faz', 'tenho', 'meus', 'minhas', 'nosso', 'nossa', 'ja',
   'condominio', 'condominios', 'predio', 'edificio', 'gente', 'alguem', 'algum', 'alguma', 'todo', 'toda',
+  // "contra" tem o mesmo radical de "contratar", "contrato" e "contribuição":
+  // deixá-la de fora evita que "como contratar?" case com "votou contra".
+  'contra',
 ]);
 
 const STEM_LENGTH = 5;

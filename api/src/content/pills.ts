@@ -353,7 +353,7 @@ export const PILLS: Pill[] = [
       { label: 'Código Civil, art. 1.336, I (contribuição pela fração ideal)', url: CODIGO_CIVIL },
       { label: 'Lei 8.245/1991, art. 22, X e parágrafo único (despesas extraordinárias são do locador)', url: LEI_8245 },
     ],
-    keywords: ['custo', 'custo da obra', 'pagar obra', 'rateio extra', 'chamada de capital', 'cobrança extra', 'taxa extra', 'extraordinária', 'parcelar', 'parcelas', 'orçamento', 'quem paga', 'votou contra', 'impermeabilização', 'elevador novo', 'dividir'],
+    keywords: ['custo', 'custo da obra', 'pagar obra', 'rateio extra', 'chamada de capital', 'cobrança extra', 'taxa extra', 'extraordinária', 'parcelar', 'parcelas', 'orçamento', 'quem paga', 'impermeabilização', 'elevador novo', 'dividir'],
     reviewedAt: '2026-10-18',
   },
   {
@@ -403,7 +403,7 @@ export const PILLS: Pill[] = [
       { label: 'Lei 8.245/1991, art. 23, XII e §§ 1º a 3º (despesas ordinárias, do locatário)', url: LEI_8245 },
       { label: 'Código Civil, art. 1.345 (a dívida acompanha a unidade)', url: CODIGO_CIVIL },
     ],
-    keywords: ['inquilino', 'locatário', 'proprietário', 'locador', 'dono', 'aluguel', 'alugado', 'locação', 'quem paga', 'responsável', 'ordinária', 'ordinárias', 'extraordinária', 'extraordinárias', 'despesa', 'contrato de locação', 'imobiliária'],
+    keywords: ['inquilino', 'locatário', 'proprietário', 'locador', 'dono', 'aluguel', 'alugado', 'locação', 'quem paga', 'responsável', 'ordinária', 'ordinárias', 'extraordinária', 'extraordinárias', 'despesa', 'imobiliária'],
     reviewedAt: '2026-10-18',
   },
   {
