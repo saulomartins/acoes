@@ -34,6 +34,7 @@ import PlatformSuspended from '../screens/PlatformSuspended';
 import { AuthContext, storage } from '../context/AuthContext';
 import { apiRequest } from '../api/client';
 import { subscribeSystemTour } from '../services/tourEvents';
+import { setPrivateArea } from '../utils/analytics';
 import { Stack } from './stack';
 import { TOUR_STEPS, MANAGEMENT_ROUTES } from './routeRoles';
 import { withResponsiveShell, withRoleGuard } from './screenHelpers';
@@ -201,6 +202,8 @@ export default function AppNavigator() {
 
   useEffect(()=>subscribeSystemTour(startTour),[startTour]);
   useEffect(()=>{if(!userToken)autoTourStarted.current=false;},[userToken]);
+  // Medição (Google) só nas páginas públicas: logado, o Analytics fica desligado.
+  useEffect(()=>{setPrivateArea(Boolean(userToken));},[userToken]);
   // O tour só pode começar depois que a navegação principal existe. Cada passo
   // faz navigationRef.navigate(step.route), e enquanto uma tela de bloqueio
   // está no ar (trocar senha, aceitar termos, escolher perfil) o Stack só tem

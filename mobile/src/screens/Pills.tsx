@@ -5,6 +5,7 @@ import { API_BASE_URL } from '../api/client';
 import { CardGrid } from '../ui/grid';
 import { colors, shadow } from '../ui/theme';
 import ChatAssistant from '../ui/ChatAssistant';
+import CookieConsent from '../ui/CookieConsent';
 
 // "Pílulas do Condomínio" — página pública da landing (só existe no build web,
 // em /pilulas). Lista, busca e detalhe de pílulas, mais o formulário "deixe
@@ -219,6 +220,7 @@ export default function Pills({ route, navigation }: any) {
       </View>
     </ScrollView>
     <ChatAssistant onOpenPill={openPill} onRequestProposal={() => navigation.navigate('Landing', { section: 'planos' })} onOpenLogin={() => navigation.navigate('Login')} />
+    <CookieConsent onOpenPrivacy={() => navigation.navigate('LegalDocument', { document: 'privacy' })} />
     </View>
   );
 }

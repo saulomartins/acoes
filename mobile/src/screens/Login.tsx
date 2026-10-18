@@ -16,6 +16,8 @@ import { AppButton } from '../ui/components';
 import { colors, layout, shadow } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 
+import CookieConsent from '../ui/CookieConsent';
+
 export default function Login({ navigation }: any) {
   const { isDesktop: desktop } = useBreakpoint();
   const [username, setUsername] = useState('');
@@ -118,6 +120,7 @@ export default function Login({ navigation }: any) {
           </View>
         </View>
       </ScrollView>
+      <CookieConsent onOpenPrivacy={() => navigation.navigate('LegalDocument', { document: 'privacy' })} />
     </KeyboardAvoidingView>
   );
 }

@@ -6,8 +6,9 @@ import { API_BASE_URL } from '../api/client';
 import { useBreakpoint } from '../ui/responsive';
 import { shadow } from '../ui/theme';
 import { CardGrid } from '../ui/grid';
-import { trackConversion } from '../utils/analytics';
+import { openCookiePreferences, trackConversion } from '../utils/analytics';
 import ChatAssistant from '../ui/ChatAssistant';
+import CookieConsent from '../ui/CookieConsent';
 import { BENEFITS, FEATURES, FEATURE_GROUPS, PROFILES, Feature } from '../content/landingContent';
 
 // Sistema visual próprio da landing: paleta sofisticada (índigo/violeta),
@@ -235,7 +236,7 @@ const FOOTER_COLUMNS = [
   { title: 'Institucional', links: ['Início', 'Soluções', 'Planos', 'Conteúdos', 'Pílulas do Condomínio'] },
   { title: 'Funcionalidades', links: ['Gestão financeira', 'Cobrança Pix e boleto', 'Enquetes', 'Reserva de espaços', 'APP do Morador'] },
   { title: 'Soluções por perfil', links: PROFILES.map((p) => p.label) },
-  { title: 'Suporte', links: ['Política de privacidade', 'Termos de uso', 'Contato'] },
+  { title: 'Suporte', links: ['Política de privacidade', 'Termos de uso', 'Preferências de cookies', 'Contato'] },
 ];
 
 const onlyPersonName = (value: string) => value.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ' -]/g, '').replace(/\s{2,}/g, ' ').slice(0, 100);
@@ -360,6 +361,7 @@ export default function Landing({ navigation, route }: any) {
     if (link === 'Pílulas do Condomínio') { navigation.navigate('Pills'); return; }
     if (link === 'Política de privacidade') { navigation.navigate('LegalDocument',{document:'privacy'}); return; }
     if (link === 'Termos de uso') { navigation.navigate('LegalDocument',{document:'terms'}); return; }
+    if (link === 'Preferências de cookies') { openCookiePreferences(); return; }
     if (link === 'Contato') Linking.openURL('mailto:laremdia.condominio@gmail.com?subject=Contato%20pelo%20site%20Lar%20em%20Dia');
     else if (FEATURES.some((feature) => feature.title === link) || link === 'Cobrança Pix e boleto') scrollToSection('funcionalidades');
     else if (PROFILES.some((profile) => profile.label === link)) scrollToSection('paraQuemE');
@@ -720,6 +722,7 @@ export default function Landing({ navigation, route }: any) {
         </View>
       </ScrollView>
       <ChatAssistant onOpenPill={(slug) => navigation.navigate('Pills', { slug })} onRequestProposal={() => scrollToSection('planos')} onOpenLogin={goToLogin} />
+      <CookieConsent onOpenPrivacy={() => navigation.navigate('LegalDocument', { document: 'privacy' })} />
     </View>
   );
 }
