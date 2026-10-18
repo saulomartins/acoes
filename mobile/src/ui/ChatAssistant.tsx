@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Text, TextInput } from './text';
 import { API_BASE_URL } from '../api/client';
 import { useBreakpoint } from './responsive';
+import { BENEFITS, FEATURE_GROUPS, PROFILES } from '../content/landingContent';
 
 // "Lia", a atendente virtual do site. Balão flutuante que abre um chat por
 // cima da landing e da página de pílulas (só web). Não é IA: as respostas
@@ -11,15 +12,16 @@ import { useBreakpoint } from './responsive';
 // base legal da pílula, e o que a busca não encontra vira pergunta para a
 // equipe (POST /pills/questions) — custo zero e sem risco de inventar lei.
 // A própria Lia se apresenta como assistente virtual, sem fingir ser gente.
-// Perguntas sobre o próprio Lar em Dia (contratar, preço, "vocês administram?")
-// não vão para a busca: têm resposta fixa em <SalesCard>.
+// Perguntas sobre o próprio Lar em Dia ("o que faz?", "como me ajuda?", "como
+// contratar?", "vocês administram?") não vão para a busca: têm resposta fixa
+// em <AboutCard>, montada com o mesmo conteúdo da landing.
 
 type PillSummary = { slug: string; title: string; category: string; summary: string };
 type PillDetail = PillSummary & { sources: Array<{ label: string; url?: string }> };
 type Message =
   | { id: number; from: 'bot' | 'user'; kind: 'text'; text: string }
   | { id: number; from: 'bot'; kind: 'answer'; pill: PillDetail; related: PillSummary[] }
-  | { id: number; from: 'bot'; kind: 'sales' };
+  | { id: number; from: 'bot'; kind: 'about'; topic: AboutTopic; profile?: Profile };
 // Omit "distributivo": aplica o Omit em cada variante da união, senão o TS
 // achata a união e perde os campos específicos de cada tipo de mensagem.
 type WithoutId<T> = T extends unknown ? Omit<T, 'id'> : never;
@@ -43,13 +45,30 @@ const HIRING_STEPS = [
 ];
 const CONTACT_EMAIL = 'laremdia.condominio@gmail.com';
 
-// Perguntas sobre o Lar em Dia em si, e não sobre direito condominial.
-// "plano de reforma" é assunto de obra (pílula), por isso fica de fora.
+export type AboutTopic = 'hiring' | 'features' | 'benefits' | 'independence';
+type Profile = (typeof PROFILES)[number]['key'];
+
+const ABOUT_LABELS: Record<Exclude<AboutTopic, 'independence'>, string> = {
+  features: 'O que o sistema faz',
+  benefits: 'Como ele pode me ajudar',
+  hiring: 'Como contratar',
+};
+
+// Perguntas sobre o Lar em Dia em si (e não sobre direito condominial), e
+// qual delas é: a ordem das regras importa. Termos que também aparecem em
+// assunto de condomínio só contam junto com uma menção ao produto — "quanto
+// custa uma obra" e "proposta de acordo" são pílulas, não contratação.
 const normalize = (text: string) => text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-export const isAboutLarEmDia = (text: string) => {
+export const detectLarEmDiaIntent = (text: string): AboutTopic | null => {
   const value = normalize(text);
-  if (/plano de reforma/.test(value)) return false;
-  return /(contrat|assinatur|\bplanos?\b|demonstra|proposta|administradora|\badministram\b|\bvoces\b|lar ?em ?dia|\bsistema\b|aplicativo|\bapp\b|software|plataforma)/.test(value);
+  if (/plano de reforma/.test(value)) return null;
+  const mentionsProduct = /(lar ?em ?dia|\bsistema\b|aplicativo|\bapp\b|software|plataforma|\bvoces\b)/.test(value);
+  if (/(contrat|assinatur|\bplanos?\b|demonstra|proposta(?! de acordo))/.test(value)) return 'hiring';
+  if (mentionsProduct && /(\bpreco|quanto custa|\bvalor\b|mensalidade)/.test(value)) return 'hiring';
+  if (/(administradora|\badministram\b|fazem a gestao|quem (faz|cuida) da gestao)/.test(value)) return 'independence';
+  if (/(vantage|benefici|vale a pena)/.test(value) || (mentionsProduct && /(ajud|por ?que usar|melhora)/.test(value))) return 'benefits';
+  if (mentionsProduct || /funcionalidade/.test(value)) return 'features';
+  return null;
 };
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
@@ -80,6 +99,89 @@ const TypingDots = () => {
   );
 };
 
+const IndependenceNote = () => (
+  <View style={styles.independence}>
+    <Text style={styles.independenceText}>O Lar em Dia <Text style={styles.bold}>não é uma administradora</Text> e não faz a gestão do seu condomínio. Nós oferecemos a plataforma para que o <Text style={styles.bold}>síndico e o subsíndico</Text> façam a gestão com <Text style={styles.bold}>independência</Text>, sem depender de terceiros.</Text>
+  </View>
+);
+
+// Respostas fixas sobre o próprio Lar em Dia. Cada cartão termina com atalhos
+// para os outros temas, para a conversa seguir sem a pessoa precisar digitar.
+const AboutCard = ({ topic, profile, onFollowUp, onRequestProposal }: { topic: AboutTopic; profile?: Profile; onFollowUp: (topic: AboutTopic) => void; onRequestProposal?: () => void }) => {
+  const followUps = (Object.keys(ABOUT_LABELS) as Array<keyof typeof ABOUT_LABELS>).filter((key) => key !== topic);
+  const profileContent = PROFILES.find((item) => item.key === profile);
+  const isManager = profile !== 'moradores';
+  return (
+    <View style={[styles.bubble, styles.bubbleBot, styles.answer]}>
+      <Text style={styles.answerCategory}>SOBRE O LAR EM DIA</Text>
+
+      {topic === 'features' ? (
+        <>
+          <Text style={styles.answerTitle}>O que o Lar em Dia faz</Text>
+          <Text style={styles.answerText}>É uma plataforma completa de gestão condominial, no computador e no celular. Ela reúne:</Text>
+          {FEATURE_GROUPS.map((group) => (
+            <View key={group.title} style={styles.featureGroup}>
+              <Text style={styles.featureGroupTitle}>{group.title}</Text>
+              <Text style={styles.featureGroupItems}>{group.items.join(' · ')}</Text>
+            </View>
+          ))}
+          <IndependenceNote />
+        </>
+      ) : null}
+
+      {topic === 'benefits' ? (
+        <>
+          <Text style={styles.answerTitle}>Como o Lar em Dia ajuda {isManager ? 'síndicos e subsíndicos' : 'moradores'}</Text>
+          {(profileContent?.bullets || []).map((bullet) => (
+            <View key={bullet} style={styles.stepRow}><Text style={styles.check}>✓</Text><Text style={styles.stepText}>{bullet}</Text></View>
+          ))}
+          {isManager ? (
+            <>
+              {BENEFITS.slice(0, 4).map((benefit) => (
+                <View key={benefit.title} style={styles.stepRow}><Text style={styles.check}>✓</Text><Text style={styles.stepText}>{benefit.title}</Text></View>
+              ))}
+              <IndependenceNote />
+            </>
+          ) : (
+            <Text style={styles.answerText}>Quem contrata o Lar em Dia é o condomínio. Se você gostou, mostre para o seu síndico. 😉</Text>
+          )}
+        </>
+      ) : null}
+
+      {topic === 'hiring' ? (
+        <>
+          <Text style={styles.answerTitle}>Como contratar o Lar em Dia</Text>
+          <IndependenceNote />
+          {HIRING_STEPS.map((step, index) => (
+            <View key={step} style={styles.stepRow}>
+              <View style={styles.stepNumber}><Text style={styles.stepNumberText}>{index + 1}</Text></View>
+              <Text style={styles.stepText}>{step}</Text>
+            </View>
+          ))}
+          <Text style={styles.answerText}>E, se precisar, o suporte é direto com quem desenvolve o sistema.</Text>
+          <View style={styles.salesActions}>
+            {onRequestProposal ? <Pressable onPress={onRequestProposal} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Pedir proposta</Text></Pressable> : null}
+            <Pressable onPress={() => Linking.openURL(`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Quero conhecer o Lar em Dia')}`)} style={styles.chip}><Text style={styles.chipText}>Falar por e-mail</Text></Pressable>
+          </View>
+        </>
+      ) : null}
+
+      {topic === 'independence' ? (
+        <>
+          <Text style={styles.answerTitle}>Quem faz a gestão do condomínio?</Text>
+          <IndependenceNote />
+          <Text style={styles.answerText}>As decisões continuam com vocês. O Lar em Dia entrega as ferramentas (cobrança, prestação de contas, comunicação, ocorrências e reservas) e o suporte direto com quem desenvolve o sistema.</Text>
+        </>
+      ) : null}
+
+      <Text style={styles.followUpLabel}>Quer saber mais?</Text>
+      <View style={styles.salesActions}>
+        {followUps.map((key) => <Pressable key={key} onPress={() => onFollowUp(key)} style={styles.chip}><Text style={styles.chipText}>{ABOUT_LABELS[key]}</Text></Pressable>)}
+      </View>
+    </View>
+  );
+};
+
 export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpenPill: (slug: string) => void; onRequestProposal?: () => void }) {
   const { isDesktop, isTablet } = useBreakpoint();
   const [open, setOpen] = useState(false);
@@ -89,6 +191,9 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
   const [input, setInput] = useState('');
   // Pergunta sem resposta aguardando o e-mail (opcional) antes de ir para a equipe.
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  // Quais botões aparecem abaixo da conversa: os assuntos de sempre, o menu
+  // "Conhecer o Lar em Dia" ou a escolha de perfil antes de "como me ajuda".
+  const [chipMode, setChipMode] = useState<'default' | 'about' | 'profile'>('default');
   const nextId = useRef(1);
   const scrollRef = useRef<ScrollView>(null);
   const pulse = useRef(new Animated.Value(0)).current;
@@ -135,16 +240,39 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
     }
   };
 
-  const explainHiring = async (question: string) => {
+  const explainAbout = async (question: string, topic: AboutTopic) => {
     push({ from: 'user', kind: 'text', text: question });
+    setChipMode('default');
+    if (topic === 'benefits') {
+      await botSays('Para eu mostrar o que muda para você: você é síndico(a)/subsíndico(a) ou morador(a)?', 600);
+      setChipMode('profile');
+      return;
+    }
     setTyping(true);
     await wait(700);
     setTyping(false);
-    push({ from: 'bot', kind: 'sales' });
+    push({ from: 'bot', kind: 'about', topic });
+  };
+
+  const chooseProfile = async (profile: Profile) => {
+    push({ from: 'user', kind: 'text', text: PROFILES.find((item) => item.key === profile)?.label || '' });
+    setChipMode('default');
+    setTyping(true);
+    await wait(600);
+    setTyping(false);
+    push({ from: 'bot', kind: 'about', topic: 'benefits', profile });
+  };
+
+  const showAboutMenu = async () => {
+    push({ from: 'user', kind: 'text', text: 'Quero conhecer o Lar em Dia' });
+    await botSays('Claro! O que você quer saber?', 500);
+    setChipMode('about');
   };
 
   const ask = async (question: string) => {
-    if (isAboutLarEmDia(question)) { await explainHiring(question); return; }
+    setChipMode('default');
+    const topic = detectLarEmDiaIntent(question);
+    if (topic) { await explainAbout(question, topic); return; }
     push({ from: 'user', kind: 'text', text: question });
     setTyping(true);
     try {
@@ -185,7 +313,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
   // Nesse caso quem rola é o onLayout da própria resposta (até o topo dela).
   const lastMessage = messages[messages.length - 1];
   useEffect(() => {
-    if (!open || ((lastMessage?.kind === 'answer' || lastMessage?.kind === 'sales') && !typing)) return;
+    if (!open || ((lastMessage?.kind === 'answer' || lastMessage?.kind === 'about') && !typing)) return;
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
   }, [messages, typing, open]);
 
@@ -208,29 +336,10 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
 
           <ScrollView ref={scrollRef} style={styles.body} contentContainerStyle={styles.bodyContent}>
             {messages.map((message) => {
-              if (message.kind === 'sales') {
+              if (message.kind === 'about') {
                 return (
                   <View key={message.id} style={styles.botRow} onLayout={(event) => { if (message.id === lastMessage?.id) scrollRef.current?.scrollTo({ y: Math.max(event.nativeEvent.layout.y - 8, 0), animated: true }); }}>
-                    <View style={[styles.bubble, styles.bubbleBot, styles.answer]}>
-                      <Text style={styles.answerCategory}>SOBRE O LAR EM DIA</Text>
-                      <Text style={styles.answerTitle}>Você no comando da gestão do seu condomínio</Text>
-                      <View style={styles.independence}>
-                        <Text style={styles.independenceText}>O Lar em Dia <Text style={styles.bold}>não é uma administradora</Text> e não faz a gestão do seu condomínio. Nós oferecemos a plataforma para que o <Text style={styles.bold}>síndico e o subsíndico</Text> façam a gestão com <Text style={styles.bold}>independência</Text>, sem depender de terceiros.</Text>
-                      </View>
-                      <Text style={styles.answerText}>Com ela, vocês cuidam de boletos por Pix e boleto, prestação de contas homologada pelo conselho fiscal, avisos, ocorrências, reservas, enquetes e do app dos moradores, tudo em um só lugar.</Text>
-                      <Text style={styles.stepsTitle}>Como contratar</Text>
-                      {HIRING_STEPS.map((step, index) => (
-                        <View key={step} style={styles.stepRow}>
-                          <View style={styles.stepNumber}><Text style={styles.stepNumberText}>{index + 1}</Text></View>
-                          <Text style={styles.stepText}>{step}</Text>
-                        </View>
-                      ))}
-                      <Text style={styles.answerText}>E, se precisar, o suporte é direto com quem desenvolve o sistema.</Text>
-                      <View style={styles.salesActions}>
-                        {onRequestProposal ? <Pressable onPress={() => { setOpen(false); onRequestProposal(); }} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Pedir proposta</Text></Pressable> : null}
-                        <Pressable onPress={() => Linking.openURL(`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Quero conhecer o Lar em Dia')}`)} style={styles.chip}><Text style={styles.chipText}>Falar por e-mail</Text></Pressable>
-                      </View>
-                    </View>
+                    <AboutCard topic={message.topic} profile={message.profile} onFollowUp={(topic) => explainAbout(ABOUT_LABELS[topic as keyof typeof ABOUT_LABELS], topic)} onRequestProposal={onRequestProposal ? () => { setOpen(false); onRequestProposal(); } : undefined} />
                   </View>
                 );
               }
@@ -273,10 +382,19 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
                     <Pressable onPress={() => { push({ from: 'user', kind: 'text', text: 'Enviar sem e-mail' }); sendQuestionToTeam(pendingQuestion, ''); }} style={styles.chip}><Text style={styles.chipText}>Enviar sem e-mail</Text></Pressable>
                     <Pressable onPress={() => { setPendingQuestion(null); botSays('Tudo bem! Se quiser, me pergunte outra coisa.', 300); }} style={styles.chip}><Text style={styles.chipText}>Não, obrigado(a)</Text></Pressable>
                   </>
+                ) : chipMode === 'about' ? (
+                  <>
+                    {(Object.keys(ABOUT_LABELS) as Array<keyof typeof ABOUT_LABELS>).map((key) => <Pressable key={key} onPress={() => explainAbout(ABOUT_LABELS[key], key)} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>{ABOUT_LABELS[key]}</Text></Pressable>)}
+                  </>
+                ) : chipMode === 'profile' ? (
+                  <>
+                    <Pressable onPress={() => chooseProfile('sindicos')} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Síndico(a) / subsíndico(a)</Text></Pressable>
+                    <Pressable onPress={() => chooseProfile('moradores')} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Morador(a)</Text></Pressable>
+                  </>
                 ) : (
                   <>
                     {TOPICS.map((topic) => <Pressable key={topic.label} onPress={() => ask(topic.query)} style={styles.chip}><Text style={styles.chipText}>{topic.label}</Text></Pressable>)}
-                    <Pressable onPress={() => explainHiring('Como contratar o Lar em Dia?')} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Como contratar o Lar em Dia</Text></Pressable>
+                    <Pressable onPress={showAboutMenu} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Conhecer o Lar em Dia</Text></Pressable>
                   </>
                 )}
               </View>
@@ -366,6 +484,11 @@ const styles = StyleSheet.create({
   stepNumberText: { color: '#fff', fontSize: 11, fontWeight: '900' },
   stepText: { flex: 1, color: C.ink, fontSize: 13, lineHeight: 18.5 },
   salesActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
+  featureGroup: { marginTop: 10 },
+  featureGroupTitle: { color: C.primary, fontWeight: '900', fontSize: 13 },
+  featureGroupItems: { color: C.ink, fontSize: 13, lineHeight: 19, marginTop: 2 },
+  check: { color: C.green, fontWeight: '900', fontSize: 13, marginTop: 1 },
+  followUpLabel: { color: C.muted, fontSize: 12, fontWeight: '800', marginTop: 14 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 },
   chip: { borderWidth: 1.5, borderColor: '#D9DCFB', backgroundColor: C.soft, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
   chipText: { color: C.primary, fontWeight: '800', fontSize: 12.5 },
