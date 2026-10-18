@@ -6,7 +6,7 @@ import { API_BASE_URL } from '../api/client';
 import { useBreakpoint } from '../ui/responsive';
 import { shadow } from '../ui/theme';
 import { CardGrid } from '../ui/grid';
-import { openCookiePreferences, trackConversion } from '../utils/analytics';
+import { openCookiePreferences, trackConversion, trackEvent } from '../utils/analytics';
 import ChatAssistant from '../ui/ChatAssistant';
 import CookieConsent from '../ui/CookieConsent';
 import { BENEFITS, FEATURES, FEATURE_GROUPS, PROFILES, Feature } from '../content/landingContent';
@@ -337,6 +337,7 @@ export default function Landing({ navigation, route }: any) {
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.message || 'Falha ao enviar contato.');
       trackConversion('leadForm');
+      trackEvent('generate_lead', { lead_source: qReferral, profile: qProfile });
       setQSent(true);
     } catch (e) {
       setQError(e instanceof Error ? e.message : 'Falha ao enviar contato. Tente novamente.');

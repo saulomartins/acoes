@@ -7,6 +7,7 @@ import { useBreakpoint } from './responsive';
 import { BENEFITS, FEATURE_GROUPS, PROFILES } from '../content/landingContent';
 import LariMascot from './LariMascot';
 import { useCookieBannerHeight } from './CookieConsent';
+import { trackEvent } from '../utils/analytics';
 
 // "Lari", a atendente virtual do site. Balão flutuante que abre um chat por
 // cima da landing e da página de pílulas (só web). Não é IA: as respostas
@@ -274,6 +275,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLog
 
   const openChat = async () => {
     setOpen(true);
+    trackEvent('lari_open');
     setTeaser(false);
     if (messages.length) return;
     await botSays('Oi! Eu sou a Lari, assistente virtual do Lar em Dia. 👋', 500);
@@ -289,6 +291,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLog
       setTyping(false);
       if (!response.ok) { await botSays(data?.message || 'Não consegui registrar sua pergunta agora. Tente de novo em alguns minutos.', 200); return; }
       setPendingQuestion(null);
+      trackEvent('pill_question_sent', { origin: 'lari', with_email: email ? 'sim' : 'nao' });
       await botSays(email ? 'Pronto! Sua pergunta foi para a nossa equipe, e eu aviso por e-mail quando a resposta virar uma pílula. 💜' : 'Pronto! Sua pergunta foi para a nossa equipe e pode virar uma nova pílula em breve. 💜', 200);
     } catch {
       setTyping(false);
@@ -298,6 +301,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLog
 
   const explainAbout = async (question: string, topic: AboutTopic) => {
     push({ from: 'user', kind: 'text', text: question });
+    trackEvent('lari_question', { answer_type: 'sobre_o_lar_em_dia', topic });
     setChipMode('default');
     if (topic === 'benefits') {
       await botSays('Para eu mostrar o que muda para você: você é síndico(a)/subsíndico(a) ou morador(a)?', 600);
@@ -338,6 +342,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLog
         setTyping(false);
         if (question.trim().length < 10) { await botSays('Não achei nada sobre isso. Pode me contar a dúvida com um pouco mais de detalhe?', 200); return; }
         setPendingQuestion(question);
+        trackEvent('lari_question', { answer_type: 'sem_resposta', topic: 'sem_resposta' });
         await botSays('Ainda não tenho uma resposta com base legal para essa dúvida. 🤔', 200);
         await botSays('Posso enviar sua pergunta para a nossa equipe. Se quiser ser avisado(a) da resposta, digite seu e-mail abaixo, ou toque em "Enviar sem e-mail".', 500);
         return;
@@ -346,6 +351,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLog
       const pill: PillDetail = detailResponse.ok ? (await detailResponse.json()).pill : { ...results[0], sources: [] };
       setTyping(false);
       push({ from: 'bot', kind: 'answer', pill, related: results.slice(1, 3) });
+      trackEvent('lari_question', { answer_type: 'pilula', topic: pill.slug });
     } catch {
       setTyping(false);
       await botSays('Tive um problema para buscar agora. Tente de novo em instantes.', 200);

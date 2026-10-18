@@ -5,6 +5,7 @@ import { API_BASE_URL } from '../api/client';
 import { CardGrid } from '../ui/grid';
 import { colors, shadow } from '../ui/theme';
 import ChatAssistant from '../ui/ChatAssistant';
+import { trackEvent } from '../utils/analytics';
 import CookieConsent from '../ui/CookieConsent';
 
 // "Pílulas do Condomínio" — página pública da landing (só existe no build web,
@@ -57,6 +58,7 @@ const QuestionForm = ({ initialQuestion = '' }: { initialQuestion?: string }) =>
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.message || 'Falha ao enviar a pergunta.');
       setSent(true);
+      trackEvent('pill_question_sent', { origin: 'pagina_pilulas', with_email: email.trim() ? 'sim' : 'nao' });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Falha ao enviar a pergunta. Tente novamente.');
     } finally {
@@ -102,7 +104,7 @@ export default function Pills({ route, navigation }: any) {
     setLoading(true);
     setError('');
     getJson<{ pill: Pill }>(`/pills/${encodeURIComponent(slug)}`)
-      .then((data) => { if (active) setPill(data.pill); })
+      .then((data) => { if (active) { setPill(data.pill); trackEvent('pill_view', { pill_slug: data.pill.slug, pill_category: data.pill.category }); } })
       .catch((e) => { if (active) setError(e.message); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -116,6 +118,7 @@ export default function Pills({ route, navigation }: any) {
     try {
       const data = await getJson<{ pills: PillSummary[] }>(`/pills/search?q=${encodeURIComponent(q)}`);
       setResults(data.pills);
+      trackEvent('pill_search', { results_count: data.pills.length });
       setSearchedFor(q);
       if (slug) navigation.setParams({ slug: undefined });
     } catch (e) {

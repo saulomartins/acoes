@@ -98,6 +98,16 @@ export const setPrivateArea = (isPrivate: boolean) => {
   if (isWeb && GA4_ID) win()[`ga-disable-${GA4_ID}`] = isPrivate || getConsent() !== 'granted';
 };
 
+// Eventos do Google Analytics (pedido de proposta, uso da Lari, pílulas).
+// Só tipos de ação e identificadores do próprio site — nunca nome, e-mail,
+// telefone ou o texto que a pessoa digitou. Sem aceite, `gtag` não existe e
+// nada é enviado; logado, o Analytics está desligado (setPrivateArea).
+type EventParams = Record<string, string | number>;
+export const trackEvent = (name: 'generate_lead' | 'lari_open' | 'lari_question' | 'pill_view' | 'pill_search' | 'pill_question_sent', params: EventParams = {}) => {
+  if (!isWeb || !GA4_ID) return;
+  win().gtag?.('event', name, { ...params, send_to: GA4_ID });
+};
+
 export const trackConversion = (conversion: keyof typeof CONVERSIONS) => {
   if (!isWeb) return;
   win().gtag?.('event', 'conversion', { send_to: CONVERSIONS[conversion] });
