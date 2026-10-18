@@ -6,6 +6,7 @@ import { API_BASE_URL } from '../api/client';
 import { useBreakpoint } from '../ui/responsive';
 import { shadow } from '../ui/theme';
 import { CardGrid } from '../ui/grid';
+import { trackConversion } from '../utils/analytics';
 
 // Sistema visual próprio da landing: paleta sofisticada (índigo/violeta),
 // cantos arredondados generosos e sombra suave discreta — deliberadamente
@@ -363,6 +364,7 @@ export default function Landing({ navigation }: any) {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.message || 'Falha ao enviar contato.');
+      trackConversion('leadForm');
       setQSent(true);
     } catch (e) {
       setQError(e instanceof Error ? e.message : 'Falha ao enviar contato. Tente novamente.');
