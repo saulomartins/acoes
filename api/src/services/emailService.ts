@@ -414,6 +414,17 @@ export const sendLeadNotificationEmail = (lead: {
     </div></body></html>`,
 });
 
+export const sendPillQuestionEmail = ({ question, email }: { question: string; email: string }) => sendEmail({
+  to: LEAD_NOTIFICATION_EMAIL,
+  subject: 'Nova pergunta nas Pílulas do Condomínio',
+  html: `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#17283e;line-height:1.5">
+    <div style="max-width:560px;margin:auto;padding:28px;border:1px solid #e4e9ee;border-radius:12px">
+      <h2 style="margin-top:0">Nova pergunta pelo site</h2>
+      <p style="background:#f5f7fb;border-radius:8px;padding:14px 16px;white-space:pre-wrap">${escapeHtml(question)}</p>
+      <p>E-mail para retorno: <strong>${escapeHtml(email || 'não informado')}</strong></p>
+    </div></body></html>`,
+});
+
 const escapeHtml = (value: string) => value.replace(/[&<>'"]/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
 }[char] || char));

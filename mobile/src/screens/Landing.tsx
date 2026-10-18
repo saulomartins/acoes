@@ -118,6 +118,7 @@ const SECTION_MARKS = {
   resultados: { glyph: '↗', tone: C.emerald },
   demo: { glyph: '▶', tone: C.sky },
   seguranca: { glyph: '🛡', tone: C.ink },
+  pilulas: { glyph: '§', tone: C.violet },
 } as const;
 
 const SectionMark = ({ id }: { id: keyof typeof SECTION_MARKS }) => {
@@ -180,6 +181,7 @@ const NAV_ITEMS = [
   { key: 'paraQuemE', label: 'Para quem é' },
   { key: 'planos', label: 'Planos' },
   { key: 'conteudos', label: 'Conteúdos' },
+  { key: 'pilulas', label: 'Pílulas' },
   { key: 'contato', label: 'Contato' },
 ];
 
@@ -271,7 +273,7 @@ const QUOTE_PROFILES = ['Síndico(a)', 'Subsíndico(a)', 'Morador(a)'];
 const QUOTE_FEATURES = FEATURES.map((feature) => feature.title);
 
 const FOOTER_COLUMNS = [
-  { title: 'Institucional', links: ['Início', 'Soluções', 'Planos', 'Conteúdos'] },
+  { title: 'Institucional', links: ['Início', 'Soluções', 'Planos', 'Conteúdos', 'Pílulas do Condomínio'] },
   { title: 'Funcionalidades', links: ['Gestão financeira', 'Cobrança Pix e boleto', 'Enquetes', 'Reserva de espaços', 'APP do Morador'] },
   { title: 'Soluções por perfil', links: PROFILES.map((p) => p.label) },
   { title: 'Suporte', links: ['Política de privacidade', 'Termos de uso', 'Contato'] },
@@ -369,10 +371,20 @@ export default function Landing({ navigation }: any) {
     }
   };
 
+  // Pílulas do Condomínio: mostra algumas na landing e manda a busca para a
+  // página própria (/pilulas), onde ficam o detalhe e o "deixe sua pergunta".
+  const [pills, setPills] = useState<Array<{ slug: string; title: string; category: string; summary: string }>>([]);
+  const [pillSearch, setPillSearch] = useState('');
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/pills`).then((response) => response.ok ? response.json() : null).then((data) => { if (data?.pills) setPills(data.pills); }).catch(() => undefined);
+  }, []);
+  const searchPills = () => navigation.navigate('Pills', pillSearch.trim() ? { q: pillSearch.trim() } : undefined);
+
   const goToLogin = () => navigation.navigate('Login');
   const handleFooterLink = (link: string) => {
     const sectionByLabel: Record<string,string> = { 'Início':'inicio', 'Soluções':'solucoes', 'Planos':'planos', 'Conteúdos':'conteudos' };
     if (sectionByLabel[link]) { scrollToSection(sectionByLabel[link]); return; }
+    if (link === 'Pílulas do Condomínio') { navigation.navigate('Pills'); return; }
     if (link === 'Política de privacidade') { navigation.navigate('LegalDocument',{document:'privacy'}); return; }
     if (link === 'Termos de uso') { navigation.navigate('LegalDocument',{document:'terms'}); return; }
     if (link === 'Contato') Linking.openURL('mailto:laremdia.condominio@gmail.com?subject=Contato%20pelo%20site%20Lar%20em%20Dia');
@@ -574,6 +586,35 @@ export default function Landing({ navigation }: any) {
             </MockupFrame>
             <Text style={styles.demoNote}>{activeDemo.note}</Text>
           </View>
+        </View>
+
+        {/* 9. PÍLULAS DO CONDOMÍNIO — dúvidas respondidas com base legal */}
+        <View style={[styles.section, styles.sectionAlt, hPad]} onLayout={registerSection('pilulas')}>
+          <SectionMark id="pilulas" />
+          <Text style={styles.sectionEyebrow}>PÍLULAS DO CONDOMÍNIO</Text>
+          <Text style={styles.sectionTitle}>Tem uma dúvida de condomínio? Pergunte.</Text>
+          <Text style={styles.sectionSubtitle}>Boas práticas de gestão em textos curtos, sempre com a lei ou a decisão de onde a orientação foi tirada.</Text>
+
+          <View style={[styles.formRow, desktop && styles.formRowDesktop, styles.pillSearchRow]}>
+            <TextInput value={pillSearch} onChangeText={setPillSearch} onSubmitEditing={searchPills} returnKeyType="search" placeholder="Ex.: inadimplente pode votar na assembleia?" placeholderTextColor={C.muted} style={[styles.formField, styles.pillSearchField]} />
+            <PillButton title="Perguntar" onPress={searchPills} />
+          </View>
+
+          {pills.length ? (
+            <CardGrid columns={{ mobile: 1, tablet: 2, desktop: 3 }} gap={14}>
+              {pills.slice(0, 3).map((pill) => (
+                <Pressable key={pill.slug} onPress={() => navigation.navigate('Pills', { slug: pill.slug })} style={({ pressed }) => [pressed && styles.pressedShrink]}>
+                  <SoftCard style={styles.pillCard}>
+                    <Text style={styles.pillCategory}>{pill.category.toUpperCase()}</Text>
+                    <Text style={styles.featureTitle}>{pill.title}</Text>
+                    <Text style={styles.featureDescription}>{pill.summary}</Text>
+                    <Text style={styles.pillLink}>Ler com a base legal →</Text>
+                  </SoftCard>
+                </Pressable>
+              ))}
+            </CardGrid>
+          ) : null}
+          <View style={styles.pillMore}><PillButton title={pills.length ? `Ver todas as ${pills.length} pílulas` : 'Ver as pílulas'} onPress={() => navigation.navigate('Pills')} tone="outline" small /></View>
         </View>
 
         {/* 10. SEGURANÇA E CONFIANÇA */}
@@ -870,6 +911,13 @@ const styles = StyleSheet.create({
   securityIcon: { fontSize: 22, marginBottom: 10 },
   securityTitle: { color: C.ink, fontSize: 14.5, fontWeight: '900', marginBottom: 6 },
   securityDescription: { color: C.muted, fontSize: 12.5, lineHeight: 18, fontWeight: '500' },
+
+  pillSearchRow: { maxWidth: 720, marginBottom: 26 },
+  pillSearchField: { backgroundColor: C.surface },
+  pillCard: { padding: 18, minHeight: 190 },
+  pillCategory: { color: C.violet, fontSize: 11, fontWeight: '900', letterSpacing: 0.8, marginBottom: 8 },
+  pillLink: { color: C.primary, fontWeight: '800', fontSize: 13, marginTop: 'auto', paddingTop: 12 },
+  pillMore: { alignItems: 'flex-start', marginTop: 22 },
 
   quoteForm: { padding: 28, marginTop: 6, maxWidth: 720 },
   formLabel: { color: C.ink, fontWeight: '800', fontSize: 13.5, marginTop: 4, marginBottom: 10 },

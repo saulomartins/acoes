@@ -22,6 +22,7 @@ import Regulation from '../screens/Regulation';
 import InfractionNotices from '../screens/InfractionNotices';
 import Polls from '../screens/Polls';
 import LegalDocument from '../screens/LegalDocument';
+import Pills from '../screens/Pills';
 import TermsAcceptance,{CURRENT_TERMS_VERSION} from '../screens/TermsAcceptance';
 import SpaceReservations from '../screens/SpaceReservations';
 import ForgotPassword from '../screens/ForgotPassword';
@@ -88,6 +89,7 @@ type RootStackParamList = {
   Polls: undefined;
   SpaceReservations: undefined;
   LegalDocument: { document: 'privacy' | 'terms' };
+  Pills: { slug?: string; q?: string } | undefined;
   TermsAcceptance: undefined;
 };
 
@@ -151,6 +153,7 @@ const LandingScreen = withSafeArea(Landing);
 const ForgotPasswordScreen = withSafeArea(ForgotPassword);
 const ResetPasswordScreen = withSafeArea(ResetPassword);
 const LegalDocumentScreen = withSafeArea(LegalDocument);
+const PillsScreen = withSafeArea(Pills);
 const SelectProfileScreen = withSafeArea(SelectProfile);
 const NativeAccessBlockedScreen = withSafeArea(NativeAccessBlocked);
 const PlatformSuspendedScreen = withSafeArea(PlatformSuspended);
@@ -251,7 +254,7 @@ export default function AppNavigator() {
 
   return (
     <View style={styles.container}>
-      <NavigationContainer ref={navigationRef} linking={{ prefixes: ['laremdia://', 'appcond://'], config: { screens: isWeb ? { Landing: '', Login: 'login', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?', LegalDocument: 'legal/:document' } : { Login: '', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?' } } }}>
+      <NavigationContainer ref={navigationRef} linking={{ prefixes: ['laremdia://', 'appcond://'], config: { screens: isWeb ? { Landing: '', Login: 'login', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?', LegalDocument: 'legal/:document', Pills: 'pilulas/:slug?' } : { Login: '', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?' } } }}>
         <Stack.Navigator screenOptions={{ animation: 'fade', contentStyle: { backgroundColor: '#f5f7fb' } }}>
           {userToken && user?.mustChangePassword ? (
             <Stack.Screen name="ForcePasswordChange" component={ForcePasswordChangeScreen} options={{ headerShown: false }} />
@@ -288,6 +291,7 @@ export default function AppNavigator() {
           ) : (
             <>
               {isWeb ? <Stack.Screen name="Landing" component={LandingScreen} options={{ headerShown: false }} /> : null}
+              {isWeb ? <Stack.Screen name="Pills" component={PillsScreen} options={{ headerShown: false, title: 'Pílulas do Condomínio' }} /> : null}
               <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
               <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ headerShown: false }} />

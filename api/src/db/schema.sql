@@ -1578,3 +1578,13 @@ create table if not exists accountability_report_statements (
   uploaded_by uuid references users(id) on delete set null,
   created_at timestamptz not null default now()
 );
+
+-- Perguntas deixadas por visitantes nas "Pílulas do Condomínio" da landing
+-- (POST /pills/questions, rota pública). Servem de pauta para novas pílulas;
+-- o e-mail é opcional e só existe para avisar quem perguntou.
+create table if not exists pill_questions (
+  id uuid primary key default gen_random_uuid(),
+  question text not null check (char_length(question) between 10 and 1000),
+  email text,
+  created_at timestamptz not null default now()
+);
