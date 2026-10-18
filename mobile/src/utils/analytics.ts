@@ -14,8 +14,8 @@ import { Platform } from 'react-native';
 //
 // Tudo isso só existe no build web; no app nativo as funções não fazem nada.
 const ADS_ID = 'AW-18518742796';
-// ID de métricas do Google Analytics 4 (começa com "G-"). Vazio = Analytics desligado.
-const GA4_ID = '';
+// ID de métricas do Google Analytics 4 (propriedade "Site Lar em Dia"). Vazio = Analytics desligado.
+const GA4_ID = 'G-CJD751JJ15';
 
 const CONVERSIONS = {
   // Ação criada no Google Ads como "Visualização de página"; aqui marca o
