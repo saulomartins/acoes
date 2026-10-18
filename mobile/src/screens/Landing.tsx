@@ -7,6 +7,7 @@ import { useBreakpoint } from '../ui/responsive';
 import { shadow } from '../ui/theme';
 import { CardGrid } from '../ui/grid';
 import { trackConversion } from '../utils/analytics';
+import ChatAssistant from '../ui/ChatAssistant';
 
 // Sistema visual próprio da landing: paleta sofisticada (índigo/violeta),
 // cantos arredondados generosos e sombra suave discreta — deliberadamente
@@ -734,6 +735,7 @@ export default function Landing({ navigation }: any) {
           </View>
         </View>
       </ScrollView>
+      <ChatAssistant onOpenPill={(slug) => navigation.navigate('Pills', { slug })} onRequestProposal={() => scrollToSection('planos')} />
     </View>
   );
 }

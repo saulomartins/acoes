@@ -4,6 +4,7 @@ import { Text, TextInput } from '../ui/text';
 import { API_BASE_URL } from '../api/client';
 import { CardGrid } from '../ui/grid';
 import { colors, shadow } from '../ui/theme';
+import ChatAssistant from '../ui/ChatAssistant';
 
 // "Pílulas do Condomínio" — página pública da landing (só existe no build web,
 // em /pilulas). Lista, busca e detalhe de pílulas, mais o formulário "deixe
@@ -136,6 +137,7 @@ export default function Pills({ route, navigation }: any) {
   const related = pill ? all.filter((item) => item.category === pill.category && item.slug !== pill.slug) : [];
 
   return (
+    <View style={styles.root}>
     <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
       <View style={styles.top}>
         <Pressable onPress={goBack} style={styles.back}><Text style={styles.backText}>‹ {slug ? 'Todas as pílulas' : 'Voltar ao site'}</Text></Pressable>
@@ -212,10 +214,13 @@ export default function Pills({ route, navigation }: any) {
         </View>
       </View>
     </ScrollView>
+    <ChatAssistant onOpenPill={openPill} onRequestProposal={() => navigation.navigate('Landing')} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.background },
   page: { backgroundColor: colors.background, padding: 16, paddingBottom: 60 },
   top: { width: '100%', maxWidth: 1100, alignSelf: 'center', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   back: { paddingVertical: 10, paddingRight: 16 },
