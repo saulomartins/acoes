@@ -218,7 +218,7 @@ export default function Pills({ route, navigation }: any) {
         </View>
       </View>
     </ScrollView>
-    <ChatAssistant onOpenPill={openPill} onRequestProposal={() => navigation.navigate('Landing', { section: 'planos' })} />
+    <ChatAssistant onOpenPill={openPill} onRequestProposal={() => navigation.navigate('Landing', { section: 'planos' })} onOpenLogin={() => navigation.navigate('Login')} />
     </View>
   );
 }

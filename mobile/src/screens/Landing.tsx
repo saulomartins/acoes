@@ -227,6 +227,9 @@ const SECURITY_ITEMS = [
 
 const QUOTE_PROFILES = ['Síndico(a)', 'Subsíndico(a)', 'Morador(a)'];
 const QUOTE_FEATURES = FEATURES.map((feature) => feature.title);
+// Como a pessoa chegou até o Lar em Dia — mesma lista validada em api/src/routes/leadRoutes.ts.
+const REFERRAL_FROM_CONDOMINIUM = 'Indicação de outro condomínio';
+const QUOTE_REFERRALS = ['Propaganda', 'YouTube', 'Google', 'Facebook', 'Instagram', 'Panfleto impresso', REFERRAL_FROM_CONDOMINIUM, 'Outro'];
 
 const FOOTER_COLUMNS = [
   { title: 'Institucional', links: ['Início', 'Soluções', 'Planos', 'Conteúdos', 'Pílulas do Condomínio'] },
@@ -295,17 +298,19 @@ export default function Landing({ navigation, route }: any) {
   const [qCondoCount, setQCondoCount] = useState('');
   const [qUnitCount, setQUnitCount] = useState('');
   const [qFeatures, setQFeatures] = useState<string[]>([]);
+  const [qReferral, setQReferral] = useState('');
+  const [qReferralCondominium, setQReferralCondominium] = useState('');
   const [qSent, setQSent] = useState(false);
   const [qSubmitting, setQSubmitting] = useState(false);
   const [qError, setQError] = useState('');
-  const qValid = Boolean(qName.trim().length >= 2 && qCondominium.trim().length >= 2 && validEmail(qEmail) && validPhone(qPhone) && qCity.trim().length >= 2 && qProfile && Number(qCondoCount) > 0 && Number(qUnitCount) > 0 && qFeatures.length > 0);
+  const qValid = Boolean(qName.trim().length >= 2 && qCondominium.trim().length >= 2 && validEmail(qEmail) && validPhone(qPhone) && qCity.trim().length >= 2 && qProfile && Number(qCondoCount) > 0 && Number(qUnitCount) > 0 && qFeatures.length > 0 && Boolean(qReferral) && (qReferral !== REFERRAL_FROM_CONDOMINIUM || qReferralCondominium.trim().length >= 2));
 
   const toggleQuoteFeature = (feature: string) => setQFeatures((current) => current.includes(feature) ? current.filter((f) => f !== feature) : [...current, feature]);
 
   const submitQuote = async () => {
     if (qSubmitting) return;
     if (!qValid) {
-      setQError('Preencha todos os campos com dados válidos e selecione ao menos uma funcionalidade.');
+      setQError('Preencha todos os campos com dados válidos, selecione ao menos uma funcionalidade e conte como conheceu o Lar em Dia.');
       return;
     }
     setQSubmitting(true);
@@ -324,6 +329,8 @@ export default function Landing({ navigation, route }: any) {
           condominiumCount: qCondoCount.trim(),
           unitCount: qUnitCount.trim(),
           featuresOfInterest: qFeatures,
+          referralSource: qReferral,
+          referralCondominium: qReferral === REFERRAL_FROM_CONDOMINIUM ? qReferralCondominium.trim() : '',
         }),
       });
       const data = await response.json().catch(() => null);
@@ -646,6 +653,20 @@ export default function Landing({ navigation, route }: any) {
                   ))}
                 </View>
 
+                <Text style={styles.formLabel}>Como você conheceu o Lar em Dia?</Text>
+                <View style={styles.chipRow}>
+                  {QUOTE_REFERRALS.map((option) => (
+                    <Pressable key={option} onPress={() => setQReferral(option)} style={[styles.chip, qReferral === option && styles.chipOn]}>
+                      <Text style={[styles.chipText, qReferral === option && styles.chipTextOn]}>{option}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                {qReferral === REFERRAL_FROM_CONDOMINIUM ? (
+                  <View style={[styles.formRow, desktop && styles.formRowDesktop]}>
+                    <TextInput value={qReferralCondominium} onChangeText={(value) => setQReferralCondominium(value.replace(/[<>]/g, '').slice(0, 140))} placeholder="Qual condomínio indicou o Lar em Dia?" placeholderTextColor={C.muted} maxLength={140} style={styles.formField} />
+                  </View>
+                ) : null}
+
                 {qError ? <Text style={styles.formError}>{qError}</Text> : null}
                 <View style={styles.formSubmitWrap}>
                   <PillButton title={qSubmitting ? 'Enviando...' : 'Receber proposta personalizada'} onPress={submitQuote} />
@@ -698,7 +719,7 @@ export default function Landing({ navigation, route }: any) {
           </View>
         </View>
       </ScrollView>
-      <ChatAssistant onOpenPill={(slug) => navigation.navigate('Pills', { slug })} onRequestProposal={() => scrollToSection('planos')} />
+      <ChatAssistant onOpenPill={(slug) => navigation.navigate('Pills', { slug })} onRequestProposal={() => scrollToSection('planos')} onOpenLogin={goToLogin} />
     </View>
   );
 }

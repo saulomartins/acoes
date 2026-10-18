@@ -46,23 +46,44 @@ const HIRING_STEPS = [
 ];
 const CONTACT_EMAIL = 'laremdia.condominio@gmail.com';
 
-export type AboutTopic = 'hiring' | 'features' | 'benefits' | 'independence';
+// Endereços públicos que a Lari informa. O app Android está na Google Play;
+// para iPhone ainda não há app (a versão para a App Store está a caminho).
+const LOGIN_URL = 'https://gestaolaremdia.com/login';
+const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.appcond.condominio';
+
+export type AboutTopic = 'hiring' | 'features' | 'benefits' | 'independence' | 'login' | 'mobileApp';
 type Profile = (typeof PROFILES)[number]['key'];
 
-const ABOUT_LABELS: Record<Exclude<AboutTopic, 'independence'>, string> = {
+const TOPIC_LABELS: Record<Exclude<AboutTopic, 'independence'>, string> = {
   features: 'O que o sistema faz',
   benefits: 'Como ele pode me ajudar',
   hiring: 'Como contratar',
+  login: 'Como entrar no sistema',
+  mobileApp: 'Tem aplicativo?',
+};
+type LabeledTopic = keyof typeof TOPIC_LABELS;
+// Menu de "Conhecer o Lar em Dia" e atalhos no fim de cada cartão.
+const MENU_TOPICS: LabeledTopic[] = ['features', 'benefits', 'hiring', 'mobileApp', 'login'];
+const FOLLOW_UPS: Record<AboutTopic, LabeledTopic[]> = {
+  features: ['benefits', 'hiring'],
+  benefits: ['features', 'hiring'],
+  hiring: ['features', 'benefits'],
+  independence: ['features', 'hiring'],
+  login: ['mobileApp'],
+  mobileApp: ['login'],
 };
 
 // Perguntas sobre o Lar em Dia em si (e não sobre direito condominial), e
-// qual delas é: a ordem das regras importa. Termos que também aparecem em
-// assunto de condomínio só contam junto com uma menção ao produto — "quanto
-// custa uma obra" e "proposta de acordo" são pílulas, não contratação.
+// qual delas é: a ordem das regras importa. Acesso e aplicativo vêm antes
+// porque "como entro no app?" também menciona o produto. Termos que também
+// aparecem em assunto de condomínio só contam junto com uma menção ao
+// produto — "quanto custa uma obra" e "proposta de acordo" são pílulas.
 const normalize = (text: string) => text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 export const detectLarEmDiaIntent = (text: string): AboutTopic | null => {
   const value = normalize(text);
   if (/plano de reforma/.test(value)) return null;
+  if (/(\blogar\b|\blogin\b|loguin|entrar no (sistema|app|aplicativo|lar)|como (eu )?(entro|acesso|faco para entrar)|acessar (o sistema|minha conta|a plataforma|o app|o aplicativo)|esqueci (a |minha )?senha|minha senha|nao consigo (entrar|acessar))/.test(value)) return 'login';
+  if (/(\bbaix(ar|o|e)\b|download|instal(ar|o|e)\b|android|iphone|\bios\b|play ?store|app ?store|google play|\bloja\b|celular|\bmobile\b|(tem|existe|possui|voces tem) (um )?(app|aplicativo))/.test(value)) return 'mobileApp';
   const mentionsProduct = /(lar ?em ?dia|\bsistema\b|aplicativo|\bapp\b|software|plataforma|\bvoces\b)/.test(value);
   if (/(contrat|assinatur|\bplanos?\b|demonstra|proposta(?! de acordo))/.test(value)) return 'hiring';
   if (mentionsProduct && /(\bpreco|quanto custa|\bvalor\b|mensalidade)/.test(value)) return 'hiring';
@@ -106,8 +127,8 @@ const IndependenceNote = () => (
 
 // Respostas fixas sobre o próprio Lar em Dia. Cada cartão termina com atalhos
 // para os outros temas, para a conversa seguir sem a pessoa precisar digitar.
-const AboutCard = ({ topic, profile, onFollowUp, onRequestProposal }: { topic: AboutTopic; profile?: Profile; onFollowUp: (topic: AboutTopic) => void; onRequestProposal?: () => void }) => {
-  const followUps = (Object.keys(ABOUT_LABELS) as Array<keyof typeof ABOUT_LABELS>).filter((key) => key !== topic);
+const AboutCard = ({ topic, profile, onFollowUp, onRequestProposal, onOpenLogin }: { topic: AboutTopic; profile?: Profile; onFollowUp: (topic: LabeledTopic) => void; onRequestProposal?: () => void; onOpenLogin: () => void }) => {
+  const followUps = FOLLOW_UPS[topic];
   const profileContent = PROFILES.find((item) => item.key === profile);
   const isManager = profile !== 'moradores';
   return (
@@ -173,15 +194,47 @@ const AboutCard = ({ topic, profile, onFollowUp, onRequestProposal }: { topic: A
         </>
       ) : null}
 
+      {topic === 'login' ? (
+        <>
+          <Text style={styles.answerTitle}>Como entrar no Lar em Dia</Text>
+          {[
+            `Acesse a página de login: ${LOGIN_URL.replace('https://', '')}`,
+            'Digite seu usuário, CPF (com ou sem pontos) ou e-mail cadastrado, e a sua senha.',
+            'Esqueceu a senha? Toque em "Esqueci minha senha" na própria tela de login.',
+          ].map((step, index) => (
+            <View key={step} style={styles.stepRow}>
+              <View style={styles.stepNumber}><Text style={styles.stepNumberText}>{index + 1}</Text></View>
+              <Text style={styles.stepText}>{step}</Text>
+            </View>
+          ))}
+          <Text style={styles.answerText}>Ainda não tem acesso? O cadastro é feito pelo síndico ou subsíndico do seu condomínio, e você recebe o usuário e a senha por e-mail. O mesmo acesso vale no site e no aplicativo Android.</Text>
+          <View style={styles.salesActions}>
+            <Pressable onPress={onOpenLogin} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Ir para o login</Text></Pressable>
+          </View>
+        </>
+      ) : null}
+
+      {topic === 'mobileApp' ? (
+        <>
+          <Text style={styles.answerTitle}>Tem aplicativo para celular?</Text>
+          <Text style={styles.answerText}>Tem, sim! 📱 O app do Lar em Dia já está na <Text style={styles.bold}>Google Play, para Android</Text>. Você entra com o mesmo usuário e senha do site.</Text>
+          <Text style={styles.answerText}>Para <Text style={styles.bold}>iPhone</Text>, a versão para a App Store está a caminho e chega em breve. Enquanto isso, dá para usar tudo pelo navegador do celular, em {LOGIN_URL.replace('https://', '')}.</Text>
+          <View style={styles.salesActions}>
+            <Pressable onPress={() => Linking.openURL(PLAY_STORE_URL)} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Baixar na Google Play</Text></Pressable>
+            <Pressable onPress={onOpenLogin} style={styles.chip}><Text style={styles.chipText}>Entrar pelo navegador</Text></Pressable>
+          </View>
+        </>
+      ) : null}
+
       <Text style={styles.followUpLabel}>Quer saber mais?</Text>
       <View style={styles.salesActions}>
-        {followUps.map((key) => <Pressable key={key} onPress={() => onFollowUp(key)} style={styles.chip}><Text style={styles.chipText}>{ABOUT_LABELS[key]}</Text></Pressable>)}
+        {followUps.map((key) => <Pressable key={key} onPress={() => onFollowUp(key)} style={styles.chip}><Text style={styles.chipText}>{TOPIC_LABELS[key]}</Text></Pressable>)}
       </View>
     </View>
   );
 };
 
-export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpenPill: (slug: string) => void; onRequestProposal?: () => void }) {
+export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLogin }: { onOpenPill: (slug: string) => void; onRequestProposal?: () => void; onOpenLogin?: () => void }) {
   const { isDesktop, isTablet } = useBreakpoint();
   const [open, setOpen] = useState(false);
   const [teaser, setTeaser] = useState(false);
@@ -220,7 +273,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
     setTeaser(false);
     if (messages.length) return;
     await botSays('Oi! Eu sou a Lari, assistente virtual do Lar em Dia. 👋', 500);
-    await botSays('Posso ajudar com dúvidas de condomínio: cobrança, assembleias, obras, inquilinos e mais. Sempre mostro a lei de onde tirei a resposta. Também explico como funciona e como contratar o Lar em Dia.');
+    await botSays('Posso ajudar com dúvidas de condomínio: cobrança, assembleias, obras, inquilinos e mais. Sempre mostro a lei de onde tirei a resposta. Também explico como funciona, como contratar e como acessar o Lar em Dia.');
     await botSays('Escreva sua pergunta ou escolha um assunto abaixo.', 400);
   };
 
@@ -338,7 +391,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
               if (message.kind === 'about') {
                 return (
                   <View key={message.id} style={styles.botRow} onLayout={(event) => { if (message.id === lastMessage?.id) scrollRef.current?.scrollTo({ y: Math.max(event.nativeEvent.layout.y - 8, 0), animated: true }); }}>
-                    <AboutCard topic={message.topic} profile={message.profile} onFollowUp={(topic) => explainAbout(ABOUT_LABELS[topic as keyof typeof ABOUT_LABELS], topic)} onRequestProposal={onRequestProposal ? () => { setOpen(false); onRequestProposal(); } : undefined} />
+                    <AboutCard topic={message.topic} profile={message.profile} onFollowUp={(topic) => explainAbout(TOPIC_LABELS[topic], topic)} onOpenLogin={() => { setOpen(false); if (onOpenLogin) onOpenLogin(); else Linking.openURL(LOGIN_URL); }} onRequestProposal={onRequestProposal ? () => { setOpen(false); onRequestProposal(); } : undefined} />
                   </View>
                 );
               }
@@ -383,7 +436,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
                   </>
                 ) : chipMode === 'about' ? (
                   <>
-                    {(Object.keys(ABOUT_LABELS) as Array<keyof typeof ABOUT_LABELS>).map((key) => <Pressable key={key} onPress={() => explainAbout(ABOUT_LABELS[key], key)} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>{ABOUT_LABELS[key]}</Text></Pressable>)}
+                    {MENU_TOPICS.map((key) => <Pressable key={key} onPress={() => explainAbout(TOPIC_LABELS[key], key)} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>{TOPIC_LABELS[key]}</Text></Pressable>)}
                   </>
                 ) : chipMode === 'profile' ? (
                   <>
@@ -393,6 +446,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
                 ) : (
                   <>
                     {TOPICS.map((topic) => <Pressable key={topic.label} onPress={() => ask(topic.query)} style={styles.chip}><Text style={styles.chipText}>{topic.label}</Text></Pressable>)}
+                    <Pressable onPress={() => explainAbout('Como entro no sistema?', 'login')} style={styles.chip}><Text style={styles.chipText}>Acessar o sistema</Text></Pressable>
                     <Pressable onPress={showAboutMenu} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Conhecer o Lar em Dia</Text></Pressable>
                   </>
                 )}

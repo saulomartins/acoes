@@ -22,6 +22,10 @@ const limit = (maximum: number, windowMs: number) => (req: Request, res: Respons
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 const validProfiles = ['Síndico(a)', 'Subsíndico(a)', 'Morador(a)'];
+// Mesma lista do formulário da landing. Opcional aqui para não recusar
+// envios de quem ainda está com a versão anterior do site aberta.
+const REFERRAL_FROM_CONDOMINIUM = 'Indicação de outro condomínio';
+const validReferralSources = ['Propaganda', 'YouTube', 'Google', 'Facebook', 'Instagram', 'Panfleto impresso', REFERRAL_FROM_CONDOMINIUM, 'Outro'];
 
 router.post('/', limit(5, 15 * 60_000), asyncHandler(async (req, res) => {
   const name = String(req.body?.name || '').trim();
@@ -35,6 +39,8 @@ router.post('/', limit(5, 15 * 60_000), asyncHandler(async (req, res) => {
   const unitCount = String(req.body?.unitCount || '').trim();
   const featureList = Array.isArray(req.body?.featuresOfInterest) ? req.body.featuresOfInterest.map((value: unknown) => String(value).trim()).filter(Boolean) : [];
   const featuresOfInterest = featureList.join(', ');
+  const referralSource = String(req.body?.referralSource || '').trim();
+  const referralCondominium = String(req.body?.referralCondominium || '').trim();
 
   if (name.length < 2 || name.length > 100 || !/^[A-Za-zÀ-ÖØ-öø-ÿ' -]+$/.test(name)) return res.status(400).json({ message: 'Informe um nome válido.' });
   if (condominiumName.length < 2 || condominiumName.length > 140) return res.status(400).json({ message: 'Informe o nome do condomínio.' });
@@ -45,8 +51,13 @@ router.post('/', limit(5, 15 * 60_000), asyncHandler(async (req, res) => {
   if (!/^\d{1,4}$/.test(condominiumCount) || Number(condominiumCount) < 1) return res.status(400).json({ message: 'Informe uma quantidade válida de condomínios.' });
   if (!/^\d{1,6}$/.test(unitCount) || Number(unitCount) < 1) return res.status(400).json({ message: 'Informe uma quantidade válida de unidades.' });
   if (!featureList.length) return res.status(400).json({ message: 'Selecione ao menos uma funcionalidade de interesse.' });
+  if (referralSource && !validReferralSources.includes(referralSource)) return res.status(400).json({ message: 'Selecione como conheceu o Lar em Dia.' });
+  if (referralSource === REFERRAL_FROM_CONDOMINIUM && (referralCondominium.length < 2 || referralCondominium.length > 140)) return res.status(400).json({ message: 'Informe qual condomínio indicou o Lar em Dia.' });
 
-  await sendLeadNotificationEmail({ name, condominiumName, email, phone, message, city, profile, condominiumCount, unitCount, featuresOfInterest });
+  await sendLeadNotificationEmail({
+    name, condominiumName, email, phone, message, city, profile, condominiumCount, unitCount, featuresOfInterest,
+    referralSource, referralCondominium: referralSource === REFERRAL_FROM_CONDOMINIUM ? referralCondominium : '',
+  });
 
   return res.status(201).json({ ok: true });
 }));

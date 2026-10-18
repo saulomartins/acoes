@@ -393,6 +393,7 @@ const LEAD_NOTIFICATION_EMAIL = 'laremdia.condominio@gmail.com';
 export const sendLeadNotificationEmail = (lead: {
   name: string; condominiumName: string; email: string; phone: string; message: string;
   city?: string; profile?: string; condominiumCount?: string; unitCount?: string; featuresOfInterest?: string;
+  referralSource?: string; referralCondominium?: string;
 }) => sendEmail({
   to: LEAD_NOTIFICATION_EMAIL,
   subject: `Novo contato pelo site — ${lead.condominiumName}`,
@@ -408,7 +409,9 @@ export const sendLeadNotificationEmail = (lead: {
         ${lead.profile ? `Perfil: <strong>${escapeHtml(lead.profile)}</strong><br/>` : ''}
         ${lead.condominiumCount ? `Nº de condomínios: <strong>${escapeHtml(lead.condominiumCount)}</strong><br/>` : ''}
         ${lead.unitCount ? `Unidades (aprox.): <strong>${escapeHtml(lead.unitCount)}</strong><br/>` : ''}
-        ${lead.featuresOfInterest ? `Interesse: <strong>${escapeHtml(lead.featuresOfInterest)}</strong>` : ''}
+        ${lead.featuresOfInterest ? `Interesse: <strong>${escapeHtml(lead.featuresOfInterest)}</strong><br/>` : ''}
+        ${lead.referralSource ? `Como conheceu: <strong>${escapeHtml(lead.referralSource)}</strong><br/>` : ''}
+        ${lead.referralCondominium ? `Condomínio que indicou: <strong>${escapeHtml(lead.referralCondominium)}</strong>` : ''}
       </p>
       ${lead.message ? `<p>${escapeHtml(lead.message)}</p>` : ''}
     </div></body></html>`,
