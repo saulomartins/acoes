@@ -18,11 +18,12 @@ const ADS_ID = 'AW-18518742796';
 const GA4_ID = 'G-CJD751JJ15';
 
 const CONVERSIONS = {
-  // Ação criada no Google Ads como "Visualização de página"; aqui marca o
-  // envio bem-sucedido do formulário "Receber proposta personalizada". O site
-  // é uma página única, então a conversão é disparada no momento da ação, e
-  // não pelo snippet de "carregamento de página" no <head>.
-  leadForm: 'AW-18518742796/OWYsCOrB_Z8dEIyutv5E',
+  // Ação "Enviar formulário de lead" do Google Ads: envio bem-sucedido do
+  // formulário "Receber proposta personalizada". O site é uma página única,
+  // então a conversão é disparada no momento da ação, e não pelo snippet de
+  // "página de conversão" no <head>. (Até 18/10/2026 ia para a ação antiga
+  // "Visualização de página", rótulo OWYsCOrB_Z8dEIyutv5E.)
+  leadForm: 'AW-18518742796/tCYFCJzRpaEdEIyutv5E',
 } as const;
 
 export type ConsentChoice = 'granted' | 'denied';
