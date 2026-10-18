@@ -5,6 +5,7 @@ import { Text, TextInput } from './text';
 import { API_BASE_URL } from '../api/client';
 import { useBreakpoint } from './responsive';
 import { BENEFITS, FEATURE_GROUPS, PROFILES } from '../content/landingContent';
+import LiaMascot from './LiaMascot';
 
 // "Lia", a atendente virtual do site. Balão flutuante que abre um chat por
 // cima da landing e da página de pílulas (só web). Não é IA: as respostas
@@ -76,10 +77,8 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const LiaAvatar = ({ size = 40 }: { size?: number }) => (
   <View style={{ width: size, height: size }}>
-    <LinearGradient colors={[C.primary, C.violet]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Text style={[styles.avatarText, { fontSize: size * 0.42 }]}>L</Text>
-    </LinearGradient>
-    <View style={[styles.onlineDot, { width: size * 0.28, height: size * 0.28, borderRadius: size * 0.14 }]} />
+    <View style={[styles.avatarRing, { borderRadius: size / 2 }]}><LiaMascot size={size - 4} /></View>
+    <View style={[styles.onlineDot, { width: size * 0.26, height: size * 0.26, borderRadius: size * 0.13 }]} />
   </View>
 );
 
@@ -438,8 +437,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
 
 const styles = StyleSheet.create({
   layer: { position: 'absolute', right: 0, bottom: 0, left: 0, top: 0, zIndex: 50, alignItems: 'flex-end', justifyContent: 'flex-end', padding: 16 },
-  avatar: { alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
-  avatarText: { color: '#fff', fontWeight: '900' },
+  avatarRing: { flex: 1, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff', overflow: 'hidden' },
   onlineDot: { position: 'absolute', right: 0, bottom: 0, backgroundColor: C.green, borderWidth: 2, borderColor: '#fff' },
   launcher: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', shadowColor: C.primary, shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 8 },
   pulse: { position: 'absolute', width: 60, height: 60, borderRadius: 30, backgroundColor: C.violet },
