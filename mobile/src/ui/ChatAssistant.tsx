@@ -5,14 +5,14 @@ import { Text, TextInput } from './text';
 import { API_BASE_URL } from '../api/client';
 import { useBreakpoint } from './responsive';
 import { BENEFITS, FEATURE_GROUPS, PROFILES } from '../content/landingContent';
-import LiaMascot from './LiaMascot';
+import LariMascot from './LariMascot';
 
-// "Lia", a atendente virtual do site. Balão flutuante que abre um chat por
+// "Lari", a atendente virtual do site. Balão flutuante que abre um chat por
 // cima da landing e da página de pílulas (só web). Não é IA: as respostas
 // vêm da busca das Pílulas do Condomínio (GET /pills/search), sempre com a
 // base legal da pílula, e o que a busca não encontra vira pergunta para a
 // equipe (POST /pills/questions) — custo zero e sem risco de inventar lei.
-// A própria Lia se apresenta como assistente virtual, sem fingir ser gente.
+// A própria Lari se apresenta como assistente virtual, sem fingir ser gente.
 // Perguntas sobre o próprio Lar em Dia ("o que faz?", "como me ajuda?", "como
 // contratar?", "vocês administram?") não vão para a busca: têm resposta fixa
 // em <AboutCard>, montada com o mesmo conteúdo da landing.
@@ -75,9 +75,9 @@ export const detectLarEmDiaIntent = (text: string): AboutTopic | null => {
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const LiaAvatar = ({ size = 40 }: { size?: number }) => (
+const LariAvatar = ({ size = 40 }: { size?: number }) => (
   <View style={{ width: size, height: size }}>
-    <View style={[styles.avatarRing, { borderRadius: size / 2 }]}><LiaMascot size={size - 4} /></View>
+    <View style={[styles.avatarRing, { borderRadius: size / 2 }]}><LariMascot size={size - 4} /></View>
     <View style={[styles.onlineDot, { width: size * 0.26, height: size * 0.26, borderRadius: size * 0.13 }]} />
   </View>
 );
@@ -219,7 +219,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
     setOpen(true);
     setTeaser(false);
     if (messages.length) return;
-    await botSays('Oi! Eu sou a Lia, assistente virtual do Lar em Dia. 👋', 500);
+    await botSays('Oi! Eu sou a Lari, assistente virtual do Lar em Dia. 👋', 500);
     await botSays('Posso ajudar com dúvidas de condomínio: cobrança, assembleias, obras, inquilinos e mais. Sempre mostro a lei de onde tirei a resposta. Também explico como funciona e como contratar o Lar em Dia.');
     await botSays('Escreva sua pergunta ou escolha um assunto abaixo.', 400);
   };
@@ -325,9 +325,9 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
       {open ? (
         <View style={[styles.panel, panelStyle]}>
           <LinearGradient colors={[C.primary, C.violet]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
-            <LiaAvatar size={38} />
+            <LariAvatar size={38} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.headerName}>Lia · Lar em Dia</Text>
+              <Text style={styles.headerName}>Lari · Lar em Dia</Text>
               <Text style={styles.headerStatus}>Assistente virtual · responde com base na lei</Text>
             </View>
             <Pressable onPress={() => setOpen(false)} hitSlop={10} style={styles.close}><Text style={styles.closeText}>✕</Text></Pressable>
@@ -420,15 +420,15 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
 
       {!open && teaser ? (
         <Pressable onPress={openChat} style={styles.teaser}>
-          <Text style={styles.teaserText}>Oi! Sou a Lia 👋 Tem alguma dúvida de condomínio?</Text>
+          <Text style={styles.teaserText}>Oi! Sou a Lari 👋 Tem alguma dúvida de condomínio?</Text>
           <Pressable onPress={() => setTeaser(false)} hitSlop={8}><Text style={styles.teaserClose}>✕</Text></Pressable>
         </Pressable>
       ) : null}
 
       {!open ? (
-        <Pressable onPress={openChat} style={styles.launcher} accessibilityLabel="Abrir chat com a Lia, assistente virtual">
+        <Pressable onPress={openChat} style={styles.launcher} accessibilityLabel="Abrir chat com a Lari, assistente virtual">
           <Animated.View style={[styles.pulse, { opacity: pulseOpacity, transform: [{ scale: pulseScale }] }]} />
-          <LiaAvatar size={60} />
+          <LariAvatar size={60} />
         </Pressable>
       ) : null}
     </View>

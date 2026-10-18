@@ -1,4 +1,4 @@
-// Conteúdo comercial da landing, compartilhado com a Lia (ui/ChatAssistant)
+// Conteúdo comercial da landing, compartilhado com a Lari (ui/ChatAssistant)
 // para o chat nunca prometer algo diferente do que o site mostra.
 
 export type Feature = { title: string; icon: string; description: string; highlight?: string };

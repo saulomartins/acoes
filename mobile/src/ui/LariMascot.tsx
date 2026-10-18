@@ -1,12 +1,12 @@
 import React from 'react';
 
-// Mascote da Lia, a atendente virtual do site: uma casinha (o símbolo do Lar
+// Mascote da Lari, a atendente virtual do site: uma casinha (o símbolo do Lar
 // em Dia) com rosto, cujo sorriso é o check verde do logo ("em dia"), e um
 // balão de conversa com reticências no telhado. Desenhada em SVG e servida
 // como data URI: não precisa de biblioteca nova e as animações (piscar e
 // reticências) são SMIL, que o navegador roda dentro de <img>. É um <img> do
 // DOM, e não o <Image> do React Native: com o <Image> do react-native-web o
-// fundo da imagem nunca era aplicado e o avatar ficava em branco. A Lia só
+// fundo da imagem nunca era aplicado e o avatar ficava em branco. A Lari só
 // existe no build web, então não há caso nativo para tratar aqui.
 const MASCOT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
@@ -52,6 +52,6 @@ const MASCOT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
 
 const MASCOT_URI = `data:image/svg+xml;utf8,${encodeURIComponent(MASCOT_SVG)}`;
 
-export default function LiaMascot({ size }: { size: number }) {
-  return React.createElement('img', { src: MASCOT_URI, width: size, height: size, alt: 'Lia, assistente virtual do Lar em Dia', draggable: false, style: { display: 'block' } });
+export default function LariMascot({ size }: { size: number }) {
+  return React.createElement('img', { src: MASCOT_URI, width: size, height: size, alt: 'Lari, assistente virtual do Lar em Dia', draggable: false, style: { display: 'block' } });
 }
