@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Animated, Easing, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text, TextInput } from './text';
 import { API_BASE_URL } from '../api/client';
@@ -11,12 +11,15 @@ import { useBreakpoint } from './responsive';
 // base legal da pílula, e o que a busca não encontra vira pergunta para a
 // equipe (POST /pills/questions) — custo zero e sem risco de inventar lei.
 // A própria Lia se apresenta como assistente virtual, sem fingir ser gente.
+// Perguntas sobre o próprio Lar em Dia (contratar, preço, "vocês administram?")
+// não vão para a busca: têm resposta fixa em <SalesCard>.
 
 type PillSummary = { slug: string; title: string; category: string; summary: string };
 type PillDetail = PillSummary & { sources: Array<{ label: string; url?: string }> };
 type Message =
   | { id: number; from: 'bot' | 'user'; kind: 'text'; text: string }
-  | { id: number; from: 'bot'; kind: 'answer'; pill: PillDetail; related: PillSummary[] };
+  | { id: number; from: 'bot'; kind: 'answer'; pill: PillDetail; related: PillSummary[] }
+  | { id: number; from: 'bot'; kind: 'sales' };
 // Omit "distributivo": aplica o Omit em cada variante da união, senão o TS
 // achata a união e perde os campos específicos de cada tipo de mensagem.
 type WithoutId<T> = T extends unknown ? Omit<T, 'id'> : never;
@@ -31,6 +34,23 @@ const TOPICS = [
   { label: 'Inquilino x proprietário', query: 'inquilino proprietário quem paga' },
   { label: 'Valor do condomínio', query: 'calcular valor taxa condominial' },
 ];
+
+// Só o que a landing já promete — nada de condição comercial inventada aqui.
+const HIRING_STEPS = [
+  'Preencha o formulário "Receber proposta personalizada" com o número de unidades e as funcionalidades que interessam.',
+  'Nossa equipe entra em contato com a proposta. O valor depende do número de unidades e das funcionalidades contratadas.',
+  'Implantação simplificada: o condomínio é configurado, o síndico recebe o acesso e cada morador entra com o próprio login.',
+];
+const CONTACT_EMAIL = 'laremdia.condominio@gmail.com';
+
+// Perguntas sobre o Lar em Dia em si, e não sobre direito condominial.
+// "plano de reforma" é assunto de obra (pílula), por isso fica de fora.
+const normalize = (text: string) => text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+export const isAboutLarEmDia = (text: string) => {
+  const value = normalize(text);
+  if (/plano de reforma/.test(value)) return false;
+  return /(contrat|assinatur|\bplanos?\b|demonstra|proposta|administradora|\badministram\b|\bvoces\b|lar ?em ?dia|\bsistema\b|aplicativo|\bapp\b|software|plataforma)/.test(value);
+};
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -96,7 +116,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
     setTeaser(false);
     if (messages.length) return;
     await botSays('Oi! Eu sou a Lia, assistente virtual do Lar em Dia. 👋', 500);
-    await botSays('Posso ajudar com dúvidas de condomínio: cobrança, assembleias, obras, inquilinos e mais. Sempre mostro a lei de onde tirei a resposta.');
+    await botSays('Posso ajudar com dúvidas de condomínio: cobrança, assembleias, obras, inquilinos e mais. Sempre mostro a lei de onde tirei a resposta. Também explico como funciona e como contratar o Lar em Dia.');
     await botSays('Escreva sua pergunta ou escolha um assunto abaixo.', 400);
   };
 
@@ -115,7 +135,16 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
     }
   };
 
+  const explainHiring = async (question: string) => {
+    push({ from: 'user', kind: 'text', text: question });
+    setTyping(true);
+    await wait(700);
+    setTyping(false);
+    push({ from: 'bot', kind: 'sales' });
+  };
+
   const ask = async (question: string) => {
+    if (isAboutLarEmDia(question)) { await explainHiring(question); return; }
     push({ from: 'user', kind: 'text', text: question });
     setTyping(true);
     try {
@@ -152,11 +181,11 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
     ask(text);
   };
 
-  // Resposta com pílula é longa: rolar até o fim esconderia o título dela.
+  // Resposta com pílula (ou o cartão de contratação) é longa: rolar até o fim esconderia o título.
   // Nesse caso quem rola é o onLayout da própria resposta (até o topo dela).
   const lastMessage = messages[messages.length - 1];
   useEffect(() => {
-    if (!open || (lastMessage?.kind === 'answer' && !typing)) return;
+    if (!open || ((lastMessage?.kind === 'answer' || lastMessage?.kind === 'sales') && !typing)) return;
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
   }, [messages, typing, open]);
 
@@ -179,6 +208,32 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
 
           <ScrollView ref={scrollRef} style={styles.body} contentContainerStyle={styles.bodyContent}>
             {messages.map((message) => {
+              if (message.kind === 'sales') {
+                return (
+                  <View key={message.id} style={styles.botRow} onLayout={(event) => { if (message.id === lastMessage?.id) scrollRef.current?.scrollTo({ y: Math.max(event.nativeEvent.layout.y - 8, 0), animated: true }); }}>
+                    <View style={[styles.bubble, styles.bubbleBot, styles.answer]}>
+                      <Text style={styles.answerCategory}>SOBRE O LAR EM DIA</Text>
+                      <Text style={styles.answerTitle}>Você no comando da gestão do seu condomínio</Text>
+                      <View style={styles.independence}>
+                        <Text style={styles.independenceText}>O Lar em Dia <Text style={styles.bold}>não é uma administradora</Text> e não faz a gestão do seu condomínio. Nós oferecemos a plataforma para que o <Text style={styles.bold}>síndico e o subsíndico</Text> façam a gestão com <Text style={styles.bold}>independência</Text>, sem depender de terceiros.</Text>
+                      </View>
+                      <Text style={styles.answerText}>Com ela, vocês cuidam de boletos por Pix e boleto, prestação de contas homologada pelo conselho fiscal, avisos, ocorrências, reservas, enquetes e do app dos moradores, tudo em um só lugar.</Text>
+                      <Text style={styles.stepsTitle}>Como contratar</Text>
+                      {HIRING_STEPS.map((step, index) => (
+                        <View key={step} style={styles.stepRow}>
+                          <View style={styles.stepNumber}><Text style={styles.stepNumberText}>{index + 1}</Text></View>
+                          <Text style={styles.stepText}>{step}</Text>
+                        </View>
+                      ))}
+                      <Text style={styles.answerText}>E, se precisar, o suporte é direto com quem desenvolve o sistema.</Text>
+                      <View style={styles.salesActions}>
+                        {onRequestProposal ? <Pressable onPress={() => { setOpen(false); onRequestProposal(); }} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Pedir proposta</Text></Pressable> : null}
+                        <Pressable onPress={() => Linking.openURL(`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Quero conhecer o Lar em Dia')}`)} style={styles.chip}><Text style={styles.chipText}>Falar por e-mail</Text></Pressable>
+                      </View>
+                    </View>
+                  </View>
+                );
+              }
               if (message.kind === 'answer') {
                 const { pill, related } = message;
                 return (
@@ -221,7 +276,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal }: { onOpe
                 ) : (
                   <>
                     {TOPICS.map((topic) => <Pressable key={topic.label} onPress={() => ask(topic.query)} style={styles.chip}><Text style={styles.chipText}>{topic.label}</Text></Pressable>)}
-                    {onRequestProposal ? <Pressable onPress={() => { setOpen(false); onRequestProposal(); }} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Quero conhecer o sistema</Text></Pressable> : null}
+                    <Pressable onPress={() => explainHiring('Como contratar o Lar em Dia?')} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Como contratar o Lar em Dia</Text></Pressable>
                   </>
                 )}
               </View>
@@ -302,6 +357,15 @@ const styles = StyleSheet.create({
   answerLink: { color: C.primary, fontWeight: '900', fontSize: 13, marginTop: 10 },
   relatedLabel: { color: C.muted, fontSize: 12, fontWeight: '800', marginTop: 10 },
   relatedLink: { color: C.primary, fontSize: 12.5, fontWeight: '700', marginTop: 4, textDecorationLine: 'underline' },
+  independence: { backgroundColor: '#EEF0FE', borderLeftWidth: 3, borderLeftColor: C.primary, borderRadius: 8, padding: 10, marginTop: 8 },
+  independenceText: { color: C.ink, fontSize: 13.5, lineHeight: 19.5 },
+  bold: { fontWeight: '900' },
+  stepsTitle: { color: C.ink, fontWeight: '900', fontSize: 13.5, marginTop: 12, marginBottom: 6 },
+  stepRow: { flexDirection: 'row', gap: 8, marginBottom: 6 },
+  stepNumber: { width: 20, height: 20, borderRadius: 10, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  stepNumberText: { color: '#fff', fontSize: 11, fontWeight: '900' },
+  stepText: { flex: 1, color: C.ink, fontSize: 13, lineHeight: 18.5 },
+  salesActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 },
   chip: { borderWidth: 1.5, borderColor: '#D9DCFB', backgroundColor: C.soft, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
   chipText: { color: C.primary, fontWeight: '800', fontSize: 12.5 },

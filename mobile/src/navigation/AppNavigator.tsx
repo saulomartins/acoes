@@ -40,7 +40,7 @@ import { withResponsiveShell, withRoleGuard } from './screenHelpers';
 import { ManagementStackScreens } from './ManagementStack';
 
 type RootStackParamList = {
-  Landing: undefined;
+  Landing: { section?: string } | undefined;
   Login: undefined;
   Register: undefined;
   ForgotPassword: undefined;

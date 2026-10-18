@@ -209,12 +209,16 @@ export default function Pills({ route, navigation }: any) {
 
         <View style={styles.cta}>
           <Text style={styles.ctaTitle}>Quer colocar essas boas práticas em prática?</Text>
-          <Text style={styles.ctaText}>O Lar em Dia organiza cobrança, assembleias, ocorrências com direito de defesa e prestação de contas homologada pelo conselho fiscal.</Text>
-          <Pressable onPress={() => navigation.navigate('Landing')} style={({ pressed }) => [styles.button, styles.ctaButton, pressed && styles.pressed]}><Text style={styles.ctaButtonText}>Conhecer o Lar em Dia</Text></Pressable>
+          <Text style={styles.ctaText}>O Lar em Dia não é uma administradora e não faz a gestão do seu condomínio. Nós oferecemos a plataforma para que o síndico e o subsíndico façam a gestão com independência: cobrança por Pix e boleto, ocorrências com direito de defesa, avisos, reservas e prestação de contas homologada pelo conselho fiscal.</Text>
+          <Text style={styles.ctaStepsTitle}>Como contratar</Text>
+          {['Peça uma proposta informando o número de unidades e as funcionalidades de interesse.', 'Nossa equipe envia a proposta. O valor depende das unidades e das funcionalidades.', 'Implantação simplificada: o síndico recebe o acesso e cada morador entra com o próprio login.'].map((step, index) => (
+            <View key={step} style={styles.ctaStep}><Text style={styles.ctaStepNumber}>{index + 1}</Text><Text style={styles.ctaStepText}>{step}</Text></View>
+          ))}
+          <Pressable onPress={() => navigation.navigate('Landing', { section: 'planos' })} style={({ pressed }) => [styles.button, styles.ctaButton, pressed && styles.pressed]}><Text style={styles.ctaButtonText}>Pedir proposta</Text></Pressable>
         </View>
       </View>
     </ScrollView>
-    <ChatAssistant onOpenPill={openPill} onRequestProposal={() => navigation.navigate('Landing')} />
+    <ChatAssistant onOpenPill={openPill} onRequestProposal={() => navigation.navigate('Landing', { section: 'planos' })} />
     </View>
   );
 }
@@ -271,6 +275,10 @@ const styles = StyleSheet.create({
   cta: { backgroundColor: colors.navy, borderRadius: 18, padding: 26, marginTop: 32 },
   ctaTitle: { color: '#fff', fontSize: 20, fontWeight: '900' },
   ctaText: { color: 'rgba(255,255,255,0.8)', fontSize: 14.5, lineHeight: 21, marginTop: 8, marginBottom: 18, maxWidth: 640 },
-  ctaButton: { backgroundColor: '#fff' },
+  ctaStepsTitle: { color: '#fff', fontSize: 15, fontWeight: '900', marginBottom: 10 },
+  ctaStep: { flexDirection: 'row', gap: 10, marginBottom: 8, maxWidth: 640 },
+  ctaStepNumber: { width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.18)', color: '#fff', fontWeight: '900', fontSize: 12, textAlign: 'center', lineHeight: 22 },
+  ctaStepText: { flex: 1, color: 'rgba(255,255,255,0.85)', fontSize: 14, lineHeight: 21 },
+  ctaButton: { backgroundColor: '#fff', marginTop: 10 },
   ctaButtonText: { color: colors.navy, fontWeight: '900', fontSize: 15 },
 });

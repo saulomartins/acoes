@@ -295,7 +295,7 @@ const maskPhone = (value: string) => {
 const validEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
 const validPhone = (value: string) => /^\d{10,11}$/.test(value.replace(/\D/g, ''));
 
-export default function Landing({ navigation }: any) {
+export default function Landing({ navigation, route }: any) {
   const { isDesktop: desktop, isTablet: tablet } = useBreakpoint();
   const scrollRef = useRef<ScrollView>(null);
   const sectionOffsets = useRef<Record<string, number>>({}).current;
@@ -305,6 +305,15 @@ export default function Landing({ navigation }: any) {
     const y = sectionOffsets[key];
     if (y !== undefined) scrollRef.current?.scrollTo({ y: Math.max(y - 84, 0), animated: true });
   };
+
+  // Vindo de outra página com destino (ex.: "Pedir proposta" nas pílulas):
+  // espera as seções registrarem a posição (onLayout) antes de rolar.
+  const targetSection: string | undefined = route?.params?.section;
+  useEffect(() => {
+    if (!targetSection) return;
+    const timer = setTimeout(() => scrollToSection(targetSection), 600);
+    return () => clearTimeout(timer);
+  }, [targetSection]);
 
   const [profileTab, setProfileTab] = useState(PROFILES[0].key);
   const activeProfile = PROFILES.find((p) => p.key === profileTab) || PROFILES[0];
