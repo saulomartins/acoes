@@ -6,6 +6,7 @@ import { API_BASE_URL } from '../api/client';
 import { useBreakpoint } from './responsive';
 import { BENEFITS, FEATURE_GROUPS, PROFILES } from '../content/landingContent';
 import LariMascot from './LariMascot';
+import { useCookieBannerHeight } from './CookieConsent';
 
 // "Lari", a atendente virtual do site. Balão flutuante que abre um chat por
 // cima da landing e da página de pílulas (só web). Não é IA: as respostas
@@ -236,6 +237,9 @@ const AboutCard = ({ topic, profile, onFollowUp, onRequestProposal, onOpenLogin 
 
 export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLogin }: { onOpenPill: (slug: string) => void; onRequestProposal?: () => void; onOpenLogin?: () => void }) {
   const { isDesktop, isTablet } = useBreakpoint();
+  // No celular o aviso de cookies ocupa a largura toda: o balão (e o chat
+  // aberto) sobem acima dele, senão o aviso cobriria o botão e o campo de texto.
+  const cookieBannerHeight = useCookieBannerHeight();
   const [open, setOpen] = useState(false);
   const [teaser, setTeaser] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -370,11 +374,12 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLog
   }, [messages, typing, open]);
 
   const panelStyle = isDesktop || isTablet ? styles.panelWide : styles.panelPhone;
+  const launcherOffset = !isDesktop && !isTablet ? cookieBannerHeight : 0;
   const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] });
   const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] });
 
   return (
-    <View pointerEvents="box-none" style={styles.layer}>
+    <View pointerEvents="box-none" style={[styles.layer, launcherOffset ? { paddingBottom: 16 + launcherOffset } : null]}>
       {open ? (
         <View style={[styles.panel, panelStyle]}>
           <LinearGradient colors={[C.primary, C.violet]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
