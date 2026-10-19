@@ -142,6 +142,29 @@ const PERSON_CTE = `
   order by condominium_id, person_key, role_priority asc
 `;
 
+// "Quem mora de fato na unidade" é contado POR UNIDADE (nunca passa do total
+// de unidades), a partir da moradia registrada (unit_occupancies), e não por
+// pessoa: dois proprietários no mesmo apartamento contam uma unidade, e o
+// proprietário que não mora não conta como inquilino. Cada unidade com
+// morador cai em uma categoria só: "inquilino" se todos os moradores são
+// inquilinos; "proprietário" se algum morador é proprietário (ou é síndico
+// sem perfil de inquilino). A soma das duas é "com morador".
+const UNIT_RESIDENCY_CTE = `
+  select un.id as unit_id, un.condominium_id,
+    coalesce(nullif(concat_ws(' - ', nullif(b.name,''), nullif(un.number,'')), ''), un.number) as unit_label,
+    case when bool_and(r.is_tenant and not r.is_owner) then 'tenant' else 'owner' end as kind,
+    string_agg(distinct coalesce(u.full_name, u.username), ', ') as resident_names
+  from units un
+  left join blocks b on b.id = un.block_id
+  join unit_occupancies oc on oc.unit_id = un.id and oc.ended_at is null
+  join users u on u.id = oc.user_id and u.deleted_at is null
+  cross join lateral (select
+    (u.role = 'proprietario' or exists(select 1 from user_profiles up where up.user_id = u.id and up.condominium_id = un.condominium_id and up.role = 'proprietario')) as is_owner,
+    (u.role = 'inquilino' or exists(select 1 from user_profiles up where up.user_id = u.id and up.condominium_id = un.condominium_id and up.role = 'inquilino')) as is_tenant
+  ) r
+  group by un.id, un.condominium_id, b.name, un.number
+`;
+
 router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('painel_usuarios'), asyncHandler(async (req, res) => {
   const condominiumId = req.user?.role === 'admin_geral' ? (String(req.query.condominiumId || '') || null) : req.user?.condominiumId;
   const result = await query<{
@@ -166,14 +189,15 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
        count(*) filter (where p.person_role='proprietario' and not p.person_logged_in and p.person_owner_tenant_active_logged_in)::int as owners_never_logged_in_tenant_active,
        count(*) filter (where p.person_role='proprietario')::int as registered_owners,
        count(*) filter (where p.person_role='inquilino')::int as registered_tenants,
-       count(*) filter (where p.person_role='inquilino' or (p.person_role='proprietario' and p.person_owner_rented))::int as real_tenant_residents,
-       count(*) filter (where p.person_role='proprietario' and not p.person_owner_rented)::int as owner_residents,
+       (select count(*) from (${UNIT_RESIDENCY_CTE}) ur where ur.condominium_id = c.id and ur.kind = 'tenant')::int as real_tenant_residents,
+       (select count(*) from (${UNIT_RESIDENCY_CTE}) ur where ur.condominium_id = c.id and ur.kind = 'owner')::int as owner_residents,
        count(*) filter (where p.person_role='proprietario' and p.person_monitors_elsewhere)::int as monitor_only_owners,
        coalesce(jsonb_agg(distinct jsonb_build_object('id',p.rep_id,'fullName',coalesce(p.full_name,p.username))) filter (where p.person_role='sindico'), '[]'::jsonb) as sindico,
        coalesce(jsonb_agg(distinct jsonb_build_object('id',p.rep_id,'fullName',coalesce(p.full_name,p.username))) filter (where p.person_role='subsindico'), '[]'::jsonb) as subsindico,
        (select count(*) from units un where un.condominium_id = c.id)::int as total_units,
-       (select count(*) from units un where un.condominium_id = c.id
-          and exists(select 1 from unit_occupancies oc where oc.unit_id = un.id and oc.ended_at is null))::int as units_with_resident,
+       -- Mesma base de "Quem mora de fato" (UNIT_RESIDENCY_CTE), para que
+       -- inquilino + proprietário sempre some exatamente "com morador".
+       (select count(*) from (${UNIT_RESIDENCY_CTE}) ur where ur.condominium_id = c.id)::int as units_with_resident,
        -- Excluídos logicamente (deleted_at preenchido) ficam de fora do
        -- PERSON_CTE de propósito (a aba "Excluídos" de Pessoas já trata como
        -- lista à parte, sem colapsar por CPF) — contagem simples de linhas,
@@ -291,8 +315,10 @@ const USER_STATS_BUCKET_WHERE: Record<UserStatsBucket, string> = {
   owners_never_logged_in_tenant_active: `p.person_role='proprietario' and not p.person_logged_in and p.person_owner_tenant_active_logged_in`,
   registered_owners: `p.person_role='proprietario'`,
   registered_tenants: `p.person_role='inquilino'`,
-  real_tenant_residents: `(p.person_role='inquilino' or (p.person_role='proprietario' and p.person_owner_rented))`,
-  owner_residents: `p.person_role='proprietario' and not p.person_owner_rented`,
+  // Nunca usados — esses dois são contados por unidade e respondidos antes
+  // (UNIT_RESIDENCY_CTE em /user-stats/members); só existem pelo Record.
+  real_tenant_residents: `false`,
+  owner_residents: `false`,
   owners_monitoring_elsewhere: `p.person_role='proprietario' and p.person_monitors_elsewhere`,
   sindico: `p.person_role='sindico'`,
   subsindico: `p.person_role='subsindico'`,
@@ -326,6 +352,21 @@ router.get('/user-stats/members', authorize('admin_geral', 'sindico', 'subsindic
     return res.json({
       members: deleted.rows.map(row => ({
         id: row.id, fullName: row.full_name || row.username, role: row.role, isExtra: false, unit: row.unit,
+      })),
+    });
+  }
+
+  // "Quem mora de fato" é por unidade: uma linha por apartamento, com os
+  // moradores dele (mesmo critério da contagem em /user-stats).
+  if (bucket === 'real_tenant_residents' || bucket === 'owner_residents') {
+    const units = await query<{ unit_id: string; unit_label: string; resident_names: string }>(
+      `select unit_id, unit_label, resident_names from (${UNIT_RESIDENCY_CTE}) ur
+       where ur.condominium_id = $1 and ur.kind = $2 order by unit_label`,
+      [condominiumId, bucket === 'real_tenant_residents' ? 'tenant' : 'owner'],
+    );
+    return res.json({
+      members: units.rows.map(row => ({
+        id: row.unit_id, fullName: row.resident_names, role: bucket === 'real_tenant_residents' ? 'inquilino' : 'proprietario', isExtra: false, unit: row.unit_label,
       })),
     });
   }
