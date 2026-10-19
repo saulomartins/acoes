@@ -6,6 +6,7 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { query, withTransaction } from '../db';
 import { notifyUsers } from '../services/notificationService';
 import { logAudit } from '../services/auditService';
+import { financialResponsibleUserSql, representativeUserSql } from '../services/unitOwnershipService';
 import {
   calculateInfractionFine, getMonthlyCorrectionRate, resolveTaxaCondominialCents, wasPreviouslyConfirmed,
   type FineBreakdown, type RegulationArticleInput,
@@ -257,11 +258,16 @@ router.post('/:id/confirm', authorize('sindico', 'subsindico'), asyncHandler(asy
     monthlyCorrectionRatePercent,
   });
 
-  const billingUser = await query<{ user_id: string }>(
-    `select user_id from unit_occupancies where unit_id=$1 and ended_at is null order by is_representative desc, started_at desc limit 1`,
+  // A multa é da unidade: sai em nome de quem paga as contas dela (o
+  // responsável financeiro, que pode ser o proprietário que não mora); sem
+  // responsável definido, vai para o representante (morador ou dono) e, por
+  // último, para o morador vinculado mais recentemente.
+  const billingUser = await query<{ user_id: string | null }>(
+    `select coalesce(${financialResponsibleUserSql('$1::uuid')}, ${representativeUserSql('$1::uuid')},
+       (select user_id from unit_occupancies where unit_id=$1 and ended_at is null order by started_at desc limit 1)) user_id`,
     [notice.rows[0].unit_id],
   );
-  if (!billingUser.rows[0]) return res.status(409).json({ message: 'A unidade não tem morador ativo vinculado para receber a cobrança da multa.' });
+  if (!billingUser.rows[0]?.user_id) return res.status(409).json({ message: 'A unidade não tem responsável financeiro, representante nem morador ativo para receber a cobrança da multa.' });
 
   const invoiceId = randomUUID();
   let updated: any;

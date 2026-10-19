@@ -29,57 +29,96 @@ export const isFinancialResponsibleSql = (userExpr: string, unitExpr: string) =>
   `(exists(select 1 from unit_occupancies where user_id=${userExpr} and unit_id=${unitExpr} and ended_at is null and is_financial_responsible=true)
     or exists(select 1 from unit_ownerships where owner_user_id=${userExpr} and unit_id=${unitExpr} and ended_at is null and is_financial_responsible=true))`;
 
+// Representante da unidade: um morador (unit_occupancies) ou o proprietário
+// que não mora (unit_ownerships). Só um por unidade, somando as duas
+// tabelas (PATCH /units/:id/representative).
+export const representativeUserSql = (unitExpr: string) =>
+  `(select user_id from unit_occupancies where unit_id=${unitExpr} and ended_at is null and is_representative=true
+    union all
+    select owner_user_id from unit_ownerships where unit_id=${unitExpr} and ended_at is null and is_representative=true
+    limit 1)`;
+
+export const isRepresentativeSql = (userExpr: string, unitExpr: string) =>
+  `(exists(select 1 from unit_occupancies where user_id=${userExpr} and unit_id=${unitExpr} and ended_at is null and is_representative=true)
+    or exists(select 1 from unit_ownerships where owner_user_id=${userExpr} and unit_id=${unitExpr} and ended_at is null and is_representative=true))`;
+
+// Unidade sem representante (nem morador nem dono marcado): o morador
+// vinculado mais recentemente assume. Usado quando alguém sai da unidade e
+// quando um morador é vinculado — quem já é representante nunca é trocado
+// por essa regra automática; troca de verdade só em Blocos e unidades.
+export const promoteRepresentativeIfMissing = async (unitId: string) => {
+  await query(
+    `update unit_occupancies set is_representative=true
+     where id=(select id from unit_occupancies where unit_id=$1 and ended_at is null order by started_at desc, created_at desc limit 1)
+       and not exists (select 1 from unit_occupancies where unit_id=$1 and ended_at is null and is_representative=true)
+       and not exists (select 1 from unit_ownerships where unit_id=$1 and ended_at is null and is_representative=true)`,
+    [unitId],
+  );
+};
+
 // Proprietário que NÃO mora na unidade ("O proprietário mora na unidade?" =
 // não, users.unit_rented_to_tenant): fica só com a posse (unit_ownerships)
-// — vê os débitos e boletos da unidade, recebe avisos e vota em enquetes,
-// mas não é morador nem representante. Pode ser o responsável financeiro:
-// se já era (morava e pagava), a marca passa da moradia para a posse. Se
-// ele era o representante, o morador restante vinculado mais recentemente
-// assume, mesma regra da troca de unidade em PATCH /users/:id.
+// — vê os débitos e boletos da unidade, recebe avisos e vota em enquetes e
+// não conta como morador. Pode ser o responsável financeiro e o
+// representante: se já era responsável (morava e pagava), a marca passa da
+// moradia para a posse. Se era o representante, quem assume é o morador
+// restante vinculado mais recentemente; sem nenhum morador, ele continua
+// representante, agora como dono.
 export const setOwnerAsMonitoring = async (unitId: string, userId: string, createdBy?: string) => {
-  const wasResponsible = await query(
-    `select 1 from unit_occupancies where unit_id=$1 and user_id=$2 and ended_at is null and is_financial_responsible=true`,
+  const before = await query<{ is_financial_responsible: boolean; is_representative: boolean }>(
+    `select is_financial_responsible, is_representative from unit_occupancies where unit_id=$1 and user_id=$2 and ended_at is null`,
     [unitId, userId],
   );
+  const wasResponsible = Boolean(before.rows[0]?.is_financial_responsible);
+  const wasRepresentative = Boolean(before.rows[0]?.is_representative);
   await query(
     `update unit_occupancies set ended_at=current_date,is_representative=false,is_financial_responsible=false
      where unit_id=$1 and user_id=$2 and ended_at is null`,
     [unitId, userId],
   );
   await query(
-    `update unit_occupancies set is_representative=true
-     where id=(select id from unit_occupancies where unit_id=$1 and ended_at is null order by started_at desc limit 1)
-       and not exists (select 1 from unit_occupancies where unit_id=$1 and ended_at is null and is_representative=true)`,
-    [unitId],
-  );
-  await query(
     `insert into unit_ownerships(unit_id,owner_user_id,created_by) values($1,$2,$3) on conflict do nothing`,
     [unitId, userId, createdBy || null],
   );
-  if (wasResponsible.rows[0]) {
+  if (wasResponsible) {
     await query(
       `update unit_ownerships set is_financial_responsible=true where unit_id=$1 and owner_user_id=$2 and ended_at is null`,
+      [unitId, userId],
+    );
+  }
+  if (wasRepresentative) {
+    await promoteRepresentativeIfMissing(unitId);
+    await query(
+      `update unit_ownerships set is_representative=true where unit_id=$1 and owner_user_id=$2 and ended_at is null
+         and not exists (select 1 from unit_occupancies where unit_id=$1 and ended_at is null and is_representative=true)`,
       [unitId, userId],
     );
   }
 };
 
 // Proprietário que passou a morar na unidade (já com a moradia ativa): a
-// posse dela termina e, se ele era o responsável financeiro como dono, a
-// marca passa para a moradia.
+// posse dela termina e o que ele era como dono (responsável financeiro,
+// representante) passa para a moradia.
 export const endOwnershipAsResident = async (unitId: string, userId: string) => {
-  const wasResponsible = await query(
-    `select 1 from unit_ownerships where unit_id=$1 and owner_user_id=$2 and ended_at is null and is_financial_responsible=true`,
+  const before = await query<{ is_financial_responsible: boolean; is_representative: boolean }>(
+    `select is_financial_responsible, is_representative from unit_ownerships where unit_id=$1 and owner_user_id=$2 and ended_at is null`,
     [unitId, userId],
   );
   await query(
-    `update unit_ownerships set ended_at=current_date,is_financial_responsible=false
+    `update unit_ownerships set ended_at=current_date,is_financial_responsible=false,is_representative=false
      where unit_id=$1 and owner_user_id=$2 and ended_at is null`,
     [unitId, userId],
   );
-  if (wasResponsible.rows[0]) {
+  if (before.rows[0]?.is_financial_responsible) {
     await query(
       `update unit_occupancies set is_financial_responsible=true where unit_id=$1 and user_id=$2 and ended_at is null`,
+      [unitId, userId],
+    );
+  }
+  if (before.rows[0]?.is_representative) {
+    await query(
+      `update unit_occupancies set is_representative=true where unit_id=$1 and user_id=$2 and ended_at is null
+         and not exists (select 1 from unit_occupancies where unit_id=$1 and ended_at is null and is_representative=true)`,
       [unitId, userId],
     );
   }

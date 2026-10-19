@@ -199,6 +199,14 @@ alter table unit_ownerships add column if not exists is_financial_responsible bo
 create unique index if not exists unit_ownerships_one_financial_responsible
   on unit_ownerships(unit_id) where ended_at is null and is_financial_responsible = true;
 
+-- O proprietário que não mora também pode ser o representante da unidade
+-- (ex.: unidade vazia, ou o síndico prefere tratar com o dono). Mesma regra
+-- do responsável financeiro: um só por unidade somando moradia e posse,
+-- garantida pela API (PATCH /units/:id/representative limpa ambas).
+alter table unit_ownerships add column if not exists is_representative boolean not null default false;
+create unique index if not exists unit_ownerships_one_representative
+  on unit_ownerships(unit_id) where ended_at is null and is_representative = true;
+
 create table if not exists polls (
   id uuid primary key default gen_random_uuid(),
   condominium_id uuid not null references condominiums(id) on delete cascade,

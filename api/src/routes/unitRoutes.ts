@@ -6,7 +6,7 @@ import { query, withTransaction } from '../db';
 import multer from 'multer';
 import ExcelJS from 'exceljs';
 import { logAudit } from '../services/auditService';
-import { financialResponsibleUserSql } from '../services/unitOwnershipService';
+import { financialResponsibleUserSql, representativeUserSql } from '../services/unitOwnershipService';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -25,10 +25,10 @@ router.get('/', authorize('admin_geral', 'sindico', 'subsindico'), asyncHandler(
                   fr.user_id financial_responsible_user_id,fru.full_name financial_responsible_name,
                   coalesce(jsonb_agg(distinct jsonb_build_object('user_id',oc.user_id,'full_name',cu.full_name,'cpf',cu.cpf,'role',cu.role,'is_representative',oc.is_representative,'is_financial_responsible',oc.is_financial_responsible))
                     filter (where oc.id is not null),'[]') residents,
-                  coalesce(jsonb_agg(distinct jsonb_build_object('user_id',oo.owner_user_id,'full_name',own.full_name,'cpf',own.cpf,'is_financial_responsible',oo.is_financial_responsible))
+                  coalesce(jsonb_agg(distinct jsonb_build_object('user_id',oo.owner_user_id,'full_name',own.full_name,'cpf',own.cpf,'is_financial_responsible',oo.is_financial_responsible,'is_representative',oo.is_representative))
                     filter (where oo.id is not null),'[]') owners
            from units u join blocks b on b.id=u.block_id left join unit_types ut on ut.id=u.unit_type_id
-           left join unit_occupancies o on o.unit_id=u.id and o.ended_at is null and o.is_representative=true
+           left join lateral (select ${representativeUserSql('u.id')} user_id) o on true
            left join users ru on ru.id=o.user_id
            left join lateral (select ${financialResponsibleUserSql('u.id')} user_id) fr on true
            left join users fru on fru.id=fr.user_id
@@ -173,8 +173,23 @@ router.patch('/:id/representative', authorize('sindico','subsindico'), asyncHand
   const condominiumId = req.user?.condominiumId; const userId = req.body?.userId || null;
   const unit = await query<any>(`select id,number from units where id=$1 and condominium_id=$2`,[req.params.id,condominiumId]);
   if (!unit.rows[0]) return res.status(404).json({ message:'Unidade não encontrada.' });
-  if (userId) { const resident = await query(`select id from unit_occupancies where unit_id=$1 and user_id=$2 and ended_at is null`,[req.params.id,userId]); if (!resident.rows[0]) return res.status(400).json({ message:'Selecione um morador atual desta unidade.' }); }
-  await withTransaction(async client => { await client.query(`update unit_occupancies set is_representative=false where unit_id=$1 and ended_at is null`,[req.params.id]); if(userId) await client.query(`update unit_occupancies set is_representative=true where unit_id=$1 and user_id=$2 and ended_at is null`,[req.params.id,userId]); });
+  // Pode ser um morador atual ou um proprietário que não mora (posse ativa).
+  let isOwner = false;
+  if (userId) {
+    const resident = await query(`select id from unit_occupancies where unit_id=$1 and user_id=$2 and ended_at is null`,[req.params.id,userId]);
+    if (!resident.rows[0]) {
+      const owner = await query(`select id from unit_ownerships where unit_id=$1 and owner_user_id=$2 and ended_at is null`,[req.params.id,userId]);
+      if (!owner.rows[0]) return res.status(400).json({ message:'Selecione um morador ou proprietário atual desta unidade.' });
+      isOwner = true;
+    }
+  }
+  await withTransaction(async client => {
+    // Um único representante por unidade, somando moradia e posse.
+    await client.query(`update unit_occupancies set is_representative=false where unit_id=$1 and ended_at is null`,[req.params.id]);
+    await client.query(`update unit_ownerships set is_representative=false where unit_id=$1 and ended_at is null`,[req.params.id]);
+    if (userId && isOwner) await client.query(`update unit_ownerships set is_representative=true where unit_id=$1 and owner_user_id=$2 and ended_at is null`,[req.params.id,userId]);
+    else if (userId) await client.query(`update unit_occupancies set is_representative=true where unit_id=$1 and user_id=$2 and ended_at is null`,[req.params.id,userId]);
+  });
   await logAudit(req, 'blocos_unidades', 'updated', `Alterou o representante da unidade ${unit.rows[0].number}`, { entityId: req.params.id });
   return res.json({ message:'Representante atualizado.' });
 }));

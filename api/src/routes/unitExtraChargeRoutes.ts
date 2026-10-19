@@ -6,6 +6,7 @@ import { requireFeature } from '../middleware/requireFeature';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { query, withTransaction } from '../db';
 import { logAudit } from '../services/auditService';
+import { financialResponsibleUserSql, representativeUserSql } from '../services/unitOwnershipService';
 
 const router = Router();
 router.use(authenticate, authorize('sindico', 'subsindico'), requireFeature('cobrancas_adicionais'));
@@ -135,11 +136,15 @@ router.get('/export', asyncHandler(async (req, res) => {
      left join blocks b on b.id = un.block_id
      join unit_extra_charge_installments ins on ins.charge_id = ec.id
      left join invoices inv on inv.id = ins.invoice_id and inv.deleted_at is null
+     -- Nome mostrado para a unidade: o representante (morador ou proprietário
+     -- que não mora); sem ele, o morador mais recente; sem morador, o
+     -- responsável financeiro (ex.: dono de unidade vazia).
      left join lateral (
-       select u.full_name, u.username from unit_occupancies uo
-       join users u on u.id = uo.user_id
-       where uo.unit_id = ec.unit_id and uo.ended_at is null and u.deleted_at is null
-       order by uo.is_representative desc nulls last limit 1
+       select u.full_name, u.username from users u
+       where u.deleted_at is null and u.id = coalesce(
+         ${representativeUserSql('ec.unit_id')},
+         (select uo.user_id from unit_occupancies uo where uo.unit_id = ec.unit_id and uo.ended_at is null order by uo.started_at desc limit 1),
+         ${financialResponsibleUserSql('ec.unit_id')})
      ) morador on true
      where ec.condominium_id = $1 and ($2::text is null or ec.description = $2)
      order by ec.description, unit_label, ins.installment_number`,
