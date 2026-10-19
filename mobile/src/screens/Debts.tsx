@@ -587,7 +587,7 @@ export default function Debts({ navigation }: any) {
           <View style={styles.personTableModalContent}>
             {detailsPerson && <>
             <View style={styles.modalHeaderRow}>
-              <Text style={[styles.modalTitle, styles.modalTitleFlex]}>{roleLabel(detailsPerson.payerRole)} · {detailsPerson.payerName}</Text>
+              <Text style={[styles.modalTitle, styles.modalTitleFlex]}>{detailsPerson.payerRole === 'responsavel_financeiro' ? 'Novo responsável financeiro' : roleLabel(detailsPerson.payerRole)} · {detailsPerson.payerName}</Text>
               <Pressable onPress={() => setDetailsPerson(null)} style={styles.modalCloseButton} accessibilityLabel="Fechar" hitSlop={8}>
                 <Text style={styles.modalCloseButtonText}>✕</Text>
               </Pressable>
@@ -597,6 +597,9 @@ export default function Debts({ navigation }: any) {
                 <View style={styles.table}>
                   <View style={[styles.tableRow, styles.tableHeader]}>
                     <Text style={[styles.headerCell, styles.referenceCell]}>Referência</Text>
+                    {/* Visão do proprietário que só acompanha: a unidade mudou de pagador ao
+                        longo do tempo, então cada mês mostra quem respondia por ele. */}
+                    {detailsPerson.payerRole === 'responsavel_financeiro' ? <Text style={[styles.headerCell, styles.payerCell]}>Responsável financeiro do mês</Text> : null}
                     <Text style={[styles.headerCell, styles.alignRight]}>Taxa</Text>
                     <Text style={styles.headerCell}>Vencimento</Text>
                     <Text style={[styles.headerCell, styles.alignCenter]}>Dias de atraso</Text>
@@ -621,6 +624,7 @@ export default function Debts({ navigation }: any) {
                           </View>
                         ) : null}
                       </View>
+                      {detailsPerson.payerRole === 'responsavel_financeiro' ? <Text style={[styles.cell, styles.payerCell]}>{row.payerName || '—'}</Text> : null}
                       <Text style={[styles.cell, styles.alignRight]}>{money(row.principalCents)}</Text>
                       <Text style={styles.cell}>{formatBrazilianDate(row.dueDate)}</Text>
                       <Text style={[styles.cell, styles.alignCenter]}>{row.daysLate}</Text>
@@ -1084,6 +1088,7 @@ const styles = StyleSheet.create({
   cell: { width: 148, paddingHorizontal: 10, color: colors.ink, fontWeight: '700' }, referenceCell: { width: 170 }, reference: { fontWeight: '900' }, amount: { color: colors.red, fontWeight: '900' },
   cellText: { color: colors.ink, fontWeight: '700' },
   referenceCellWrap: { width: 170, paddingHorizontal: 10 },
+  payerCell: { width: 220 },
   alignRight: { textAlign: 'right' }, alignCenter: { textAlign: 'center' },
   status: { color: colors.primaryDark },
   actionsCell: { width: 260 }, actionsCellRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
