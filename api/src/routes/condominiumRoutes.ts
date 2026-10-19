@@ -300,7 +300,7 @@ router.get('/user-stats', authorize('admin_geral', 'sindico', 'subsindico'), req
   });
 }));
 
-type UserStatsBucket = 'registered' | 'active' | 'inactive' | 'logged_in' | 'never_logged_in' | 'owners_never_logged_in_tenant_active' | 'deleted' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
+type UserStatsBucket = 'units_without_resident' | 'registered' | 'active' | 'inactive' | 'logged_in' | 'never_logged_in' | 'owners_never_logged_in_tenant_active' | 'deleted' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
 const USER_STATS_BUCKET_WHERE: Record<UserStatsBucket, string> = {
   // Nunca usado — bucket 'deleted' retorna antes de chegar aqui (ver
   // /user-stats/members), só existe pra satisfazer o Record exaustivo.
@@ -317,6 +317,7 @@ const USER_STATS_BUCKET_WHERE: Record<UserStatsBucket, string> = {
   registered_tenants: `p.person_role='inquilino'`,
   // Nunca usados — esses dois são contados por unidade e respondidos antes
   // (UNIT_RESIDENCY_CTE em /user-stats/members); só existem pelo Record.
+  units_without_resident: `false`,
   real_tenant_residents: `false`,
   owner_residents: `false`,
   owners_monitoring_elsewhere: `p.person_role='proprietario' and p.person_monitors_elsewhere`,
@@ -352,6 +353,42 @@ router.get('/user-stats/members', authorize('admin_geral', 'sindico', 'subsindic
     return res.json({
       members: deleted.rows.map(row => ({
         id: row.id, fullName: row.full_name || row.username, role: row.role, isExtra: false, unit: row.unit,
+      })),
+    });
+  }
+
+  // "Sem morador" (Unidades / apartamentos): unidades fora do
+  // UNIT_RESIDENCY_CTE, com os proprietários e telefones para o síndico
+  // entrar em contato — o dono que só tem a posse (unit_ownerships) e quem
+  // está cadastrado como proprietário com essa unidade. Unidade sem nenhum
+  // proprietário cadastrado aparece numa linha própria.
+  if (bucket === 'units_without_resident') {
+    const empty = await query<{ unit_id: string; unit_label: string; owner_id: string | null; owner_name: string | null; phone: string | null }>(
+      `select un.id as unit_id,
+              coalesce(nullif(concat_ws(' - ', nullif(b.name,''), nullif(un.number,'')), ''), un.number) as unit_label,
+              o.id as owner_id, coalesce(o.full_name, o.username) as owner_name, o.phone
+       from units un
+       left join blocks b on b.id = un.block_id
+       left join lateral (
+         select distinct u.id, u.full_name, u.username, u.phone from users u
+         where u.deleted_at is null and u.condominium_id = un.condominium_id and (
+           exists(select 1 from unit_ownerships ow where ow.unit_id = un.id and ow.owner_user_id = u.id and ow.ended_at is null)
+           or (u.unit_id = un.id and (u.role = 'proprietario' or exists(select 1 from user_profiles up where up.user_id = u.id and up.condominium_id = un.condominium_id and up.role = 'proprietario')))
+         )
+       ) o on true
+       where un.condominium_id = $1
+         and not exists (select 1 from (${UNIT_RESIDENCY_CTE}) ur where ur.unit_id = un.id)
+       order by b.name, un.number, owner_name`,
+      [condominiumId],
+    );
+    return res.json({
+      members: empty.rows.map(row => ({
+        id: `${row.unit_id}:${row.owner_id || 'sem-dono'}`,
+        fullName: row.owner_name || 'Sem proprietário cadastrado',
+        role: row.owner_id ? 'proprietario' : '',
+        isExtra: false,
+        unit: row.unit_label,
+        phone: row.phone || null,
       })),
     });
   }

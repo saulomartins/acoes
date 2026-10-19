@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Modal, RefreshControl, ScrollView, StyleSheet, View, Pressable } from 'react-native';
+import { Linking, Modal, RefreshControl, ScrollView, StyleSheet, View, Pressable } from 'react-native';
 import { Text } from '../ui/text';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
@@ -47,7 +47,7 @@ type CondominiumUserStats = {
   planEstimatedMonthlyAmountCents: number | null;
 };
 
-type Bucket = 'registered' | 'active' | 'inactive' | 'logged_in' | 'never_logged_in' | 'owners_never_logged_in_tenant_active' | 'deleted' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
+type Bucket = 'units_without_resident' | 'registered' | 'active' | 'inactive' | 'logged_in' | 'never_logged_in' | 'owners_never_logged_in_tenant_active' | 'deleted' | 'registered_owners' | 'registered_tenants' | 'real_tenant_residents' | 'owner_residents' | 'owners_monitoring_elsewhere' | 'sindico' | 'subsindico';
 const BUCKET_LABEL: Record<Bucket, string> = {
   registered: 'Cadastrados',
   active: 'Ativos',
@@ -58,8 +58,9 @@ const BUCKET_LABEL: Record<Bucket, string> = {
   deleted: 'Excluídos logicamente',
   registered_owners: 'Proprietários (cadastrados)',
   registered_tenants: 'Inquilinos (cadastrados)',
-  real_tenant_residents: 'Inquilinos morando de fato',
-  owner_residents: 'Proprietários morando na própria unidade',
+  units_without_resident: 'Unidades sem morador — proprietários e telefones',
+  real_tenant_residents: 'Unidades com inquilino morando',
+  owner_residents: 'Unidades com o proprietário morando',
   owners_monitoring_elsewhere: 'Proprietários que monitoram outra unidade',
   sindico: 'Síndico',
   subsindico: 'Subsíndico',
@@ -68,7 +69,9 @@ const BUCKET_LABEL: Record<Bucket, string> = {
 const planMetricLabel = (metric: 'login_enabled' | 'registered' | null) => metric === 'login_enabled' ? 'login habilitado' : 'cadastrado';
 const formatCurrency = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-type Member = { id: string; fullName: string; role: string; isExtra: boolean; unit: string };
+type Member = { id: string; fullName: string; role: string; isExtra: boolean; unit: string; phone?: string | null };
+// Telefone salvo só com dígitos (DDD + número) — exibido no formato brasileiro.
+const formatPhone = (digits: string) => digits.length === 11 ? `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}` : digits.length === 10 ? `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}` : digits;
 const roleLabel = (role: string) => role === 'sindico' ? 'Síndico' : role === 'subsindico' ? 'Subsíndico' : role === 'proprietario' ? 'Proprietário' : role === 'inquilino' ? 'Inquilino' : role;
 const namesOrDash = (list: NamedUser[]) => list.length ? list.map(item => item.fullName).join(', ') : '—';
 
@@ -243,10 +246,10 @@ export default function UserStats() {
                 <Text {...summaryValueProps} style={[s.summaryValue, s.activeText]}>{item.unitsWithResident}</Text>
                 <Text {...summaryLabelProps} style={s.summaryLabel}>com morador</Text>
               </View>
-              <View style={[s.summary, s.summaryInactive, compact && s.summaryMobile]}>
+              <Pressable style={[s.summary, s.summaryInactive, compact && s.summaryMobile]} onPress={() => openDetail(item.condominiumId, item.name, 'units_without_resident')}>
                 <Text {...summaryValueProps} style={[s.summaryValue, s.inactiveText]}>{item.unitsWithoutResident}</Text>
-                <Text {...summaryLabelProps} style={s.summaryLabel}>sem morador</Text>
-              </View>
+                <Text {...summaryLabelProps} style={s.summaryLabel}>sem morador · toque para ver os proprietários</Text>
+              </Pressable>
             </View>
 
             <Text style={s.groupLabel}>Proprietários que também monitoram outra unidade</Text>
@@ -328,7 +331,14 @@ export default function UserStats() {
             {detailLoading ? <Text style={s.modalEmpty}>Carregando...</Text> : detailMembers.length === 0 ? <Text style={s.modalEmpty}>Ninguém nesta categoria.</Text> : detailMembers.map(member => (
               <View key={member.id} style={s.modalRow}>
                 <Text style={s.modalName}>{member.fullName}</Text>
-                <Text style={s.modalMeta}>{roleLabel(member.role)}{member.isExtra ? ' (perfil adicional)' : ''} · {member.unit}</Text>
+                <Text style={s.modalMeta}>{member.role ? `${roleLabel(member.role)}${member.isExtra ? ' (perfil adicional)' : ''} · ` : ''}{member.unit}</Text>
+                {detail?.bucket === 'units_without_resident' && member.role ? (member.phone ? (
+                  <View style={s.phoneRow}>
+                    <Text style={s.phoneText}>📞 {formatPhone(member.phone)}</Text>
+                    <Pressable onPress={() => Linking.openURL(`tel:${member.phone}`)} style={s.phoneAction}><Text style={s.phoneActionText}>Ligar</Text></Pressable>
+                    <Pressable onPress={() => Linking.openURL(`https://wa.me/55${member.phone}`)} style={s.phoneAction}><Text style={s.phoneActionText}>WhatsApp</Text></Pressable>
+                  </View>
+                ) : <Text style={s.modalMeta}>Telefone não cadastrado</Text>) : null}
               </View>
             ))}
           </ScrollView>
@@ -384,6 +394,10 @@ const s = StyleSheet.create({
   modalRow: { borderTopWidth: 1, borderTopColor: colors.border, paddingVertical: 10 },
   modalName: { fontWeight: '800', color: colors.ink },
   modalMeta: { color: colors.muted, fontSize: 13, marginTop: 2 },
+  phoneRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 6 },
+  phoneText: { color: colors.ink, fontWeight: '800', fontSize: 14 },
+  phoneAction: { borderWidth: 1, borderColor: colors.primary, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: colors.softBlue },
+  phoneActionText: { color: colors.primary, fontWeight: '800', fontSize: 12 },
   modalClose: { marginTop: 14, alignSelf: 'flex-end', borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 10 },
   modalCloseText: { fontWeight: '800', color: colors.ink },
 });
