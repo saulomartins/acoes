@@ -14,6 +14,7 @@ import { createBillingTemplateWorkbook } from '../services/billingTemplateServic
 import { getInterIntegration } from './invoiceRoutes';
 import { notifyNewInvoice } from '../services/invoiceReminderService';
 import { logAudit } from '../services/auditService';
+import { financialResponsibleUserSql, isFinancialResponsibleSql } from '../services/unitOwnershipService';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -191,7 +192,7 @@ router.post('/batches/preview', asyncHandler(async (req, res) => {
        exists(select 1 from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status <> 'canceled') duplicate,
        (select i.amount_cents from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status <> 'canceled' order by i.created_at desc limit 1) existing_amount_cents,
        (select i.status from invoices i where i.user_id=u.id and i.reference_month=$3::date and i.status <> 'canceled' order by i.created_at desc limit 1) existing_status,
-       exists(select 1 from unit_occupancies uo where uo.user_id=u.id and uo.unit_id=u.unit_id and uo.ended_at is null and uo.is_financial_responsible=true) is_unit_financial_responsible
+       ${isFinancialResponsibleSql('u.id', 'u.unit_id')} is_unit_financial_responsible
      from users u left join units un on un.id=u.unit_id left join unit_types ut on ut.id=un.unit_type_id
      where u.condominium_id=$1 and u.id=any($2::uuid[]) order by u.full_name,u.username`,
     [condominiumId, userIds, `${referenceMonth}-01`],
@@ -260,7 +261,7 @@ router.post('/batches', asyncHandler(async (req, res) => {
   for(const person of people.rows) if(person.unit_id) unitCounts.set(person.unit_id,(unitCounts.get(person.unit_id)||0)+1);
   const duplicateUnitIds=[...unitCounts.entries()].filter(([,count])=>count>1).map(([id])=>id);
   if(duplicateUnitIds.length){
-    const responsible=await query<{unit_id:string;user_id:string}>(`select unit_id,user_id from unit_occupancies where unit_id=any($1::uuid[]) and ended_at is null and is_financial_responsible=true`,[duplicateUnitIds]);
+    const responsible=await query<{unit_id:string;user_id:string}>(`select un.id unit_id,${financialResponsibleUserSql('un.id')} user_id from units un where un.id=any($1::uuid[])`,[duplicateUnitIds]);
     const responsibleByUnit=new Map(responsible.rows.map(r=>[r.unit_id,r.user_id]));
     const unresolved=people.rows.filter((person:any)=>duplicateUnitIds.includes(person.unit_id)&&responsibleByUnit.get(person.unit_id)!==person.id);
     if(unresolved.length) return res.status(400).json({message:`Selecione só o responsável financeiro de cada unidade (Blocos e unidades > Definir financeiro): ${unresolved.map((p:any)=>p.full_name||p.username).join(', ')}.`});

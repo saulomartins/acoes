@@ -64,8 +64,11 @@ export const checkClearance = async (condominiumId: string, userId: string): Pro
     `select ec.description, ins.amount_cents, to_char(ins.reference_month, 'YYYY-MM') as reference_month
      from unit_extra_charges ec
      join unit_extra_charge_installments ins on ins.charge_id = ec.id
-     join unit_occupancies uo on uo.unit_id = ec.unit_id and uo.ended_at is null
-     where uo.user_id = $1 and ec.condominium_id = $2 and ins.status = 'pending'
+     -- Unidade em que a pessoa mora ou da qual é dona sem morar (o Nada
+     -- consta é da unidade, e o dono pode ser quem paga o condomínio).
+     where ec.unit_id in (select unit_id from unit_occupancies where user_id = $1 and ended_at is null
+                          union select unit_id from unit_ownerships where owner_user_id = $1 and ended_at is null)
+       and ec.condominium_id = $2 and ins.status = 'pending'
      order by ins.reference_month`,
     [userId, condominiumId],
   );

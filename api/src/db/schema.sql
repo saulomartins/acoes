@@ -191,6 +191,14 @@ create table if not exists unit_ownerships (
 create unique index if not exists unit_ownerships_active_owner
   on unit_ownerships(unit_id, owner_user_id) where ended_at is null;
 
+-- Proprietário que não mora também pode ser o responsável financeiro (ele
+-- paga o condomínio, o inquilino só mora). A marca fica na posse; a regra
+-- de um único responsável por unidade vale somando as duas tabelas e é
+-- garantida pela API (PATCH /units/:id/financial-responsible limpa ambas).
+alter table unit_ownerships add column if not exists is_financial_responsible boolean not null default false;
+create unique index if not exists unit_ownerships_one_financial_responsible
+  on unit_ownerships(unit_id) where ended_at is null and is_financial_responsible = true;
+
 create table if not exists polls (
   id uuid primary key default gen_random_uuid(),
   condominium_id uuid not null references condominiums(id) on delete cascade,

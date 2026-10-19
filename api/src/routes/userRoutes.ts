@@ -12,7 +12,7 @@ import { isAcceptedDocumentFormat, maskDocument, normalizeDocument } from '../se
 import { sendWelcomeEmail, sendPasswordResetByAdminEmail } from '../services/emailService';
 import { logAudit } from '../services/auditService';
 import { listProfiles } from '../services/authService';
-import { setOwnerAsMonitoring } from '../services/unitOwnershipService';
+import { endOwnershipAsResident, isFinancialResponsibleSql, setOwnerAsMonitoring } from '../services/unitOwnershipService';
 
 const router = Router();
 const validRoles: UserRole[] = ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'];
@@ -34,7 +34,7 @@ router.get('/', authorize('admin_geral', 'sindico', 'subsindico'), asyncHandler(
             users.street, users.address_number, users.address_complement, users.neighborhood, users.city, users.state, users.postal_code, users.deleted_at,
             unit_types.name as unit_type_name, unit_types.fee_cents as condominium_fee_cents,
             exists(select 1 from unit_occupancies uo where uo.user_id=users.id and uo.unit_id=users.unit_id and uo.ended_at is null and uo.is_representative=true) as is_unit_representative,
-            exists(select 1 from unit_occupancies uo where uo.user_id=users.id and uo.unit_id=users.unit_id and uo.ended_at is null and uo.is_financial_responsible=true) as is_unit_financial_responsible
+            ${isFinancialResponsibleSql('users.id', 'users.unit_id')} as is_unit_financial_responsible
      from users
      left join units on units.id = users.unit_id
      left join blocks on blocks.id = units.block_id
@@ -300,8 +300,9 @@ router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), requireF
     // representante — não existe mais escolha manual dessa opção.
     await query(`update unit_occupancies set is_representative=false where unit_id=$1 and ended_at is null`,[unitId]);
     await query(`insert into unit_occupancies(unit_id,user_id,is_representative) values($1,$2,true) on conflict (unit_id,user_id) where ended_at is null do update set is_representative=true`,[unitId,req.params.id]);
-    // Passou a morar na unidade: deixa de ser só "dono que acompanha" dela.
-    await query(`update unit_ownerships set ended_at=current_date where unit_id=$1 and owner_user_id=$2 and ended_at is null`,[unitId,req.params.id]);
+    // Passou a morar na unidade: a posse dela termina (se pagava como dono,
+    // continua o responsável financeiro, agora como morador).
+    await endOwnershipAsResident(unitId, req.params.id);
   }
   await logAudit(req, 'pessoas', 'updated', `Editou ${result.rows[0].full_name || result.rows[0].username}`, { entityId: req.params.id });
   return res.json({ user: result.rows[0] });

@@ -12,13 +12,35 @@ export const getOwnedUnitIds = async (userId: string): Promise<string[]> => {
   return result.rows.map(row => row.unit_id);
 };
 
-// Proprietário que NÃO mora na unidade ("Quem mora de fato na unidade?" =
-// outra pessoa, users.unit_rented_to_tenant): fica só com a posse
-// (unit_ownerships) — acompanha os débitos, recebe avisos e vota em
-// enquetes, mas nunca é morador, representante nem responsável financeiro.
-// Se ele era o representante, o morador restante vinculado mais
-// recentemente assume, mesma regra da troca de unidade em PUT /users/:id.
+// Responsável financeiro de uma unidade pode ser um morador
+// (unit_occupancies) ou o proprietário que não mora (unit_ownerships) — ex.:
+// dono que aluga o apartamento mas continua pagando o condomínio. Só um por
+// unidade, somando as duas tabelas (PATCH /units/:id/financial-responsible).
+// `unitExpr` é a expressão SQL do id da unidade na consulta de quem chama.
+export const financialResponsibleUserSql = (unitExpr: string) =>
+  `(select user_id from unit_occupancies where unit_id=${unitExpr} and ended_at is null and is_financial_responsible=true
+    union all
+    select owner_user_id from unit_ownerships where unit_id=${unitExpr} and ended_at is null and is_financial_responsible=true
+    limit 1)`;
+
+// Mesma regra, do ponto de vista de uma pessoa: ela é o responsável
+// financeiro da unidade `unitExpr`?
+export const isFinancialResponsibleSql = (userExpr: string, unitExpr: string) =>
+  `(exists(select 1 from unit_occupancies where user_id=${userExpr} and unit_id=${unitExpr} and ended_at is null and is_financial_responsible=true)
+    or exists(select 1 from unit_ownerships where owner_user_id=${userExpr} and unit_id=${unitExpr} and ended_at is null and is_financial_responsible=true))`;
+
+// Proprietário que NÃO mora na unidade ("O proprietário mora na unidade?" =
+// não, users.unit_rented_to_tenant): fica só com a posse (unit_ownerships)
+// — vê os débitos e boletos da unidade, recebe avisos e vota em enquetes,
+// mas não é morador nem representante. Pode ser o responsável financeiro:
+// se já era (morava e pagava), a marca passa da moradia para a posse. Se
+// ele era o representante, o morador restante vinculado mais recentemente
+// assume, mesma regra da troca de unidade em PATCH /users/:id.
 export const setOwnerAsMonitoring = async (unitId: string, userId: string, createdBy?: string) => {
+  const wasResponsible = await query(
+    `select 1 from unit_occupancies where unit_id=$1 and user_id=$2 and ended_at is null and is_financial_responsible=true`,
+    [unitId, userId],
+  );
   await query(
     `update unit_occupancies set ended_at=current_date,is_representative=false,is_financial_responsible=false
      where unit_id=$1 and user_id=$2 and ended_at is null`,
@@ -34,11 +56,39 @@ export const setOwnerAsMonitoring = async (unitId: string, userId: string, creat
     `insert into unit_ownerships(unit_id,owner_user_id,created_by) values($1,$2,$3) on conflict do nothing`,
     [unitId, userId, createdBy || null],
   );
+  if (wasResponsible.rows[0]) {
+    await query(
+      `update unit_ownerships set is_financial_responsible=true where unit_id=$1 and owner_user_id=$2 and ended_at is null`,
+      [unitId, userId],
+    );
+  }
+};
+
+// Proprietário que passou a morar na unidade (já com a moradia ativa): a
+// posse dela termina e, se ele era o responsável financeiro como dono, a
+// marca passa para a moradia.
+export const endOwnershipAsResident = async (unitId: string, userId: string) => {
+  const wasResponsible = await query(
+    `select 1 from unit_ownerships where unit_id=$1 and owner_user_id=$2 and ended_at is null and is_financial_responsible=true`,
+    [unitId, userId],
+  );
+  await query(
+    `update unit_ownerships set ended_at=current_date,is_financial_responsible=false
+     where unit_id=$1 and owner_user_id=$2 and ended_at is null`,
+    [unitId, userId],
+  );
+  if (wasResponsible.rows[0]) {
+    await query(
+      `update unit_occupancies set is_financial_responsible=true where unit_id=$1 and user_id=$2 and ended_at is null`,
+      [unitId, userId],
+    );
+  }
 };
 
 // Responsável financeiro atual de cada unidade (Blocos e unidades > Definir
-// financeiro). Usado na visão do proprietário que só acompanha: o card do
-// apartamento mostra quem paga, não o próprio proprietário.
+// financeiro). Usado na visão do proprietário que não mora: o card do
+// apartamento mostra quem paga, não o próprio proprietário (a não ser que
+// seja ele quem paga).
 export const getFinancialResponsibles = async (unitIds: string[]) => {
   if (!unitIds.length) return [];
   const result = await query<{ unit_id: string; unit_label: string; full_name: string | null; role: string | null }>(
@@ -47,8 +97,7 @@ export const getFinancialResponsibles = async (unitIds: string[]) => {
             coalesce(fu.full_name,fu.username) full_name, fu.role
      from units un
      left join blocks b on b.id=un.block_id
-     left join unit_occupancies fr on fr.unit_id=un.id and fr.ended_at is null and fr.is_financial_responsible=true
-     left join users fu on fu.id=fr.user_id
+     left join users fu on fu.id=${financialResponsibleUserSql('un.id')}
      where un.id=any($1::uuid[])`,
     [unitIds],
   );

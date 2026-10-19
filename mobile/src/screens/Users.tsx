@@ -955,12 +955,12 @@ export default function Users({ navigation }: any) {
                   <Text style={[styles.roleText, !unitRentedToTenant && styles.roleTextActive]}>Sim, mora na unidade</Text>
                 </Pressable>
                 <Pressable onPress={() => setUnitRentedToTenant(true)} style={[styles.roleButton, unitRentedToTenant && styles.roleButtonActive]}>
-                  <Text style={[styles.roleText, unitRentedToTenant && styles.roleTextActive]}>Não mora, só acompanha</Text>
+                  <Text style={[styles.roleText, unitRentedToTenant && styles.roleTextActive]}>Não mora na unidade</Text>
                 </Pressable>
               </View>
               <Text style={styles.fieldHint}>{unitRentedToTenant
-                ? 'O proprietário acessa o aplicativo só para acompanhar a unidade: vê os débitos e boletos de quem paga (o responsável financeiro definido em Blocos e unidades), recebe avisos e vota em enquetes. Ele não conta como morador, não é o representante e não é o responsável financeiro.'
-                : 'O proprietário é morador da unidade e passa a ser o representante dela. Escolha "Não mora, só acompanha" quando a unidade estiver alugada ou vazia.'}</Text>
+                ? 'O proprietário não conta como morador nem é o representante, mas continua vendo os débitos e boletos da unidade, recebendo avisos e votando em enquetes. Se é ele quem paga o condomínio, defina-o como responsável financeiro em Blocos e unidades > Definir financeiro.'
+                : 'O proprietário é morador da unidade e passa a ser o representante dela. Escolha "Não mora na unidade" quando ela estiver alugada ou vazia.'}</Text>
             </View>
           </FormFieldFull>
         ) : null}
@@ -1132,7 +1132,7 @@ export default function Users({ navigation }: any) {
               {user?.role === 'admin_geral' ? <Text style={styles.cardCondominium}>{condominiumName(item.condominium_id)}</Text> : null}
               <Text style={styles.cardLine}>Unidade: {item.unit || 'nao informada'}</Text>
               {item.billing_exempt ? <Text style={styles.exemptBadge}>Isento de boleto</Text> : null}
-              {item.role === 'proprietario' && item.unit_rented_to_tenant ? <Text style={styles.exemptBadge}>Não mora, só acompanha</Text> : null}
+              {item.role === 'proprietario' && item.unit_rented_to_tenant ? <Text style={styles.exemptBadge}>Não mora na unidade</Text> : null}
               {!item.billing_exempt ? <Text style={styles.cardLine}>Vencimento preferido: dia {item.preferred_due_day || 10}</Text> : null}
               {item.unit_type_name ? <Text style={styles.cardLine}>Tipologia: {item.unit_type_name} · {formatCurrency(item.condominium_fee_cents || 0)}</Text> : null}
               <Text style={styles.cardLine}>
