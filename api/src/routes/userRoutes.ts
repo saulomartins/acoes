@@ -12,6 +12,7 @@ import { isAcceptedDocumentFormat, maskDocument, normalizeDocument } from '../se
 import { sendWelcomeEmail, sendPasswordResetByAdminEmail } from '../services/emailService';
 import { logAudit } from '../services/auditService';
 import { listProfiles } from '../services/authService';
+import { setOwnerAsMonitoring } from '../services/unitOwnershipService';
 
 const router = Router();
 const validRoles: UserRole[] = ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'];
@@ -196,7 +197,10 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
     ],
   );
 
-  if (unitId && (role === 'proprietario' || role === 'inquilino')) {
+  if (unitId && role === 'proprietario' && unitRentedToTenant) {
+    // Proprietário que não mora na unidade: só posse, nunca morador.
+    await setOwnerAsMonitoring(unitId, (result.rows[0] as any).id, req.user?.id);
+  } else if (unitId && (role === 'proprietario' || role === 'inquilino')) {
     // Quem acabou de ser vinculado à unidade vira automaticamente o
     // representante — não existe mais escolha manual dessa opção.
     await query(`update unit_occupancies set is_representative=false where unit_id=$1 and ended_at is null`,[unitId]);
@@ -281,15 +285,23 @@ router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), requireF
   );
   if (target.unit_id && target.unit_id !== unitId) {
     await query(`update unit_occupancies set ended_at=current_date,is_representative=false where unit_id=$1 and user_id=$2 and ended_at is null`,[target.unit_id,req.params.id]);
+    // A posse que vinha do cadastro (proprietário que só acompanhava a
+    // unidade antiga) acaba junto com o vínculo.
+    await query(`update unit_ownerships set ended_at=current_date where unit_id=$1 and owner_user_id=$2 and ended_at is null`,[target.unit_id,req.params.id]);
     // Sem essa pessoa, o representante da unidade antiga passa pro morador
     // restante vinculado mais recentemente (se sobrar algum).
     await query(`update unit_occupancies set is_representative=true where id=(select id from unit_occupancies where unit_id=$1 and ended_at is null order by started_at desc limit 1)`,[target.unit_id]);
   }
-  if (unitId && (nextRole === 'proprietario' || nextRole === 'inquilino')) {
+  if (unitId && nextRole === 'proprietario' && unitRentedToTenant) {
+    // Proprietário que não mora na unidade: só posse, nunca morador.
+    await setOwnerAsMonitoring(unitId, req.params.id, req.user?.id);
+  } else if (unitId && (nextRole === 'proprietario' || nextRole === 'inquilino')) {
     // Quem acabou de ser vinculado à unidade vira automaticamente o
     // representante — não existe mais escolha manual dessa opção.
     await query(`update unit_occupancies set is_representative=false where unit_id=$1 and ended_at is null`,[unitId]);
     await query(`insert into unit_occupancies(unit_id,user_id,is_representative) values($1,$2,true) on conflict (unit_id,user_id) where ended_at is null do update set is_representative=true`,[unitId,req.params.id]);
+    // Passou a morar na unidade: deixa de ser só "dono que acompanha" dela.
+    await query(`update unit_ownerships set ended_at=current_date where unit_id=$1 and owner_user_id=$2 and ended_at is null`,[unitId,req.params.id]);
   }
   await logAudit(req, 'pessoas', 'updated', `Editou ${result.rows[0].full_name || result.rows[0].username}`, { entityId: req.params.id });
   return res.json({ user: result.rows[0] });

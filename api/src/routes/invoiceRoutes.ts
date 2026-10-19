@@ -11,7 +11,7 @@ import { createInterBoleto, getInterBoleto, getInterBoletoPdf, listInterBoletosB
 import { sendPushNotification } from '../services/notificationService';
 import { notifyNewInvoice, transitionOverdueInvoices } from '../services/invoiceReminderService';
 import { logAudit } from '../services/auditService';
-import { getRepresentedUnitIds } from '../services/unitOwnershipService';
+import { getViewableUnitIds } from '../services/unitOwnershipService';
 import { getBillingRules } from '../services/lateFeeService';
 
 const router = Router();
@@ -312,9 +312,10 @@ router.get('/', asyncHandler(async (req, res) => {
   // Representante atual da unidade (Blocos e unidades) vê os boletos da
   // própria unidade mesmo quando o responsável financeiro (Definir
   // financeiro) é outro morador — ex.: inquilino vendo o boleto emitido no
-  // nome do proprietário. Só leitura: nunca habilita ações de quem não é o
-  // titular do boleto.
-  const representedUnitIds = isResident ? await getRepresentedUnitIds(req.user!.id) : [];
+  // nome do proprietário. Vale também para o proprietário que não mora e só
+  // acompanha a unidade (unit_ownerships): ele vê os boletos de quem paga.
+  // Só leitura: nunca habilita ações de quem não é o titular do boleto.
+  const representedUnitIds = isResident ? await getViewableUnitIds(req.user!.id) : [];
 
   await transitionOverdueInvoices();
 
@@ -1192,7 +1193,7 @@ router.get('/:id/pix', asyncHandler(async(req,res)=>{
   let invoice=result.rows[0];
   if(!invoice)return res.status(404).json({message:'Boleto não encontrado.'});
   if(['proprietario','inquilino'].includes(req.user?.role||'')&&invoice.user_id!==req.user?.id){
-    const representedUnitIds=await getRepresentedUnitIds(req.user!.id);
+    const representedUnitIds=await getViewableUnitIds(req.user!.id);
     if(!invoice.unit_id||!representedUnitIds.includes(invoice.unit_id))return res.status(403).json({message:'Você não pode acessar o Pix deste boleto.'});
   }
   if(['paid','canceled'].includes(invoice.status))return res.status(409).json({message:invoice.status==='paid'?'Este boleto já foi pago.':'Este boleto foi cancelado.'});
@@ -1207,7 +1208,7 @@ router.get('/:id/pdf', asyncHandler(async(req,res)=>{
     from invoices i join users u on u.id=i.user_id where i.id=$1 and i.condominium_id=$2`,[req.params.id,req.user?.condominiumId]);
   const row=invoice.rows[0];if(!row)return res.status(404).json({message:'Boleto não encontrado.'});
   if(['proprietario','inquilino'].includes(req.user?.role||'')&&row.user_id!==req.user?.id){
-    const representedUnitIds=await getRepresentedUnitIds(req.user!.id);
+    const representedUnitIds=await getViewableUnitIds(req.user!.id);
     if(!row.unit_id||!representedUnitIds.includes(row.unit_id))return res.status(403).json({message:'Você não pode acessar este boleto.'});
   }
   if(row.status==='canceled')return res.status(409).json({message:'Este boleto foi cancelado e não deve ser impresso para pagamento.'});

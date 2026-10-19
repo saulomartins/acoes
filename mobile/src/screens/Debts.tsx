@@ -50,6 +50,10 @@ type DebtRow = {
 };
 type Agreement = { id:string;status:string;debtor_name:string;apartment:string;original_total_cents:number;negotiated_total_cents:number;paid_before_cents?:number;discount_cents?:number;legacy_invoice_id?:string|null;installment_count:number;first_due_date:string;valid_until:string|null;sent_at:string|null;accepted_at:string|null;breached_at:string|null;breach_reason:string|null;notes:string|null;cancellation_reason:string|null;judicial?:boolean;judicial_process_number?:string|null;installments:Array<{id:string;number:number;amountCents:number;dueDate:string;invoiceId:string|null;status:string|null;canceledAt?:string|null;cancellationReason?:string|null}>;items:Array<{invoiceId:string;referenceMonth:string;dueDate:string;principalCents:number;fineCents:number;interestCents:number;frozenTotalCents:number;frozenAt:string}> };
 type DebtData = {
+  // Proprietário que não mora e só acompanha: cada apartamento aparece pelo
+  // responsável financeiro (unitResponsibles), não pela pessoa logada.
+  monitorOnly?: boolean;
+  unitResponsibles?: Array<{ unit: string; name: string | null; role: string | null }>;
   scope: 'person' | 'condominium';
   person: Person & { cpf: string };
   asOf: string;
@@ -82,7 +86,7 @@ const todayIso = () => {
   return local.toISOString().slice(0, 10);
 };
 const situation = (row: DebtRow) => row.status === 'paid' ? 'Pago' : row.daysLate > 0 ? 'Em atraso' : 'Em aberto';
-const roleLabel = (role: string) => role === 'proprietario' ? 'Proprietário' : role === 'inquilino' ? 'Inquilino' : role ? role : 'Morador';
+const roleLabel = (role: string) => role === 'proprietario' ? 'Proprietário' : role === 'inquilino' ? 'Inquilino' : role === 'responsavel_financeiro' ? 'Responsável financeiro' : role ? role : 'Morador';
 const agreementStatus:Record<string,string>={draft:'Rascunho',sent:'Aguardando seu aceite',accepted:'Aceito · aguardando boletos',active:'Acordo ativo',at_risk:'Acordo sob risco',breached:'Acordo rompido',settled:'Acordo quitado',rejected:'Proposta recusada',expired:'Proposta expirada',canceled:'Proposta cancelada'};
 // 'sent' muda de texto conforme quem lê e o tipo do acordo: o acordo judicial
 // dispensa o aceite, e para o síndico quem aceita é o responsável, não ele.
@@ -236,6 +240,28 @@ export default function Debts({ navigation }: any) {
 
   const units = useMemo<UnitGroup[]>(() => {
     if (!data) return [];
+    if (data.monitorOnly) {
+      // Um card por apartamento, com todos os débitos da unidade (inclusive
+      // boletos antigos no nome do próprio proprietário) sob o responsável
+      // financeiro atual — é ele quem responde pela cobrança.
+      return groupByUnit(data.rows, null).map(group => {
+        const responsible = data.unitResponsibles?.find(item => item.unit === group.unit);
+        const rows = group.people.flatMap(person => person.rows)
+          .sort((a, b) => b.referenceMonth.localeCompare(a.referenceMonth) || b.dueDate.localeCompare(a.dueDate));
+        const openRows = rows.filter(row => row.open);
+        return {
+          ...group,
+          people: [{
+            payerId: `unidade:${group.unit}`,
+            payerName: responsible?.name || 'Responsável financeiro não definido',
+            payerRole: 'responsavel_financeiro',
+            rows,
+            openCount: openRows.length,
+            updatedTotalCents: openRows.reduce((sum, row) => sum + row.updatedTotalCents, 0),
+          }],
+        };
+      });
+    }
     return groupByUnit(data.rows.filter(row => !row.ownedElsewhere), data.person.unit);
   }, [data]);
 
@@ -542,7 +568,7 @@ export default function Debts({ navigation }: any) {
 
         <View style={styles.unitsList}>
         {!units.length
-          ? <EmptyState title="Nenhum débito encontrado" description={manager ? 'Não há cobranças registradas para os apartamentos.' : 'Não há cobranças registradas para o seu apartamento.'} />
+          ? <EmptyState title="Nenhum débito encontrado" description={manager ? 'Não há cobranças registradas para os apartamentos.' : data?.monitorOnly ? 'Não há cobranças registradas para os apartamentos que você acompanha.' : 'Não há cobranças registradas para o seu apartamento.'} />
           : visibleUnits.length
             ? visibleUnits.map(group => renderUnitGroup(group))
             : <EmptyState title="Nenhum resultado" description="Nenhum apartamento ou morador corresponde ao que você buscou. Ajuste os filtros acima." />}

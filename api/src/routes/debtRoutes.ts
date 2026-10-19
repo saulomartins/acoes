@@ -5,7 +5,7 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { query, withTransaction } from '../db';
 import { getBillingRules, calculateLateFee, dailyInterestPercent } from '../services/lateFeeService';
 import { logAudit } from '../services/auditService';
-import { getOwnedUnitIds } from '../services/unitOwnershipService';
+import { getFinancialResponsibles, getOwnedUnitIds } from '../services/unitOwnershipService';
 
 const router=Router();
 router.use(authenticate);
@@ -30,8 +30,17 @@ router.get('/',asyncHandler(async(req,res)=>{
   // em unidade que ele possui (unit_ownerships) — mesma visão somente leitura
   // já aplicada em /invoices, sem precisar pedir explicitamente por ?userId.
   let extraUserIds:string[]=[];
+  // Proprietário que não mora ("Quem mora de fato na unidade?" = outra
+  // pessoa) só acompanha: a tela mostra cada apartamento dele pelo
+  // responsável financeiro, e não por ele mesmo.
+  let monitorOnly=false;
+  let ownedUnitIds:string[]=[];
   if(!manager){
-    const ownedUnitIds=await getOwnedUnitIds(req.user!.id);
+    ownedUnitIds=await getOwnedUnitIds(req.user!.id);
+    if(req.user?.role==='proprietario'&&ownedUnitIds.length){
+      const me=await query<{unit_rented_to_tenant:boolean}>(`select unit_rented_to_tenant from users where id=$1`,[req.user!.id]);
+      monitorOnly=Boolean(me.rows[0]?.unit_rented_to_tenant);
+    }
     if(ownedUnitIds.length){
       const residents=await query<{id:string}>(`select id from users where unit_id=any($1::uuid[]) and condominium_id=$2 and id<>$3`,[ownedUnitIds,condominiumId,req.user!.id]);
       extraUserIds=residents.rows.map(row=>row.id);
@@ -91,10 +100,11 @@ router.get('/',asyncHandler(async(req,res)=>{
   // prazo) continua aparecendo na lista com daysLate=0 ("Em aberto" no front), mas
   // não deve somar em openCount/totais, senão o boleto do mês corrente ainda não
   // vencido infla a dívida de quem está em dia.
-  const rows=invoices.rows.map((invoice:any)=>{const dueDate=isoDate(invoice.due_date);const open=!['paid','canceled'].includes(invoice.status)&&dueDate<asOf;const daysLate=open?daysBetween(dueDate,asOf):0;const principal=Number(invoice.amount_cents);const{fineCents:fine,interestCents:interest}=invoice.frozen_by_agreement?{fineCents:Number(invoice.frozen_fine_cents),interestCents:Number(invoice.frozen_interest_cents)}:calculateLateFee(rules,principal,daysLate);return {id:invoice.id,payerId:invoice.user_id,referenceMonth:isoDate(invoice.reference_month||invoice.due_date).slice(0,7),principalCents:principal,dueDate,daysLate,status:invoice.status,fineCents:fine,interestCents:interest,updatedTotalCents:invoice.frozen_by_agreement?Number(invoice.frozen_total_cents):principal+fine+interest,frozenByAgreement:Boolean(invoice.frozen_by_agreement),open,paidAt:invoice.paid_at,paidAmountCents:invoice.paid_amount_cents,digitableLine:invoice.digitable_line,payerName:invoice.payer_name,payerUnit:invoice.payer_unit,payerRole:invoice.payer_role,invoiceType:invoice.invoice_type,negotiationType:invoice.negotiation_type,judicialProcessNumber:invoice.judicial_process_number,externalId:invoice.external_id,inAgreement:Boolean(invoice.in_agreement),adjustments:invoice.adjustments,ownedElsewhere:extraUserIds.includes(invoice.user_id)}});
+  const rows=invoices.rows.map((invoice:any)=>{const dueDate=isoDate(invoice.due_date);const open=!['paid','canceled'].includes(invoice.status)&&dueDate<asOf;const daysLate=open?daysBetween(dueDate,asOf):0;const principal=Number(invoice.amount_cents);const{fineCents:fine,interestCents:interest}=invoice.frozen_by_agreement?{fineCents:Number(invoice.frozen_fine_cents),interestCents:Number(invoice.frozen_interest_cents)}:calculateLateFee(rules,principal,daysLate);return {id:invoice.id,payerId:invoice.user_id,referenceMonth:isoDate(invoice.reference_month||invoice.due_date).slice(0,7),principalCents:principal,dueDate,daysLate,status:invoice.status,fineCents:fine,interestCents:interest,updatedTotalCents:invoice.frozen_by_agreement?Number(invoice.frozen_total_cents):principal+fine+interest,frozenByAgreement:Boolean(invoice.frozen_by_agreement),open,paidAt:invoice.paid_at,paidAmountCents:invoice.paid_amount_cents,digitableLine:invoice.digitable_line,payerName:invoice.payer_name,payerUnit:invoice.payer_unit,payerRole:invoice.payer_role,invoiceType:invoice.invoice_type,negotiationType:invoice.negotiation_type,judicialProcessNumber:invoice.judicial_process_number,externalId:invoice.external_id,inAgreement:Boolean(invoice.in_agreement),adjustments:invoice.adjustments,ownedElsewhere:!monitorOnly&&extraUserIds.includes(invoice.user_id)}});
   const openRows=rows.filter((row:any)=>row.open);
   const totals={principalCents:openRows.reduce((sum:number,row:any)=>sum+row.principalCents,0),fineCents:openRows.reduce((sum:number,row:any)=>sum+row.fineCents,0),interestCents:openRows.reduce((sum:number,row:any)=>sum+row.interestCents,0),updatedTotalCents:openRows.reduce((sum:number,row:any)=>sum+row.updatedTotalCents,0),openCount:openRows.length};
-  return res.json({scope:userId?'person':'condominium',person:{...person,cpf:digits(person.cpf)},asOf,rules:{finePercent:rules.fineType==='PERCENT'?rules.fineValue:0,fineType:rules.fineType,fineValue:rules.fineValue,dailyInterestPercent:dailyInterestPercent(rules),interestType:rules.interestType,interestValue:rules.interestValue,legalBasis:'Configuração de multa e mora do condomínio'},rows,totals});
+  const unitResponsibles=monitorOnly?(await getFinancialResponsibles(ownedUnitIds)).map(row=>({unit:row.unit_label,name:row.full_name,role:row.role})):[];
+  return res.json({monitorOnly,unitResponsibles,scope:userId?'person':'condominium',person:{...person,cpf:digits(person.cpf)},asOf,rules:{finePercent:rules.fineType==='PERCENT'?rules.fineValue:0,fineType:rules.fineType,fineValue:rules.fineValue,dailyInterestPercent:dailyInterestPercent(rules),interestType:rules.interestType,interestValue:rules.interestValue,legalBasis:'Configuração de multa e mora do condomínio'},rows,totals});
 }));
 
 // Edição total de um débito: valor, vencimento, observação, ou marcar como

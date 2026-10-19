@@ -12,13 +12,19 @@ router.use(authenticate);
 router.use(requireFeature('enquetes'));
 
 const isManager = (role?: string) => role === 'sindico' || role === 'subsindico';
+// Vota quem mora numa unidade ativa (unit_occupancies) ou é proprietário que
+// não mora e só acompanha a unidade (unit_ownerships): continua condômino,
+// com direito de participar das decisões (Código Civil, art. 1.335, III).
+const LINKED_TO_ACTIVE_UNIT = `(exists (select 1 from unit_occupancies uo join units un on un.id=uo.unit_id
+                   where uo.user_id=u.id and uo.ended_at is null and un.active=true and un.condominium_id=u.condominium_id)
+       or exists (select 1 from unit_ownerships ow join units un on un.id=ow.unit_id
+                   where ow.owner_user_id=u.id and ow.ended_at is null and un.active=true and un.condominium_id=u.condominium_id))`;
 const residentIsActive = async (userId: string, condominiumId: string) => {
   const result = await query(
     `select 1 from users u
      where u.id=$1 and u.condominium_id=$2 and u.role in ('proprietario','inquilino')
        and u.login_enabled=true and u.deleted_at is null
-       and exists (select 1 from unit_occupancies uo join units un on un.id=uo.unit_id
-                   where uo.user_id=u.id and uo.ended_at is null and un.active=true and un.condominium_id=$2)`,
+       and ${LINKED_TO_ACTIVE_UNIT}`,
     [userId, condominiumId],
   );
   return Boolean(result.rows[0]);
@@ -83,7 +89,7 @@ router.patch('/:id/publish', authorize('sindico', 'subsindico'), asyncHandler(as
   if (!result.rows[0]) return res.status(409).json({ message: 'A enquete não está em rascunho ou o prazo já expirou.' });
   const recipients = await query<{ id: string }>(
     `select u.id from users u where u.condominium_id=$1 and u.role in ('proprietario','inquilino') and u.login_enabled=true and u.deleted_at is null
-     and exists(select 1 from unit_occupancies uo join units un on un.id=uo.unit_id where uo.user_id=u.id and uo.ended_at is null and un.active=true)`,
+     and ${LINKED_TO_ACTIVE_UNIT}`,
     [condominiumId],
   );
   await notifyUsers({ condominiumId, senderId: req.user?.id, recipientIds: recipients.rows.map(row => row.id), title: 'Nova enquete disponível', body: result.rows[0].title, screen: 'Polls' });
@@ -103,7 +109,7 @@ router.patch('/:id/close', authorize('sindico', 'subsindico'), asyncHandler(asyn
 
 router.post('/:id/vote', authorize('proprietario', 'inquilino'), asyncHandler(async (req, res) => {
   const condominiumId = req.user!.condominiumId!;
-  if (!(await residentIsActive(req.user!.id, condominiumId))) return res.status(403).json({ message: 'Somente moradores ativos vinculados a uma unidade podem votar.' });
+  if (!(await residentIsActive(req.user!.id, condominiumId))) return res.status(403).json({ message: 'Somente moradores e proprietários vinculados a uma unidade ativa podem votar.' });
   const optionId = String(req.body?.optionId || '');
   const option = await query(
     `select o.id from poll_options o join polls p on p.id=o.poll_id

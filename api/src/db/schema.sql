@@ -1588,3 +1588,37 @@ create table if not exists pill_questions (
   email text,
   created_at timestamptz not null default now()
 );
+
+-- Proprietário que não mora na unidade ("Quem mora de fato na unidade?" =
+-- outra pessoa, users.unit_rented_to_tenant) deixa de ser morador: passa a
+-- só acompanhar a unidade pela posse (unit_ownerships) — vê os débitos e
+-- boletos de quem paga, recebe avisos e vota em enquetes, mas não é
+-- morador, representante nem responsável financeiro (2026-10-19). Os dois
+-- comandos abaixo convertem quem já estava cadastrado assim; são
+-- idempotentes e não tocam em quem mora na própria unidade.
+insert into unit_ownerships (unit_id, owner_user_id)
+select u.unit_id, u.id from users u
+where u.role = 'proprietario' and u.unit_rented_to_tenant and u.unit_id is not null and u.deleted_at is null
+  and not exists (select 1 from unit_ownerships ow where ow.unit_id = u.unit_id and ow.owner_user_id = u.id and ow.ended_at is null);
+
+-- Encerra a moradia desses proprietários. A marca is_representative fica na
+-- linha encerrada (os índices só olham moradias ativas) para o comando
+-- seguinte saber em quais unidades ele era o representante.
+update unit_occupancies uo set ended_at = current_date, is_financial_responsible = false
+from users u
+where u.id = uo.user_id and uo.ended_at is null and uo.unit_id = u.unit_id
+  and u.role = 'proprietario' and u.unit_rented_to_tenant and u.deleted_at is null;
+
+-- Unidade que ficou sem representante porque ele era um desses proprietários:
+-- a representação passa ao morador restante vinculado mais recentemente
+-- (mesma regra de PUT /users/:id). Unidades sem esse caso não são tocadas.
+update unit_occupancies o set is_representative = true
+where o.id in (
+  select distinct on (x.unit_id) x.id from unit_occupancies x
+  where x.ended_at is null
+    and not exists (select 1 from unit_occupancies r where r.unit_id = x.unit_id and r.ended_at is null and r.is_representative)
+    and exists (select 1 from unit_occupancies e join users u on u.id = e.user_id
+                where e.unit_id = x.unit_id and e.ended_at is not null and e.is_representative
+                  and u.role = 'proprietario' and u.unit_rented_to_tenant)
+  order by x.unit_id, x.started_at desc
+);
