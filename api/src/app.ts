@@ -17,7 +17,6 @@ import bankConfigurationRoutes from './routes/bankConfigurationRoutes';
 import accountabilityRoutes from './routes/accountabilityRoutes';
 import accountabilityAttachmentRoutes from './routes/accountabilityAttachmentRoutes';
 import agreementRoutes from './routes/agreementRoutes';
-import mobileReleaseRoutes from './routes/mobileReleaseRoutes';
 import platformPlanRoutes from './routes/platformPlanRoutes';
 import leadRoutes from './routes/leadRoutes';
 import auditLogRoutes from './routes/auditLogRoutes';
@@ -82,7 +81,6 @@ app.use('/reports', reportRoutes);
 app.use('/bank-configurations', bankConfigurationRoutes);
 app.use('/accountability', accountabilityRoutes);
 app.use('/accountability-attachments', accountabilityAttachmentRoutes);
-app.use('/mobile-releases', mobileReleaseRoutes);
 app.use('/platform-plans', platformPlanRoutes);
 app.use('/leads', leadRoutes);
 app.use('/audit-log', auditLogRoutes);
@@ -102,9 +100,9 @@ app.use((_req, res) => res.status(404).json({ message: 'route not found' }));
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (typeof error === 'object' && error && 'code' in error && error.code === '23505') {
-    return res.status(409).json({ message: 'registro duplicado' });
+    return res.status(409).json({ message: 'Registro duplicado.' });
   }
 
   console.error('Unhandled API error', error);
-  return res.status(500).json({ message: 'internal server error' });
+  return res.status(500).json({ message: 'Não foi possível concluir agora. Tente novamente em alguns minutos.' });
 });

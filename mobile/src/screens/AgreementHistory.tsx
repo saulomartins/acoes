@@ -9,6 +9,7 @@ import { formatBrazilianDate, formatBrazilianMonth } from '../utils/date';
 import { useBreakpoint } from '../ui/responsive';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Agreement = {
   id: string;
@@ -189,7 +190,7 @@ export default function AgreementHistory({ navigation }: any) {
     <ScrollView ref={scrollRef} contentContainerStyle={[styles.container, compact && styles.containerMobile]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
       <View style={styles.headerRow}><View style={styles.grow}><Text style={styles.eyebrow}>FINANCEIRO</Text>
       <Text style={styles.title}>Histórico de Acordos</Text>
-      <Text style={styles.subtitle}>{manager ? 'Acordos encerrados, quitados e rompidos' : 'Acompanhe seus acordos finalizados'}</Text></View><Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable></View>
+      <Text style={styles.subtitle}>{manager ? 'Acordos encerrados, quitados e rompidos' : 'Acompanhe seus acordos finalizados'}</Text></View><TourButton onPress={openTour}/></View>
 
       <View ref={registerSection('summary')} style={[styles.summaryRow, compact && styles.summaryRowMobile, isActive('summary')&&styles.tourHighlight]}>
         <View style={[styles.summary, compact && styles.summaryMobile]}><Text {...summaryValueProps} style={[styles.summaryValue, compact && styles.summaryValueMobile]}>{agreements.length}</Text><Text {...summaryLabelProps} style={styles.summaryLabel}>acordos no histórico</Text></View>

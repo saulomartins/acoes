@@ -82,7 +82,7 @@ router.post('/register', async (req, res) => {
     }
 
     console.error('Error on /auth/register', error);
-    return res.status(500).json({ message: 'internal server error' });
+    return res.status(500).json({ message: 'Não foi possível concluir agora. Tente novamente em alguns minutos.' });
   }
 });
 
@@ -118,7 +118,7 @@ router.post('/login', limit(20, 15 * 60_000), async (req, res) => {
     return res.json(response);
   } catch (error) {
     console.error('Error on /auth/login', error);
-    return res.status(500).json({ message: 'internal server error' });
+    return res.status(500).json({ message: 'Não foi possível concluir agora. Tente novamente em alguns minutos.' });
   }
 });
 

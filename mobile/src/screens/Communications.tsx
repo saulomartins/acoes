@@ -16,6 +16,7 @@ import { useBreakpoint } from "../ui/responsive";
 import { emitNotificationsChanged } from "../services/notificationEvents";
 import FeatureTour, { type TourStep } from "../ui/FeatureTour";
 import { useSectionTour } from "../ui/useSectionTour";
+import TourButton from '../ui/TourButton';
 
 type Notice = {
   id: string;
@@ -244,9 +245,7 @@ export default function Communications({ navigation }: any) {
           </Text>
         </View>
         <View style={styles.heading}>
-          <Pressable onPress={openTour} style={styles.tourButton}>
-            <Text style={styles.tourButtonText}>? Tour desta tela</Text>
-          </Pressable>
+          <TourButton onPress={openTour}/>
           <View style={styles.counter}>
             <Text style={styles.counterValue}>{unread}</Text>
             <Text style={styles.counterLabel}>

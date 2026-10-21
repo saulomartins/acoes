@@ -10,6 +10,7 @@ import { useBreakpoint } from '../ui/responsive';
 import { CardGrid, FormFieldFull, FormGrid } from '../ui/grid';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Article = {
   id: string; condominium_id: string; article_number: string; description: string;
@@ -322,7 +323,7 @@ export default function RegulationArticles({ navigation }: any) {
             <Text style={s.title}>Artigos do regimento</Text>
             <Text style={s.subtitle}>Cada condomínio configura seus próprios artigos — percentuais de multa, prazos, juros e correção. Editar um artigo nunca altera notificações já emitidas.</Text>
           </View>
-          <Pressable onPress={openTour} style={s.tourButton}><Text style={s.tourButtonText}>? Tour desta tela</Text></Pressable>
+          <TourButton onPress={openTour}/>
         </View>
 
         {isAdminGeral ? (

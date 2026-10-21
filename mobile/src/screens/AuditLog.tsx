@@ -7,6 +7,7 @@ import { EmptyState, Panel } from '../ui/components';
 import { colors } from '../ui/theme';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Condominium = { id: string; name: string; cnpj: string | null; address: string | null };
 type AuditFeature =
@@ -105,7 +106,7 @@ export default function AuditLog({ navigation }: any) {
           <Text style={styles.title}>Auditoria</Text>
           <Text style={styles.subtitle}>Ações de síndicos e subsíndicos em cada condomínio: quem fez o quê e quando. Em Regimento e Ocorrências, ações de proprietários e inquilinos também aparecem aqui.</Text>
         </View>
-        <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+        <TourButton onPress={openTour}/>
       </View>
 
       <Panel>

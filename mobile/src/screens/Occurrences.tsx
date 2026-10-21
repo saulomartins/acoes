@@ -9,6 +9,7 @@ import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Occurrence = {
   id: string; unit_id: string | null; related_unit_id: string | null; reported_by: string;
@@ -134,7 +135,7 @@ export default function Occurrences({ navigation }: any) {
             <Text style={styles.title}>Ocorrências</Text>
             <Text style={styles.subtitle}>{manager ? 'Registro formal de infrações e incidentes do condomínio.' : 'Registre incidentes e acompanhe suas ocorrências.'}</Text>
           </View>
-          <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+          <TourButton onPress={openTour}/>
         </View>
 
         <View ref={registerSection('create')} style={[isActive('create') && styles.tourHighlight]}>

@@ -9,6 +9,7 @@ import { useBreakpoint } from '../ui/responsive';
 import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Condominium = { id: string; name: string; cnpj: string | null; address: string | null };
 type UnitType = { id: string; name: string; fee_cents: number; description: string | null; active: boolean };
@@ -128,7 +129,7 @@ export default function UnitTypes({ navigation }: any) {
           <Text style={styles.title}>Tipologias e valores</Text>
           <Text style={styles.subtitle}>Defina os tipos de apartamento e o valor mensal padrão cobrado de cada unidade.</Text>
         </View>
-        <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+        <TourButton onPress={openTour}/>
       </View>
 
       {user?.role === 'admin_geral' ? <FormFieldFull><View style={styles.panel}><Text style={styles.panelTitle}>Condomínio</Text>{condominiums.map((item) => <Pressable key={item.id} onPress={async () => { setCondominiumId(item.id); await loadTypes(item.id); }} style={[styles.option, condominiumId === item.id && styles.optionActive]}><Text style={[styles.optionText, condominiumId === item.id && styles.optionTextActive]}>{item.name}</Text></Pressable>)}</View></FormFieldFull> : null}

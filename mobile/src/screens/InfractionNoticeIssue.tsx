@@ -9,6 +9,7 @@ import { useBreakpoint } from '../ui/responsive';
 import { formatCents } from '../utils/money';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Article = { id: string; article_number: string; description: string; base_fine_percent: string; payment_deadline_days: number };
 type UnitOption = { id: string; label: string };
@@ -96,7 +97,7 @@ export default function InfractionNoticeIssue({ navigation, route }: any) {
             <Text style={styles.title}>Emitir notificação de infração</Text>
             <Text style={styles.subtitle}>Escolha o artigo e a unidade, revise o cálculo completo da multa e só então envie.</Text>
           </View>
-          <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+          <TourButton onPress={openTour}/>
         </View>
 
         {!loadingLists && articles.length === 0 ? (

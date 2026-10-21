@@ -8,6 +8,7 @@ import { colors } from '../ui/theme';
 import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type PlanType = 'per_active_user' | 'tiered_bracket' | 'included_overage';
 type ActiveUserMetric = 'login_enabled' | 'registered';
@@ -206,7 +207,7 @@ export default function PlatformPlans() {
           <Text style={styles.title}>Planos da plataforma</Text>
           <Text style={styles.subtitle}>Cadastre como a plataforma cobra cada condominio: por usuário ativo, por faixa fechada, ou base mensal com usuários incluídos e excedente.</Text>
         </View>
-        <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+        <TourButton onPress={openTour}/>
       </View>
 
       <View ref={registerSection('form')} style={[isActive('form') && styles.tourHighlight]}>

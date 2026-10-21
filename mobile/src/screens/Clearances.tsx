@@ -9,6 +9,7 @@ import { useBreakpoint } from '../ui/responsive';
 import { formatBrazilianDate } from '../utils/date';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type DebtItem = { source: string; label: string; referenceMonth?: string; dueDate?: string; amountCents?: number };
 type Check = { eligible: boolean; blockers: DebtItem[]; pendings: DebtItem[]; checkedAt: string };
@@ -108,7 +109,7 @@ export default function Clearances() {
           <Text style={s.title}>Nada consta</Text>
           <Text style={s.subtitle}>{manager ? 'Analise os pedidos e emita a declaração de quitação condominial.' : 'Solicite a declaração de que sua unidade está em dia com o condomínio.'}</Text>
         </View>
-        <Pressable onPress={openTour} style={s.tourButton}><Text style={s.tourButtonText}>? Tour desta tela</Text></Pressable>
+        <TourButton onPress={openTour}/>
       </View>
 
       {!manager ? (

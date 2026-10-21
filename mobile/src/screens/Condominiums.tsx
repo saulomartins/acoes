@@ -9,6 +9,7 @@ import { useBreakpoint } from '../ui/responsive';
 import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Condominium = {
   id: string;
@@ -386,7 +387,7 @@ export default function Condominiums({ navigation }: any) {
           <Text style={styles.title}>Configuração inicial</Text>
           <Text style={styles.subtitle}>Cadastre os condomínios e depois defina os gestores responsáveis.</Text>
         </View>
-        <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+        <TourButton onPress={openTour}/>
       </View>
 
       <View ref={registerSection('form')} style={[isActive('form') && styles.tourHighlight]}>

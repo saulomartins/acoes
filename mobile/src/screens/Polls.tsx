@@ -8,6 +8,7 @@ import { colors, layout } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Option = { id:string; label:string; position:number; vote_count:number|null };
 type Poll = { id:string; title:string; description:string|null; status:'draft'|'open'|'closed'|'canceled'; closes_at:string|null; created_at:string; created_by_name:string; vote_count:number; selected_option_id:string|null; options:Option[] };
@@ -45,7 +46,7 @@ export default function Polls() {
   ];
   const tourSteps=manager?managerTourSteps:residentTourSteps;
   return <><ScrollView ref={scrollRef} contentContainerStyle={[styles.content,isDesktop&&styles.desktop]} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={()=>{setRefreshing(true);load(true);}}/>} keyboardShouldPersistTaps="handled">
-    <View style={styles.headerRow}><View style={styles.grow}><Text style={styles.eyebrow}>PARTICIPAÇÃO DO CONDOMÍNIO</Text><Text style={styles.pageTitle}>Enquetes</Text><Text style={styles.subtitle}>Consulte os moradores e acompanhe as respostas.</Text></View><Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable></View>
+    <View style={styles.headerRow}><View style={styles.grow}><Text style={styles.eyebrow}>PARTICIPAÇÃO DO CONDOMÍNIO</Text><Text style={styles.pageTitle}>Enquetes</Text><Text style={styles.subtitle}>Consulte os moradores e acompanhe as respostas.</Text></View><TourButton onPress={openTour}/></View>
     {manager?<View ref={registerSection('create')} style={[isActive('create')&&styles.tourHighlight]}><Panel><Text style={styles.panelTitle}>Criar nova enquete</Text><Text style={styles.label}>Título</Text><TextInput style={styles.input} value={title} onChangeText={setTitle} maxLength={160} placeholder="Ex.: Horário da próxima assembleia"/><Text style={styles.label}>Descrição (opcional)</Text><TextInput style={[styles.input,styles.multiline]} value={description} onChangeText={setDescription} multiline maxLength={2000}/><Text style={styles.label}>Encerramento (opcional)</Text><TextInput style={styles.input} value={closesAt} onChangeText={setClosesAt} placeholder="20/08/2026 18:00"/><Text style={styles.label}>Opções</Text>{options.map((option,index)=><View key={index} style={styles.optionEdit}><TextInput style={[styles.input,styles.grow]} value={option} onChangeText={value=>setOptions(current=>current.map((item,i)=>i===index?value:item))} placeholder={`Opção ${index+1}`}/>{options.length>2?<Pressable onPress={()=>setOptions(current=>current.filter((_,i)=>i!==index))}><Text style={styles.remove}>Remover</Text></Pressable>:null}</View>)}{options.length<10?<Pressable onPress={()=>setOptions(current=>[...current,''])}><Text style={styles.add}>+ Adicionar opção</Text></Pressable>:null}<View style={styles.button}><AppButton title="Salvar rascunho" loading={busy==='create'} onPress={create}/></View></Panel></View>:null}
     <View ref={registerSection('list')} style={[isActive('list')&&styles.tourHighlight]}>
     <Text style={styles.sectionTitle}>{manager?'Enquetes do condomínio':'Disponíveis para você'}</Text>

@@ -8,6 +8,7 @@ import { EmptyState } from '../ui/components';
 import { colors } from '../ui/theme';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 // "Minhas faturas": histórico das faturas da plataforma (assinatura do Lar em
 // Dia) do condomínio do síndico/subsíndico, com o recibo em PDF das pagas. O
@@ -156,7 +157,7 @@ export default function PlatformInvoices() {
           <Text style={styles.title}>Minhas faturas</Text>
           <Text style={styles.subtitle}>Histórico das faturas do Lar em Dia do seu condomínio, com o recibo de cada pagamento.</Text>
         </View>
-        <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+        <TourButton onPress={openTour}/>
       </View>
 
       <View ref={registerSection('summary')} style={[styles.summaryRow, isActive('summary') && styles.tourHighlight]}>

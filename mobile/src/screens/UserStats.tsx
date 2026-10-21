@@ -9,6 +9,7 @@ import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type NamedUser = { id: string; fullName: string };
 
@@ -156,7 +157,7 @@ export default function UserStats() {
             {isAdmin ? 'Cadastro, acesso e ocupação de cada condomínio. Toque em um número para ver quem são.' : `Cadastro, acesso e ocupação de ${user?.condominiumName || 'seu condomínio'}. Toque em um número para ver quem são.`}
           </Text>
         </View>
-        <Pressable onPress={openTour} style={s.tourButton}><Text style={s.tourButtonText}>? Tour desta tela</Text></Pressable>
+        <TourButton onPress={openTour}/>
       </View>
 
       {isAdmin ? (

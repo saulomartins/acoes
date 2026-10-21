@@ -10,6 +10,7 @@ import { useBreakpoint } from '../ui/responsive';
 import { brazilianDateToIso, formatBrazilianDate, formatBrazilianMonth, maskBrazilianDate } from '../utils/date';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Person = { id: string; full_name: string | null; username: string; unit: string | null };
 type DebtAdjustment = {
@@ -519,7 +520,7 @@ export default function Debts({ navigation }: any) {
   return <><ScrollView ref={scrollRef} contentContainerStyle={[styles.container,compact&&styles.containerMobile]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
       <View style={styles.headerRow}><View style={styles.grow}><Text style={styles.eyebrow}>FINANCEIRO</Text>
       <Text style={styles.title}>Gestão de débitos por apartamento</Text>
-      <Text style={styles.subtitle}>Cada apartamento apresenta suas referências mensais, encargos e total atualizado diariamente.</Text></View><Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable></View>
+      <Text style={styles.subtitle}>Cada apartamento apresenta suas referências mensais, encargos e total atualizado diariamente.</Text></View><TourButton onPress={openTour}/></View>
 
       <View ref={registerSection('update')} style={[styles.updateBox,isActive('update')&&styles.tourHighlight]}>
         <View style={styles.updateCopy}>

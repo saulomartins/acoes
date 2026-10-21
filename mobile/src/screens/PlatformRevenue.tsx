@@ -9,6 +9,7 @@ import { colors } from '../ui/theme';
 import { maskBrazilianDate, brazilianDateToIso, formatBrazilianDate, formatBrazilianMonth } from '../utils/date';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type PlatformPlan = { id: string; name: string; plan_type: 'per_active_user' | 'tiered_bracket'; active: boolean };
 type PlatformStatus = 'active' | 'suspended' | 'canceled';
@@ -170,7 +171,7 @@ export default function PlatformRevenue() {
           <Text style={styles.subtitle}>Veja quanto cada condominio geraria por mes com o plano vinculado, com base nos usuários ativos cadastrados. Condomínios suspensos ou cancelados não entram na projeção.</Text>
         </View>
         <Pressable onPress={reconcilePayments} disabled={reconciling} style={[styles.tourButton, reconciling && { opacity: 0.6 }]}><Text style={styles.tourButtonText}>{reconciling ? 'Verificando...' : 'Verificar pagamentos'}</Text></Pressable>
-        <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+        <TourButton onPress={openTour}/>
       </View>
       {reconcileMessage ? <Text style={styles.lastInvoiceText}>{reconcileMessage}</Text> : null}
 

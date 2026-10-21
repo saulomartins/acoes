@@ -10,6 +10,7 @@ import { useBreakpoint } from '../ui/responsive';
 import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Person={id:string;full_name:string|null;username:string;role:string;unit:string|null;unit_id?:string|null;is_unit_financial_responsible?:boolean;unit_type_name?:string|null;condominium_fee_cents?:number|null;billing_exempt?:boolean;preferred_due_day?:number};
 type Preview={referenceMonth:string;validCount:number;totalAmountCents:number;items:Array<Person&{valid:boolean;issues:string[];due_date:string}>};
@@ -109,7 +110,7 @@ export default function BillingSettings({navigation}:any){
  return (
   <>
     <ScrollView ref={scrollRef} contentContainerStyle={[s.container,mobile&&s.containerMobile]}>
- <View style={s.headerRow}><View style={s.grow}><Text style={s.eyebrow}>COBRANÇAS</Text><Text style={s.title}>Configuração e emissão em massa</Text><Text style={s.subtitle}>Nome, documento e endereço vêm da pessoa; o valor vem da tipologia. A prévia nunca emite automaticamente.</Text></View><Pressable onPress={openTour} style={s.tourButton}><Text style={s.tourButtonText}>? Tour desta tela</Text></Pressable></View>
+ <View style={s.headerRow}><View style={s.grow}><Text style={s.eyebrow}>COBRANÇAS</Text><Text style={s.title}>Configuração e emissão em massa</Text><Text style={s.subtitle}>Nome, documento e endereço vêm da pessoa; o valor vem da tipologia. A prévia nunca emite automaticamente.</Text></View><TourButton onPress={openTour}/></View>
  <View ref={registerSection('rules')} style={[isActive('rules')&&s.tourHighlight]}><Panel>
    <Text style={s.heading}>Regras padrão</Text>
    <Text style={s.label}>Recebimento</Text>

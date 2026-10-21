@@ -9,6 +9,7 @@ import { useBreakpoint } from '../ui/responsive';
 import { formatCents } from '../utils/money';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Notice = {
   id: string; unit_id: string; unit_label: string | null; description: string; status: string;
@@ -140,7 +141,7 @@ export default function InfractionNotices({ navigation }: any) {
             <Text style={styles.title}>Notificações de infração</Text>
             <Text style={styles.subtitle}>{manager ? 'Acompanhe e confirme as notificações emitidas.' : 'Notificações recebidas pela sua unidade.'}</Text>
           </View>
-          <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+          <TourButton onPress={openTour}/>
         </View>
 
         <View ref={registerSection('filters')} style={[isActive('filters') && styles.tourHighlight]}>

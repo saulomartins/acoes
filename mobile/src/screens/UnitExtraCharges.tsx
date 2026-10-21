@@ -9,6 +9,7 @@ import { FormGrid, CardGrid } from '../ui/grid';
 import { brazilianMonthToIso, formatBrazilianMonth, maskBrazilianMonth } from '../utils/date';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Unit = { id: string; number: string; block_name: string | null };
 type PersonBillingInfo = { unit_id: string | null; billing_exempt: boolean };
@@ -222,7 +223,7 @@ export default function UnitExtraCharges({ navigation }: any) {
           <Text style={styles.title}>Cobranças adicionais</Text>
           <Text style={styles.subtitle}>Lance valores extras por unidade (ex.: tag de portaria) que são somados à taxa condominial nos boletos, avulsos ou parcelados, até o fim da cobrança.</Text>
         </View>
-        <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+        <TourButton onPress={openTour}/>
       </View>
 
       <View ref={registerSection('list')} style={[isActive('list') && styles.tourHighlight]}>

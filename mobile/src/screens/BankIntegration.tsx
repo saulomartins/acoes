@@ -11,6 +11,7 @@ import { FormGrid, FormFieldFull, CardGrid } from '../ui/grid';
 import { maskBrazilianMonth, brazilianMonthToIso, formatBrazilianMonth } from '../utils/date';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Provider = { id:string; code:string; name:string; adapterKey:string|null; active:boolean; operational:boolean; requiredFields:string[] };
 type Purpose = 'boleto'|'extrato';
@@ -126,7 +127,7 @@ export default function BankIntegration({ navigation, route }:any) {
         <Text style={s.eyebrow}>Admin geral</Text><Text style={s.title}>Gestão de bancos</Text>
         <Text style={s.subtitle}>{pageTitle}</Text>
       </View>
-      <Pressable onPress={openTour} style={s.tourButton}><Text style={s.tourButtonText}>? Tour desta tela</Text></Pressable>
+      <TourButton onPress={openTour}/>
     </View>
     {error?<Text style={s.error}>{error}</Text>:null}{notice?<Text style={s.success}>{notice}</Text>:null}
 

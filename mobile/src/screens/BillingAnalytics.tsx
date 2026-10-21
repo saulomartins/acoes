@@ -9,6 +9,7 @@ import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
+import TourButton from '../ui/TourButton';
 
 type ReasonBreakdown = { reason: string | null; count: number; totalCents: number };
 type BillingAnalyticsSummary = {
@@ -72,7 +73,7 @@ export default function BillingAnalytics() {
           <Text style={s.title}>Indicadores de boletos</Text>
           <Text style={s.subtitle}>Visão analítica por período, separada do Painel financeiro: total recebido, não pago e cancelado (com os motivos de cancelamento).</Text>
         </View>
-        <Pressable onPress={openTour} style={s.tourButton}><Text style={s.tourButtonText}>? Tour desta tela</Text></Pressable>
+        <TourButton onPress={openTour}/>
       </View>
 
       <View ref={registerSection('period')} style={[isActive('period') && s.tourHighlight]}>

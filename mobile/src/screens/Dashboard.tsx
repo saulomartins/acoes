@@ -9,6 +9,7 @@ import { useBreakpoint } from '../ui/responsive';
 import { formatBrazilianDate, formatBrazilianMonth } from '../utils/date';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type PixSettledInvoice = {
   id: string;
@@ -108,7 +109,7 @@ export default function Dashboard() {
           <Text style={s.title}>Painel financeiro</Text>
           <Text style={s.subtitle}>Pagos, em aberto, cancelados e inadimplência por mês de referência do boleto.</Text>
         </View>
-        <Pressable onPress={openTour} style={s.tourButton}><Text style={s.tourButtonText}>? Tour desta tela</Text></Pressable>
+        <TourButton onPress={openTour}/>
       </View>
 
       <View ref={registerSection('filter')} style={[isActive('filter') && s.tourHighlight]}>

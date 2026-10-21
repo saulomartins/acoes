@@ -14,6 +14,7 @@ import { colors, layout } from "../ui/theme";
 import { useBreakpoint } from "../ui/responsive";
 import FeatureTour, { type TourStep } from "../ui/FeatureTour";
 import { useSectionTour } from "../ui/useSectionTour";
+import TourButton from '../ui/TourButton';
 type Report = {
   id: string;
   category: string;
@@ -178,9 +179,7 @@ export default function Reports({ navigation }: any) {
                 : "Converse diretamente com o síndico e o subsíndico."}
             </Text>
           </View>
-          <Pressable onPress={openTour} style={styles.tourButton}>
-            <Text style={styles.tourButtonText}>? Tour desta tela</Text>
-          </Pressable>
+          <TourButton onPress={openTour}/>
         </View>
         {!manager ? (
           <View ref={registerSection('newReport')} style={[isActive('newReport')&&styles.tourHighlight]}>

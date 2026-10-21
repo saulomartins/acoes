@@ -10,6 +10,7 @@ import { useBreakpoint } from '../ui/responsive';
 import { FormGrid } from '../ui/grid';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type UtilityType = 'agua' | 'gas' | 'energia';
 const UTILITY_TYPES: UtilityType[] = ['agua', 'gas', 'energia'];
@@ -137,7 +138,7 @@ export default function UnitConsumption() {
             <Text style={s.title}>Consumo (água, gás e energia)</Text>
             <Text style={s.subtitle}>Lance a quantidade consumida por unidade a cada mês — o valor é somado ao boleto da taxa condominial, além da tipologia.</Text>
           </View>
-          <Pressable onPress={openTour} style={s.tourButton}><Text style={s.tourButtonText}>? Tour desta tela</Text></Pressable>
+          <TourButton onPress={openTour}/>
         </View>
 
         <View ref={registerSection('rates')} style={[isActive('rates')&&s.tourHighlight]}><Panel>

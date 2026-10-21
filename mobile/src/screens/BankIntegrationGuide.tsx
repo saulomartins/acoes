@@ -362,8 +362,8 @@ const rolloutSteps: RolloutStep[] = [
   },
   {
     title: '10. Apresentar o tour de cada tela ao síndico',
-    detail: 'Não existe uma tela única de checklist de implantação dentro do app — cada tela tem seu próprio "? Tour desta tela". Vale abrir esses tours junto com o síndico na primeira reunião, começando pelas telas das features que foram ligadas no passo 2.',
-    where: 'Botão "? Tour desta tela", em cada tela',
+    detail: 'Não existe uma tela única de checklist de implantação dentro do app — cada tela tem seu próprio botão "?" (tour desta tela). Vale abrir esses tours junto com o síndico na primeira reunião, começando pelas telas das features que foram ligadas no passo 2.',
+    where: 'Botão "?" (tour desta tela), no topo de cada tela',
   },
 ];
 

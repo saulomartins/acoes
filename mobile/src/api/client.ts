@@ -122,7 +122,13 @@ export const apiRequest = async <T>(
       },
     });
 
-  let response = await request(storedToken || token);
+  // Sem conexão (servidor fora do ar, sem internet): fetch lança TypeError.
+  let response: Response;
+  try {
+    response = await request(storedToken || token);
+  } catch {
+    throw new Error('Sem conexão com o servidor. Verifique sua internet e tente novamente.');
+  }
   if (response.status === 401) {
     const renewedToken = await refreshAccessToken();
     if (renewedToken) response = await request(renewedToken);
@@ -132,7 +138,10 @@ export const apiRequest = async <T>(
 
   if (!response.ok) {
     const maybeError = data as { message?: string; code?: string } | null;
-    const message = maybeError?.message || 'Falha na requisicao';
+    // Erro inesperado do servidor (5xx) vem com texto técnico ou sem texto:
+    // mostra uma mensagem que o usuário entende. Os 4xx trazem o motivo real.
+    const technical = !maybeError?.message || /internal server error/i.test(maybeError.message);
+    const message = response.status >= 500 && technical ? 'Não foi possível concluir agora. Tente novamente em alguns minutos.' : maybeError?.message || 'Não foi possível concluir a solicitação.';
     if (response.status === 403 && maybeError?.code === 'PLATFORM_SUSPENDED') platformSuspendedListeners.forEach(listener => listener(message));
     throw new Error(message);
   }

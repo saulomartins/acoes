@@ -7,6 +7,7 @@ import { AppDialog, EmptyState, Panel } from '../ui/components';
 import { colors } from '../ui/theme';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type Condominium = { id: string; name: string };
 type Person = { id: string; full_name: string | null; username: string; cpf: string | null; role: string; unit: string | null };
@@ -104,7 +105,7 @@ export default function Support() {
   const selectedCondominium = condominiums.find(c => c.id === condominiumId) || null;
 
   return <><ScrollView ref={scrollRef} contentContainerStyle={s.container} refreshControl={<RefreshControl refreshing={loading} onRefresh={() => isAdmin ? loadCondominiums() : loadPeople('')} />}>
-    <View style={s.headerRow}><View style={s.grow}><Text style={s.eyebrow}>ADMINISTRAÇÃO</Text><Text style={s.title}>Suporte</Text><Text style={s.subtitle}>{isAdmin ? 'Localize uma pessoa por condomínio e corrija problemas de acesso — sem precisar de SQL manual.' : 'Localize um morador do seu condomínio e corrija problemas de acesso.'}</Text></View><Pressable onPress={openTour} style={s.tourButton}><Text style={s.tourButtonText}>? Tour desta tela</Text></Pressable></View>
+    <View style={s.headerRow}><View style={s.grow}><Text style={s.eyebrow}>ADMINISTRAÇÃO</Text><Text style={s.title}>Suporte</Text><Text style={s.subtitle}>{isAdmin ? 'Localize uma pessoa por condomínio e corrija problemas de acesso — sem precisar de SQL manual.' : 'Localize um morador do seu condomínio e corrija problemas de acesso.'}</Text></View><TourButton onPress={openTour}/></View>
 
     <View ref={registerSection('find')} style={[isActive('find') && s.tourHighlight]}>
       <Panel>

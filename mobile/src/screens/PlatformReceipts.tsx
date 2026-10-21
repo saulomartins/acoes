@@ -9,6 +9,7 @@ import { colors } from '../ui/theme';
 import { formatBrazilianMonth } from '../utils/date';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
+import TourButton from '../ui/TourButton';
 
 type InvoiceStatus = 'pending' | 'sent' | 'paid' | 'canceled' | 'refunded';
 
@@ -245,7 +246,7 @@ export default function PlatformReceipts() {
         </View>
         <Pressable onPress={generateAll} disabled={isLoading} style={[styles.tourButton, isLoading && { opacity: 0.6 }]}><Text style={styles.tourButtonText}>Gerar faturas do mês</Text></Pressable>
         <Pressable onPress={verifyAll} disabled={isLoading} style={[styles.tourButton, isLoading && { opacity: 0.6 }]}><Text style={styles.tourButtonText}>Verificar todos</Text></Pressable>
-        <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+        <TourButton onPress={openTour}/>
       </View>
 
       <View ref={registerSection('summary')} style={[styles.summaryRow, isActive('summary') && styles.tourHighlight]}>
