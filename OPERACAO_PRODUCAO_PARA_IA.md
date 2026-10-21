@@ -1347,3 +1347,8 @@ publicados junto, com autorização do usuário.
 - Android: AAB 1.7.3 (versionCode 47), build EAS
   `4aaf87eb-263b-40db-a8d3-aab72058a21b`, FINISHED. Envio à Play Store pelo
   usuário. `blockedPermissions` de READ_MEDIA_* mantido.
+- Web (mesmo dia, commit `33a04bf`): gráfico "Arrecadação por mês" do Início do
+  síndico virou barra empilhada pago (verde) / em aberto no prazo (azul) / vencido
+  (vermelho). Deployment `f484b3e9.lar-em-dia.pages.dev`, bundle
+  `AppEntry-4604f411c6bf994b115e6706ecdb2f51.js`, servido em `gestaolaremdia.com`.
+  Só web — não exige versão nova do app.
