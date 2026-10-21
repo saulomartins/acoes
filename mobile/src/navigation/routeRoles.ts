@@ -45,7 +45,6 @@ export const TOUR_STEPS: TourStep[] = [
   { route: 'InfractionNotices', title: 'Notificações de infração', description: 'Acompanhamento de notificações, ciência, defesa e situação de cada processo.', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'regimento_ocorrencias' },
   { route: 'Polls', title: 'Enquetes', description: 'Consultas criadas pela gestão para participação dos moradores ativos.', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'enquetes' },
   { route: 'SpaceReservations', title: 'Reserva de espaços', description: 'Calendário de disponibilidade e solicitações de reserva das áreas comuns.', roles: ['sindico', 'subsindico', 'proprietario', 'inquilino'], feature: 'reserva_espacos' },
-  { route: 'MobileReleases', title: 'Instalar aplicativo', description: 'Central com a versão mais recente do app para Android e iOS.', roles: ['admin_geral', 'sindico', 'subsindico', 'proprietario', 'inquilino'], webOnly: true },
 ];
 
 // Papéis permitidos por rota, para o guard de role (RequireRole). Rota

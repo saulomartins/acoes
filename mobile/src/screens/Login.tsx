@@ -71,7 +71,8 @@ export default function Login({ navigation }: any) {
               <View><Text style={styles.brandName}>Lar em Dia</Text><Text style={styles.brandCaption}>Gestão condominial</Text></View>
             </View>
 
-            <View style={styles.heroContent}>
+            {/* No celular o formulário vem primeiro: da apresentação fica só a marca. */}
+            {desktop ? <View style={styles.heroContent}>
               <Text style={styles.eyebrow}>GESTÃO SIMPLES E CONECTADA</Text>
               <Text style={[styles.heroTitle, desktop && styles.heroTitleDesktop]}>Seu condomínio inteiro em um só lugar.</Text>
               <Text style={styles.heroText}>Financeiro, boletos, moradores e comunicados organizados para uma administração mais tranquila.</Text>
@@ -81,7 +82,7 @@ export default function Login({ navigation }: any) {
                 <View style={styles.feature}><View style={styles.check}><Text style={styles.checkText}>✓</Text></View><Text style={styles.featureText}>Cobranças integradas ao Banco de Gestão Financeira</Text></View>
                 <View style={styles.feature}><View style={styles.check}><Text style={styles.checkText}>✓</Text></View><Text style={styles.featureText}>Acesso seguro para gestão e moradores</Text></View>
               </View>
-            </View>
+            </View> : null}
 
             {desktop ? <Text style={styles.presentationFooter}>Lar em Dia · Gestão condominial inteligente</Text> : null}
           </View>

@@ -19,7 +19,7 @@ type Invoice = {
   provider:string; external_id:string|null; digitable_line:string|null; paid_at?:string|null;
   pix_copy_paste?:string|null;
   paid_amount_cents?:number|null; user_username?:string; user_full_name?:string|null;
-  invoice_type?:'regular'|'agreement'; agreement_id?:string|null;
+  invoice_type?:'regular'|'agreement'|'legacy'|'infraction'; agreement_id?:string|null;
   cancellation_reason?:string|null;
   provider_situation?:string|null;
   debt_excluded_at?:string|null; debt_exclusion_reason?:string|null; debt_excluded_by_name?:string|null;
@@ -65,6 +65,7 @@ const currencyToCents=(value:string)=>{const amount=Number(value.replace(/\./g,'
 const monthKey=(item:Invoice)=>(item.reference_month||item.due_date).slice(0,7);
 const currentMonth=()=>{const now=new Date();return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`};
 const currentBrazilianMonth=()=>formatBrazilianMonth(currentMonth());
+const longMonth=(item:Invoice)=>{const label=new Date(`${monthKey(item)}-15T12:00:00`).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});return label.charAt(0).toUpperCase()+label.slice(1)};
 
 export default function Invoices({navigation}:any){
   const {isMobile:compact}=useBreakpoint();
@@ -194,11 +195,78 @@ export default function Invoices({navigation}:any){
     {key:'invoices',title:'Lista de cobranças',description:'Cada card é um boleto, agrupado por mês de referência. Quando o boleto vem da tipologia, o card mostra "Composição da cobrança": Valor condomínio (com Taxa de condomínio/Taxa de melhoria, se configuradas em Config. e Enviar cobranças), cobranças adicionais e consumo de água/gás/energia, cada um com seu valor. Boletos vencidos ganham destaque em vermelho, e parcelas de acordo de renegociação mostram a etiqueta "PARCELA DE ACORDO". Num boleto cancelado, você pode registrar o motivo do cancelamento e marcar se o valor foi recebido por fora do sistema (ex.: Pix direto na chave) — isso passa a contar no total recebido da referência.'},
   ];
   const residentTourSteps:TourStep[]=[
-    {key:'summary',title:'Resumo das suas cobranças',description:'O botão "Buscar boletos em aberto no banco" consulta o Banco Inter e atualiza a situação das suas cobranças (pago, vencido). Os números abaixo mostram quanto você já pagou, quanto está em aberto e quantos boletos seus estão vencidos, sempre considerando a referência selecionada no filtro.'},
-    {key:'filters',title:'Filtrar suas cobranças',description:'Filtre suas cobranças por mês de referência ou por situação: aguardando o banco, em aberto, pago, vencido ou cancelado.'},
-    {key:'invoices',title:'Seus boletos',description:'Cada card é uma cobrança sua, agrupada por mês de referência. Quando o boleto vem da taxa condominial, o card mostra "Composição da cobrança" com o detalhamento do valor (taxas, cobranças adicionais e consumo de água/gás/energia, se houver). Em boletos em aberto ou vencidos, dá pra abrir/imprimir o PDF ou copiar o código Pix Copia e Cola pra pagar direto pelo app do seu banco. Parcelas de um acordo de renegociação aparecem com a etiqueta "PARCELA DE ACORDO".'},
+    {key:'featured',title:'Boleto da vez',description:'O boleto em aberto com o vencimento mais próximo (um vencido aparece primeiro), com o valor, a situação e a composição: taxas, cobranças adicionais e consumo de água/gás/energia, se houver. "Copiar código Pix" copia o Pix Copia e Cola para você colar no app do seu banco; "PDF" abre o boleto para imprimir. Sem nada em aberto, aparece "Tudo em dia".'},
+    {key:'history',title:'Histórico',description:'Todos os seus boletos, do mais recente para o mais antigo. Toque em um deles para ver a composição, a linha digitável e, se ainda estiver em aberto, pagar. Parcelas de um acordo de renegociação aparecem com a etiqueta "PARCELA DE ACORDO". "Buscar boletos em aberto no banco" consulta o banco e atualiza a situação na hora.'},
   ];
   const tourSteps=canManage?managerTourSteps:residentTourSteps;
+  const [expandedId,setExpandedId]=useState('');
+
+  // Morador: o boleto da vez em destaque e o histórico embaixo. Sem filtros de
+  // referência nem busca por pessoa, que só fazem sentido para a gestão.
+  if(!canManage){
+    const payable=(item:Invoice)=>['issued','overdue'].includes(item.status)&&!isExpiredAtBank(item)&&Boolean(item.external_id);
+    const openItems=items.filter(item=>['issued','overdue','pending_provider'].includes(item.status)&&!item.debt_excluded_at).sort((a,b)=>(a.status==='overdue'?0:1)-(b.status==='overdue'?0:1)||a.due_date.localeCompare(b.due_date));
+    const featured=openItems[0]||null;
+    const history=items.filter(item=>item.id!==featured?.id).sort((a,b)=>monthKey(b).localeCompare(monthKey(a))||b.due_date.localeCompare(a.due_date));
+    const chip=(item:Invoice)=><Text style={[r.chip,item.status==='paid'&&r.chipPaid,(item.status==='overdue'||isExpiredAtBank(item))&&r.chipOverdue,item.status==='canceled'&&r.chipCanceled]}>{invoiceLabel(item)}</Text>;
+    const composition=(item:Invoice)=><InvoiceComposition item={item} variant="card"/>;
+    const statusHint=(item:Invoice)=>isExpiredAtBank(item)?<Text style={s.expiredAlert}>Boleto expirado no banco — não pode mais ser pago. Fale com a administração do condomínio.</Text>
+      :item.status==='pending_provider'||isProcessingAtBank(item)?<Text style={s.pendingBankHint}>O banco ainda não confirmou este boleto. O Pix e o PDF aparecem assim que a confirmação chegar.</Text>:null;
+    const actions=(item:Invoice)=>item.external_id&&item.status!=='canceled'&&item.status!=='pending_provider'?<View style={r.actions}>
+      {payable(item)?<Pressable accessibilityRole="button" onPress={()=>payWithPix(item.id)} style={({pressed})=>[r.primary,pressed&&r.pressed]}><Text style={r.primaryText}>Copiar código Pix</Text></Pressable>:null}
+      <Pressable accessibilityRole="button" accessibilityLabel="Abrir o PDF do boleto" onPress={()=>openPdf(item.id)} style={({pressed})=>[r.secondary,!payable(item)&&r.secondaryWide,pressed&&r.pressed]}><Text style={r.secondaryText}>{payable(item)?'PDF':'Abrir PDF do boleto'}</Text></Pressable>
+    </View>:null;
+    const daysTo=(item:Invoice)=>{const due=new Date(`${item.due_date.slice(0,10)}T00:00:00`);const today=new Date();today.setHours(0,0,0,0);return Math.round((due.getTime()-today.getTime())/86400000)};
+    return <><ScrollView ref={scrollRef} contentContainerStyle={[s.container,compact&&s.containerMobile]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load}/>}>
+      <View style={r.header}><View style={s.grow}><Text style={r.title}>Boletos</Text><Text style={r.subtitle}>Pague, baixe o PDF e acompanhe o histórico da sua unidade.</Text></View><Pressable onPress={openTour} accessibilityRole="button" accessibilityLabel="Tour desta tela" style={r.help}><Text style={r.helpText}>?</Text></Pressable></View>
+      {error?<Text style={s.error}>{error}</Text>:null}
+
+      <View ref={registerSection('featured')} style={[isActive('featured')&&s.tourHighlight]}>
+        {featured?<View style={r.featured}>
+          <View style={r.featuredTop}>
+            <View style={s.grow}>
+              <Text style={r.featuredMonth}>{featured.reference_month?longMonth(featured):'Boleto'} · vence {formatBrazilianDate(featured.due_date)}</Text>
+              {featured.invoice_type==='agreement'?<Text style={s.agreementTag}>PARCELA DE ACORDO</Text>:null}
+              <Text style={r.featuredAmount}>{money(featured.amount_cents)}</Text>
+            </View>
+            {chip(featured)}
+          </View>
+          {featured.status==='issued'&&!isExpiredAtBank(featured)?<Text style={r.dueHint}>{daysTo(featured)===0?'Vence hoje':daysTo(featured)>0?`Faltam ${daysTo(featured)} dia${daysTo(featured)===1?'':'s'} para o vencimento`:''}</Text>:null}
+          {featured.status==='overdue'&&!isExpiredAtBank(featured)?<Text style={r.overdueHint}>Pagamento atrasado — venceu em {formatBrazilianDate(featured.due_date)}</Text>:null}
+          {statusHint(featured)}
+          {actions(featured)}
+          {composition(featured)}
+          {openItems.length>1?<Text style={r.moreOpen}>Você tem mais {openItems.length-1} boleto(s) em aberto no histórico abaixo.</Text>:null}
+        </View>:<View style={[r.featured,r.featuredOk]}>
+          <Text style={r.okTitle}>{loading&&!items.length?'Carregando…':'Tudo em dia'}</Text>
+          <Text style={r.okText}>{items.length?'Nenhum boleto em aberto na sua unidade.':'Ainda não há boletos emitidos para você.'}</Text>
+        </View>}
+      </View>
+
+      <View ref={registerSection('history')} style={[r.historyWrap,isActive('history')&&s.tourHighlight]}>
+        <View style={r.historyHead}><Text style={r.historyTitle}>Histórico</Text><Pressable onPress={syncAll} disabled={loading}><Text style={r.syncLink}>{loading?'Buscando no banco…':'Buscar boletos em aberto no banco'}</Text></Pressable></View>
+        {history.length?<View style={r.list}>{history.map((item,index)=>{const open=expandedId===item.id;return <View key={item.id} style={[index<history.length-1&&r.divider]}>
+          <Pressable accessibilityRole="button" accessibilityState={{expanded:open}} onPress={()=>setExpandedId(open?'':item.id)} style={({pressed})=>[r.row,pressed&&r.pressed]}>
+            <View style={s.grow}>
+              <Text style={r.rowTitle}>{item.reference_month?longMonth(item):formatBrazilianDate(item.due_date)}{item.invoice_type==='agreement'?' · parcela de acordo':''}</Text>
+              <Text style={r.rowMeta}>{item.paid_at?`Pago em ${formatBrazilianDate(item.paid_at)} · ${money(Number(item.paid_amount_cents||item.amount_cents))}`:`${money(item.amount_cents)} · vence ${formatBrazilianDate(item.due_date)}`}</Text>
+            </View>
+            {chip(item)}
+            <Text style={r.chevron}>{open?'⌃':'⌄'}</Text>
+          </Pressable>
+          {open?<View style={r.expanded}>
+            {statusHint(item)}
+            {item.status==='canceled'?<Text style={r.canceled}>Boleto cancelado — não utilize para pagamento.{item.cancellation_reason?` Motivo: ${item.cancellation_reason}`:''}</Text>:item.digitable_line?<Text selectable style={s.digitable}>{item.digitable_line}</Text>:null}
+            {actions(item)}
+            {composition(item)}
+          </View>:null}
+        </View>})}</View>:<EmptyState title="Sem histórico ainda" description="Os boletos pagos e anteriores aparecem aqui."/>}
+      </View>
+      <AppDialog visible={Boolean(dialog)} title={dialog?.title||''} message={dialog?.message||''} tone={dialog?.tone} confirmLabel={dialog?.confirmLabel} cancelLabel={dialog?.cancelLabel} onConfirm={dialog?.onConfirm} onClose={()=>setDialog(null)} scrollable={dialog?.scrollable}/>
+    </ScrollView>
+    <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step=>scrollToSection(step.key)}/>
+    </>;
+  }
 
   return <><ScrollView ref={scrollRef} contentContainerStyle={[s.container,compact&&s.containerMobile]} refreshControl={<RefreshControl refreshing={loading} onRefresh={load}/>}>
     <View style={s.headerRow}><View style={s.grow}><Text style={s.eyebrow}>COBRANÇAS</Text><Text style={s.title}>Gestão de cobranças</Text>
@@ -277,15 +345,7 @@ export default function Invoices({navigation}:any){
       <View style={s.groupHeader}><View><Text style={s.groupTitle}>Referência {formatBrazilianMonth(group.reference)}</Text><Text style={s.groupMeta}>{group.items.length} cobrança(s)</Text></View><Text style={s.groupTotal}>{money(group.items.reduce((sum,item)=>sum+item.amount_cents,0))}</Text></View>
       <CardGrid columns={{mobile:1,tablet:2,desktop:2}}>
         {group.items.map(item=><View key={item.id} style={[s.card,item.status==='overdue'&&s.overdueCard]}><View style={s.cardTop}><View style={s.nameArea}><Text style={s.cardTitle}>{item.user_full_name||item.user_username||'Morador'}</Text>{item.invoice_type==='agreement'?<Text style={s.agreementTag}>PARCELA DE ACORDO · {item.agreement_id?.slice(0,8).toUpperCase()}</Text>:null}<Text style={s.cardValue}>{money(item.amount_cents)}</Text></View><Text style={[s.badge,item.status==='paid'&&s.badgePaid,item.status==='overdue'&&s.badgeOverdue,isExpiredAtBank(item)&&s.badgeExpired,Boolean(item.debt_excluded_at)&&!['paid','canceled'].includes(item.status)&&s.badgeExcluded]}>{invoiceLabel(item)}</Text></View>
-          {item.condo_base_fee_cents!=null?<View style={s.breakdownBox}>
-            <Text style={s.breakdownTitle}>Composição da cobrança</Text>
-            <View style={s.breakdownRow}><Text style={s.breakdownLabel}>Valor condomínio</Text><Text style={s.breakdownValue}>{money(item.condo_base_fee_cents)}</Text></View>
-            {item.condo_fee_cents!=null?<View style={s.breakdownRow}><Text style={[s.breakdownLabel,s.breakdownIndent]}>Taxa de condomínio ({item.condo_fee_percent}%)</Text><Text style={s.breakdownValue}>{money(item.condo_fee_cents)}</Text></View>:null}
-            {item.improvement_fee_cents!=null?<View style={s.breakdownRow}><Text style={[s.breakdownLabel,s.breakdownIndent]}>Taxa de melhoria ({item.improvement_fee_percent}%)</Text><Text style={s.breakdownValue}>{money(item.improvement_fee_cents)}</Text></View>:null}
-            {(item.extra_charge_items||[]).map((extra,index)=><View key={`extra-${index}`} style={s.breakdownRow}><Text style={s.breakdownLabel}>{extra.description}</Text><Text style={s.breakdownValue}>{money(extra.amount_cents)}</Text></View>)}
-            {(item.consumption_items||[]).map((consumption,index)=><View key={`consumption-${index}`} style={s.breakdownRow}><Text style={s.breakdownLabel}>{utilityLabel[consumption.utility_type]||consumption.utility_type} ({consumption.quantity} × {money(consumption.unit_price_cents)})</Text><Text style={s.breakdownValue}>{money(consumption.amount_cents)}</Text></View>)}
-            <View style={[s.breakdownRow,s.breakdownTotalRow]}><Text style={s.breakdownTotalLabel}>Valor total</Text><Text style={s.breakdownTotalValue}>{money(item.amount_cents)}</Text></View>
-          </View>:null}
+          <InvoiceComposition item={item} variant="box"/>
           {isExpiredAtBank(item)?<Text style={s.expiredAlert}>Boleto expirado no Banco Inter — não pode mais ser pago. Vencimento: {formatBrazilianDate(item.due_date)}. Reemita a cobrança ou, se a dívida já foi quitada por outro boleto, retire-a da dívida abaixo.</Text>
             :isProcessingAtBank(item)?<Text style={s.pendingBankHint}>O banco ainda está processando este boleto. Vencimento: {formatBrazilianDate(item.due_date)}.</Text>
             :item.status==='overdue'?<Text style={s.overdueAlert}>Pagamento atrasado — vencimento enviado ao banco: {formatBrazilianDate(item.due_date)}</Text>
@@ -320,6 +380,87 @@ export default function Invoices({navigation}:any){
   <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step=>scrollToSection(step.key)}/>
   </>;
 }
+
+// Composição da cobrança — a mesma para gestão e moradores. As taxas
+// detalham o valor do condomínio (por isso recuadas); adicionais e consumo
+// somam ao total. Boleto sem o detalhamento gravado (importado do banco ou
+// emitido com valor manual) ainda mostra o tipo, os adicionais e o consumo
+// vinculados; se as partes não fecharem com o total, a diferença vira "Outros
+// valores". Só exibição: nenhum valor é recalculado.
+const baseLabel:Record<string,string>={agreement:'Parcela de acordo',infraction:'Multa por infração',legacy:'Débito anterior'};
+function InvoiceComposition({item,variant}:{item:Invoice;variant:'card'|'box'}){
+  const box=variant==='box';
+  const st={wrap:box?s.breakdownBox:r.composition,title:box?s.breakdownTitle:r.compTitle,row:box?s.breakdownRow:r.compRow,label:box?s.breakdownLabel:r.compLabel,value:box?s.breakdownValue:r.compValue,indent:box?s.breakdownIndent:r.compIndent,totalRow:box?s.breakdownTotalRow:r.compTotalRow,totalLabel:box?s.breakdownTotalLabel:r.compTotalLabel,totalValue:box?s.breakdownTotalValue:r.compTotalValue};
+  const extras=item.extra_charge_items||[];const consumptions=item.consumption_items||[];
+  const extrasSum=extras.reduce((sum,extra)=>sum+Number(extra.amount_cents||0),0);
+  const consumptionSum=consumptions.reduce((sum,consumption)=>sum+Number(consumption.amount_cents||0),0);
+  const detailed=item.condo_base_fee_cents!=null;
+  const base=detailed?Number(item.condo_base_fee_cents):item.amount_cents-extrasSum-consumptionSum;
+  const other=detailed?item.amount_cents-base-extrasSum-consumptionSum:0;
+  return <View style={st.wrap}>
+    <Text style={st.title}>Composição da cobrança</Text>
+    <View style={st.row}><Text style={st.label}>{detailed?'Valor condomínio':baseLabel[item.invoice_type||'']||'Taxa condominial'}</Text><Text style={st.value}>{money(base)}</Text></View>
+    {detailed&&item.condo_fee_cents!=null?<View style={st.row}><Text style={[st.label,st.indent]}>Taxa de condomínio ({Number(item.condo_fee_percent).toLocaleString('pt-BR')}%)</Text><Text style={st.value}>{money(item.condo_fee_cents)}</Text></View>:null}
+    {detailed&&item.improvement_fee_cents!=null?<View style={st.row}><Text style={[st.label,st.indent]}>Taxa de melhoria ({Number(item.improvement_fee_percent).toLocaleString('pt-BR')}%)</Text><Text style={st.value}>{money(item.improvement_fee_cents)}</Text></View>:null}
+    {extras.map((extra,index)=><View key={`extra-${index}`} style={st.row}><Text style={st.label}>{extra.description}</Text><Text style={st.value}>{money(extra.amount_cents)}</Text></View>)}
+    {consumptions.map((consumption,index)=><View key={`consumption-${index}`} style={st.row}><Text style={st.label}>{utilityLabel[consumption.utility_type]||consumption.utility_type} ({consumption.quantity} × {money(consumption.unit_price_cents)})</Text><Text style={st.value}>{money(consumption.amount_cents)}</Text></View>)}
+    {other!==0?<View style={st.row}><Text style={st.label}>Outros valores</Text><Text style={st.value}>{money(other)}</Text></View>:null}
+    <View style={[st.row,st.totalRow]}><Text style={st.totalLabel}>Valor total</Text><Text style={st.totalValue}>{money(item.amount_cents)}</Text></View>
+    {!detailed&&item.invoice_type!=='agreement'&&item.invoice_type!=='infraction'?<Text style={r.compNote}>O detalhamento das taxas não foi registrado na emissão deste boleto.</Text>:null}
+  </View>;
+}
+
+// Visão do morador (boleto da vez + histórico).
+const r=StyleSheet.create({
+  header:{flexDirection:'row',alignItems:'flex-start',gap:12},
+  title:{color:colors.navy,fontSize:26,fontWeight:'900'},
+  subtitle:{color:'#5b6577',fontSize:14,lineHeight:20,marginTop:2},
+  help:{width:40,height:40,borderRadius:20,borderWidth:1,borderColor:colors.border,backgroundColor:'#fff',alignItems:'center',justifyContent:'center'},
+  helpText:{color:colors.primaryDark,fontSize:16,fontWeight:'900'},
+  featured:{backgroundColor:'#fff',borderWidth:1,borderColor:colors.border,borderRadius:20,padding:18,gap:10,maxWidth:720},
+  featuredOk:{backgroundColor:'#e6f6f2',borderColor:'#bfe6dc'},
+  featuredTop:{flexDirection:'row',alignItems:'flex-start',gap:12},
+  featuredMonth:{color:'#5b6577',fontSize:13,fontWeight:'700'},
+  featuredAmount:{color:colors.navy,fontSize:30,fontWeight:'900',marginTop:2},
+  dueHint:{color:'#7a520a',fontSize:14,fontWeight:'700'},
+  overdueHint:{color:'#a12c2c',fontSize:14,fontWeight:'800'},
+  moreOpen:{color:'#5b6577',fontSize:13},
+  okTitle:{color:'#0b6b5d',fontSize:22,fontWeight:'900'},
+  okText:{color:'#2f5d55',fontSize:14},
+  chip:{fontSize:12,fontWeight:'900',paddingHorizontal:10,paddingVertical:4,borderRadius:999,overflow:'hidden',backgroundColor:'#fbf1dc',color:'#7a520a'},
+  chipPaid:{backgroundColor:'#e6f6f2',color:'#0b6b5d'},
+  chipOverdue:{backgroundColor:'#fbebeb',color:'#a12c2c'},
+  chipCanceled:{backgroundColor:'#eef1f6',color:'#4a5466'},
+  actions:{flexDirection:'row',gap:10},
+  primary:{flex:1,minHeight:48,borderRadius:14,backgroundColor:colors.primary,alignItems:'center',justifyContent:'center',paddingHorizontal:12},
+  primaryText:{color:'#fff',fontSize:15,fontWeight:'900'},
+  secondary:{minHeight:48,minWidth:80,borderRadius:14,borderWidth:1,borderColor:'#c9d3e3',backgroundColor:'#fff',alignItems:'center',justifyContent:'center',paddingHorizontal:16},
+  secondaryWide:{flex:1},
+  secondaryText:{color:colors.ink,fontSize:15,fontWeight:'800'},
+  pressed:{opacity:.85},
+  composition:{borderTopWidth:1,borderTopColor:'#eef1f6',paddingTop:10,gap:6},
+  compRow:{flexDirection:'row',justifyContent:'space-between',gap:10},
+  compLabel:{color:'#5b6577',fontSize:14,flexShrink:1},
+  compValue:{color:colors.ink,fontSize:14,fontWeight:'700'},
+  compTitle:{color:colors.ink,fontSize:14,fontWeight:'900'},
+  compNote:{color:'#5b6577',fontSize:12,lineHeight:17,marginTop:2},
+  compIndent:{marginLeft:14},
+  compTotalRow:{borderTopWidth:1,borderTopColor:'#eef1f6',paddingTop:8,marginTop:2},
+  compTotalLabel:{color:colors.ink,fontSize:14,fontWeight:'900'},
+  compTotalValue:{color:colors.ink,fontSize:15,fontWeight:'900'},
+  historyWrap:{gap:10,maxWidth:720},
+  historyHead:{flexDirection:'row',justifyContent:'space-between',alignItems:'baseline',gap:10,flexWrap:'wrap'},
+  historyTitle:{color:colors.navy,fontSize:17,fontWeight:'900'},
+  syncLink:{color:colors.primaryDark,fontSize:13,fontWeight:'800'},
+  list:{backgroundColor:'#fff',borderWidth:1,borderColor:colors.border,borderRadius:16,overflow:'hidden'},
+  divider:{borderBottomWidth:1,borderBottomColor:'#eef1f6'},
+  row:{flexDirection:'row',alignItems:'center',gap:10,paddingHorizontal:14,paddingVertical:13,minHeight:60},
+  rowTitle:{color:colors.ink,fontSize:15,fontWeight:'800'},
+  rowMeta:{color:'#5b6577',fontSize:13,marginTop:2},
+  chevron:{color:'#8a94a6',fontSize:16,fontWeight:'900'},
+  expanded:{paddingHorizontal:14,paddingBottom:14,gap:10},
+  canceled:{color:'#a12c2c',fontSize:13,fontWeight:'700',lineHeight:19},
+});
 
 const s=StyleSheet.create({
   containerMobile:{paddingHorizontal:12,paddingTop:16,paddingBottom:34},

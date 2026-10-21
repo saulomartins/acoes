@@ -16,7 +16,6 @@ import AgreementHistory from '../screens/AgreementHistory';
 import Communications from '../screens/Communications';
 import Reports from '../screens/Reports';
 import Accountability from '../screens/Accountability';
-import MobileReleases from '../screens/MobileReleases';
 import Occurrences from '../screens/Occurrences';
 import Regulation from '../screens/Regulation';
 import InfractionNotices from '../screens/InfractionNotices';
@@ -74,7 +73,6 @@ type RootStackParamList = {
   Communications: undefined;
   Reports: undefined;
   Accountability: undefined;
-  MobileReleases: undefined;
   PlatformPlans: undefined;
   PlatformRevenue: undefined;
   PlatformReceipts: undefined;
@@ -139,7 +137,6 @@ const AgreementHistoryScreen = withRoleGuard(withResponsiveShell(AgreementHistor
 const CommunicationsScreen = withRoleGuard(withResponsiveShell(Communications, 'Communications'), 'Communications');
 const ReportsScreen = withRoleGuard(withResponsiveShell(Reports, 'Reports'), 'Reports');
 const AccountabilityScreen = withRoleGuard(withResponsiveShell(Accountability, 'Accountability'), 'Accountability');
-const MobileReleasesScreen = withRoleGuard(withResponsiveShell(MobileReleases, 'MobileReleases'), 'MobileReleases');
 const OccurrencesScreen = withRoleGuard(withResponsiveShell(Occurrences, 'Occurrences'), 'Occurrences');
 const RegulationScreen = withRoleGuard(withResponsiveShell(Regulation, 'Regulation'), 'Regulation');
 const InfractionNoticesScreen = withRoleGuard(withResponsiveShell(InfractionNotices, 'InfractionNotices'), 'InfractionNotices');
@@ -283,7 +280,6 @@ export default function AppNavigator() {
               <Stack.Screen name="Communications" component={CommunicationsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Reports" component={ReportsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Accountability" component={AccountabilityScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="MobileReleases" component={MobileReleasesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Regulation" component={RegulationScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Occurrences" component={OccurrencesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="InfractionNotices" component={InfractionNoticesScreen} options={{ headerShown: false }} />

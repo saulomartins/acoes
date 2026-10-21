@@ -25,15 +25,15 @@ export default function Register({ navigation }: any) {
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={styles.hero}>
           <Text style={styles.appName}>Lar em Dia</Text>
-          <Text style={styles.title}>Comece pela configuracao inicial.</Text>
-          <Text style={styles.subtitle}>Essa conta sera o admin geral para criar condominios e vincular sindicos.</Text>
+          <Text style={styles.title}>Comece pela configuração inicial.</Text>
+          <Text style={styles.subtitle}>Essa conta será o admin geral para criar condomínios e vincular síndicos.</Text>
         </View>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Criar admin geral</Text>
-          <Text style={styles.cardSubtitle}>Depois voce cadastra o condominio e o sindico responsavel.</Text>
+          <Text style={styles.cardSubtitle}>Depois você cadastra o condomínio e o síndico responsável.</Text>
 
-          <Text style={styles.label}>Usuario</Text>
+          <Text style={styles.label}>Usuário</Text>
           <TextInput
             placeholder="admin"
             value={username}
@@ -45,7 +45,7 @@ export default function Register({ navigation }: any) {
 
           <Text style={styles.label}>Senha</Text>
           <TextInput
-            placeholder="Minimo 6 caracteres"
+            placeholder="Mínimo 6 caracteres"
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -58,7 +58,7 @@ export default function Register({ navigation }: any) {
           <AppButton title={isLoading ? 'Criando...' : 'Criar admin geral'} onPress={handleSignUp} disabled={!canSubmit} />
 
           <Pressable style={styles.linkButton} onPress={() => navigation.navigate('Login')} disabled={isLoading}>
-            <Text style={styles.linkText}>Ja tenho acesso</Text>
+            <Text style={styles.linkText}>Já tenho acesso</Text>
           </Pressable>
         </View>
       </ScrollView>

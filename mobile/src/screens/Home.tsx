@@ -12,6 +12,8 @@ import type { FeatureKey } from '../context/AuthContext';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
 import { MANAGEMENT_ROUTES } from '../navigation/routeRoles';
+import { ResidentHome } from './home/ResidentHome';
+import { ManagerHome } from './home/ManagerHome';
 
 // No app nativo, rotas de gestão nem existem no Stack (ver ManagementStack
 // .web/.native.tsx) — tocar num atalho dessas mostra este aviso em vez de
@@ -117,6 +119,7 @@ const buildMenuStructure = (): MenuItem[] => [
 const modules = buildMenuStructure();
 
 const formatCurrency = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const greetingForHour = () => { const hour = new Date().getHours(); return hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite'; };
 
 const roleLabels: Record<string, string> = {
   admin_geral: 'Administrador geral',
@@ -135,6 +138,16 @@ const tourSteps: TourStep[] = [
   { key: 'profile', title: 'Seu perfil', description: 'Mostra o cargo com que você está logado (Síndico, Subsíndico, Proprietário, Inquilino ou Administrador geral) — é esse cargo que define quais áreas aparecem no "Acesso rápido" logo abaixo e o que você pode fazer em cada uma. Síndico/subsíndico também veem, ao lado, o plano de cobrança da plataforma contratado pelo condomínio e quanto o mês está dando até agora — inclusive quantos usuários excedentes e o quanto isso já soma, quando o plano é do tipo "base + incluídos" (quando a funcionalidade "Painel de usuários" está ativa). Toque no card pra ver o detalhamento completo.' },
   { key: 'quickAccess', title: 'Acesso rápido', description: 'Grade com as áreas liberadas pra você. Ela é montada automaticamente: primeiro filtra pelo seu cargo (ex.: só Síndico/Subsíndico veem "Prestação de contas" com formulário de lançamento, moradores só veem consulta) e depois pelas funcionalidades que o Administrador geral ativou pra esse condomínio em Condomínios > Funcionalidades ativas. Um card com "EM BREVE" ainda não tem tela associada.' },
   { key: 'security', title: 'Ambiente seguro', description: 'Lembrete de que os dados e credenciais do condomínio só são exibidos pra perfis autorizados — cada rota do menu é validada tanto na tela quanto na API antes de mostrar qualquer informação.' },
+];
+const residentTourSteps: TourStep[] = [
+  { key: 'next', title: 'Seu boleto da vez', description: 'O boleto em aberto com o vencimento mais próximo (um vencido aparece primeiro), com o valor, quantos dias faltam e o que ele inclui. "Copiar código Pix" copia o Pix Copia e Cola para você colar no app do seu banco; "PDF" abre o boleto para imprimir. Sem nada em aberto, o cartão mostra "Tudo em dia" e o último pagamento.' },
+  { key: 'attention', title: 'Precisa da sua atenção', description: 'Tudo o que espera uma ação sua, num só lugar: proposta de acordo, notificação de infração para dar ciência, enquete que você ainda não votou, suas reservas e os avisos novos. Toque em uma linha para abrir a tela correspondente.' },
+  { key: 'shortcuts', title: 'Atalhos', description: 'Acesso direto às outras áreas liberadas para moradores no seu condomínio. Boletos, avisos e reservas também ficam na barra de baixo.' },
+];
+const managerHomeTourSteps: TourStep[] = [
+  { key: 'kpis', title: 'Números do mês', description: 'Quanto já foi recebido no mês (e a fatia do total emitido), quanto está vencido somando todo o histórico e quanto ainda está em aberto no prazo. Aparecem quando as funcionalidades Painel e Gestão de cobranças estão ativas.' },
+  { key: 'pending', title: 'Pendências', description: 'A fila do que espera a gestão: reservas para aprovar, relatos abertos ou com mensagem nova, notificações em defesa, ocorrências abertas, pedidos de nada consta e boletos vencidos. "Aprovar" confirma a reserva aqui mesmo, depois de uma confirmação; os demais botões abrem a tela onde o item é resolvido.' },
+  { key: 'chart', title: 'Arrecadação por mês', description: 'Recebido em cada uma das últimas quatro referências, sobre o total emitido (barra cinza). O mês atual aparece mais claro porque ainda está em andamento.' },
 ];
 export default function Home({ navigation }: any) {
   const { user, userToken, signOut, condominiumFeatures } = useContext(AuthContext);
@@ -164,7 +177,10 @@ export default function Home({ navigation }: any) {
 
   const admin = user?.role === 'admin_geral';
   const manager = user?.role === 'sindico' || user?.role === 'subsindico';
+  const resident = user?.role === 'proprietario' || user?.role === 'inquilino';
   const initials = (user?.username || 'U').slice(0, 2).toUpperCase();
+  const firstName = (user?.fullName || '').trim().split(/\s+/)[0] || user?.username || '';
+  const todayLabel = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
 
   // condominiumFeatures === null (admin_geral ou ainda carregando) nunca
   // esconde nada por funcionalidade, só o papel filtra nesse caso.
@@ -275,14 +291,21 @@ export default function Home({ navigation }: any) {
     <><ScrollView ref={scrollRef} contentContainerStyle={[styles.content, (tablet || !desktop) && styles.contentMobile]}>
       <View style={[styles.welcome, tablet && { paddingHorizontal: 20 }, !desktop && { paddingHorizontal: 16 }]}>
         <View style={styles.headerRow}>
-          <View style={styles.grow}><Text style={styles.eyebrow}>VISÃO GERAL</Text><Text style={[styles.welcomeTitle, tablet && { fontSize: 24 }, !desktop && { fontSize: 22 }]}>Olá, {user?.username}! 👋</Text></View>
-          <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
+          <View style={styles.grow}>
+            <Text style={[styles.welcomeTitle, tablet && { fontSize: 24 }, !desktop && { fontSize: 22 }]}>{admin ? `Olá, ${firstName}!` : manager ? `${greetingForHour()}, ${firstName}` : `Olá, ${firstName}`}</Text>
+          </View>
+          <Pressable onPress={openTour} accessibilityRole="button" accessibilityLabel="Tour desta tela" style={styles.tourIconButton}><Text style={styles.tourIconText}>?</Text></Pressable>
         </View>
         <Text style={[styles.welcomeText, tablet && { fontSize: 14 }, !desktop && { fontSize: 13 }]}>
-          {admin ? 'Acompanhe e administre os condomínios da Administração geral.' : user?.role === 'sindico' || user?.role === 'subsindico' ? 'Acompanhe e administre o seu condomínio' : 'Acompanhe as informações do seu condomínio'}
-          {!admin && <Text style={styles.condominiumHighlight}> "{condominiumName || 'Carregando...'}"</Text>}
-          {!admin && '.'}
+          {admin ? 'Acompanhe e administre os condomínios da Administração geral.' : `${todayLabel.charAt(0).toUpperCase()}${todayLabel.slice(1)} · ${condominiumName || 'Carregando…'}`}
         </Text>
+        {manager && planUsage?.hasPlan && planUsage.planName && condominiumFeatures?.painel_usuarios === true ? (
+          <Pressable onPress={() => goToRoute(navigation, 'UserStats')} style={styles.planChip}>
+            <Text style={styles.planChipText}>
+              Plano {planUsage.planName}{planUsage.estimatedMonthlyAmountCents != null ? ` · até o momento ${formatCurrency(planUsage.estimatedMonthlyAmountCents)}` : ''}{(planUsage.overageUnits || 0) > 0 ? ` · ${planUsage.overageUnits} excedente${planUsage.overageUnits === 1 ? '' : 's'}` : ''} ›
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {manager && restriction?.restricted ? (
@@ -338,6 +361,19 @@ export default function Home({ navigation }: any) {
         </View>
       ) : null}
 
+      {resident ? (
+        <View style={[tablet && { paddingHorizontal: 20 }, !desktop && { paddingHorizontal: 16 }]}>
+          <ResidentHome navigation={navigation} registerSection={registerSection} isActive={isActive} />
+        </View>
+      ) : null}
+
+      {manager ? (
+        <View style={[tablet && { paddingHorizontal: 20 }, !desktop && { paddingHorizontal: 16 }]}>
+          <ManagerHome navigation={navigation} registerSection={registerSection} isActive={isActive} desktop={desktop} />
+        </View>
+      ) : null}
+
+      {admin ? <>
       <View ref={registerSection('profile')} style={[isActive('profile') && styles.tourHighlight]}>
       <View style={[styles.statGrid, tablet && { paddingHorizontal: 20, gap: 12 }, !desktop && { paddingHorizontal: 16, gap: 10 }, (tablet || !desktop) && styles.horizontalCards]}>
         <View style={[styles.stat, styles.profileStat, tablet && { minHeight: 140, padding: 16 }, !desktop && { minHeight: 120, padding: 14 }]}><View style={styles.statHead}><View style={[styles.statIcon, { backgroundColor: '#fff3de' }]}><Text style={{ color: colors.amber }}>♙</Text></View><Text style={styles.statLabel}>SEU PERFIL</Text></View><Text numberOfLines={1} style={[styles.statValue, styles.roleValue, tablet && { fontSize: 18 }, !desktop && { fontSize: 16 }]}>{roleLabels[user?.role || ''] || 'Usuário'}</Text><Text style={styles.statDescription}>acesso personalizado por permissão</Text></View>
@@ -413,17 +449,20 @@ export default function Home({ navigation }: any) {
       <View ref={registerSection('security')} style={[isActive('security') && styles.tourHighlight]}>
       <View style={[styles.securityCard, tablet && { marginHorizontal: 20, padding: 16 }, !desktop && { marginHorizontal: 16, padding: 14 }]}><View style={styles.securityIcon}><Text>🔒</Text></View><View style={styles.grow}><Text style={[styles.securityTitle, tablet && { fontSize: 14 }, !desktop && { fontSize: 13 }]}>Ambiente seguro</Text><Text style={[styles.securityText, tablet && { fontSize: 13 }, !desktop && { fontSize: 12 }]}>Seus dados e credenciais são protegidos e exibidos somente para perfis autorizados.</Text></View></View>
       </View>
+      </> : null}
       {(tablet || !desktop) ? <Pressable onPress={() => signOut()} style={[styles.mobileExit, tablet && { marginHorizontal: 20 }, !desktop && { marginHorizontal: 16 }]}><Text style={styles.mobileExitText}>Sair da conta</Text></Pressable> : null}
     </ScrollView>
-    <FeatureTour steps={manager ? tourSteps.map(step => step.key === 'profile' ? { ...step, description: step.description + MANAGER_INVOICE_TOUR } : step) : tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} /></>
+    <FeatureTour steps={resident ? residentTourSteps : manager ? managerHomeTourSteps.map(step => step.key === 'pending' ? { ...step, description: step.description + MANAGER_INVOICE_TOUR } : step) : tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} /></>
   );
 }
 
 const styles = StyleSheet.create({
   grow: { flex: 1 },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
-  tourButton: { borderWidth: 1, borderColor: colors.primary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.softBlue },
-  tourButtonText: { color: colors.primaryDark, fontWeight: '900', fontSize: 13 },
+  tourIconButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  tourIconText: { color: colors.primaryDark, fontWeight: '900', fontSize: 16 },
+  planChip: { alignSelf: 'flex-start', marginTop: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  planChipText: { color: colors.primaryDark, fontWeight: '800', fontSize: 13 },
   tourHighlight: { borderWidth: 2, borderColor: colors.primary, borderRadius: 16, padding: 6, margin: -6 },
   content: { width: '100%', alignSelf: 'center', paddingHorizontal: 0, paddingTop: 0, paddingBottom: 60 },
   contentMobile: { paddingHorizontal: 0, paddingTop: 0, paddingBottom: 100 },

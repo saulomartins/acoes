@@ -165,7 +165,7 @@ export default function PlatformRevenue() {
     <ScrollView ref={scrollRef} contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} />}>
       <View style={styles.headerRow}>
         <View style={styles.grow}>
-          <Text style={styles.eyebrow}>Modelo de negocio</Text>
+          <Text style={styles.eyebrow}>Modelo de negócio</Text>
           <Text style={styles.title}>Faturamento da plataforma</Text>
           <Text style={styles.subtitle}>Veja quanto cada condominio geraria por mes com o plano vinculado, com base nos usuários ativos cadastrados. Condomínios suspensos ou cancelados não entram na projeção.</Text>
         </View>

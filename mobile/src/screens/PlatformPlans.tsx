@@ -202,7 +202,7 @@ export default function PlatformPlans() {
     <ScrollView ref={scrollRef} contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} />}>
       <View style={styles.headerRow}>
         <View style={styles.grow}>
-          <Text style={styles.eyebrow}>Modelo de negocio</Text>
+          <Text style={styles.eyebrow}>Modelo de negócio</Text>
           <Text style={styles.title}>Planos da plataforma</Text>
           <Text style={styles.subtitle}>Cadastre como a plataforma cobra cada condominio: por usuário ativo, por faixa fechada, ou base mensal com usuários incluídos e excedente.</Text>
         </View>
@@ -300,7 +300,7 @@ export default function PlatformPlans() {
           <AppButton title={editingId ? 'Salvar plano' : 'Cadastrar plano'} onPress={save} disabled={isLoading || !isValid} />
           {editingId ? (
             <Pressable onPress={resetForm} style={styles.cancelButton}>
-              <Text style={styles.cancelText}>Cancelar edicao</Text>
+              <Text style={styles.cancelText}>Cancelar edição</Text>
             </Pressable>
           ) : null}
         </View>

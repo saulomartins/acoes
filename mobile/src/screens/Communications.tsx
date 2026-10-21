@@ -256,7 +256,7 @@ export default function Communications({ navigation }: any) {
         </View>
         {pushStatus !== 'registered' ? (
           <View style={styles.pushWarning}>
-            <Text style={styles.pushWarningTitle}>Notificacoes deste aparelho: {pushStatus === 'registering' ? 'registrando...' : 'nao ativas'}</Text>
+            <Text style={styles.pushWarningTitle}>Notificações deste aparelho: {pushStatus === 'registering' ? 'registrando...' : 'não ativas'}</Text>
             <Text style={styles.pushWarningText}>{pushError || 'Aguarde o registro do aparelho para receber avisos nativos.'}</Text>
           </View>
         ) : null}

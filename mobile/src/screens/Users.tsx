@@ -1128,9 +1128,9 @@ export default function Users({ navigation }: any) {
                 <Text style={styles.badge}>{roleLabel(item.role)}</Text>
               </View>
               <Text style={styles.cardLine}>@{item.username}</Text>
-              <Text style={styles.cardLine}>CPF: {item.cpf ? formatCpf(item.cpf) : 'nao informado'}</Text>
+              <Text style={styles.cardLine}>CPF: {item.cpf ? formatCpf(item.cpf) : 'não informado'}</Text>
               {user?.role === 'admin_geral' ? <Text style={styles.cardCondominium}>{condominiumName(item.condominium_id)}</Text> : null}
-              <Text style={styles.cardLine}>Unidade: {item.unit || 'nao informada'}</Text>
+              <Text style={styles.cardLine}>Unidade: {item.unit || 'não informada'}</Text>
               {item.billing_exempt ? <Text style={styles.exemptBadge}>Isento de boleto</Text> : null}
               {item.role === 'proprietario' && item.unit_rented_to_tenant ? <Text style={styles.exemptBadge}>Não mora na unidade</Text> : null}
               {!item.billing_exempt ? <Text style={styles.cardLine}>Vencimento preferido: dia {item.preferred_due_day || 10}</Text> : null}

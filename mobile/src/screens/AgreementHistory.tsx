@@ -216,7 +216,7 @@ export default function AgreementHistory({ navigation }: any) {
         </View>
       </Panel></View>
 
-      {error && <Text style={styles.error}>{error}</Text>}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <View ref={registerSection('agreements')} style={[isActive('agreements')&&styles.tourHighlight]}>
       {loading && !agreements.length ? (

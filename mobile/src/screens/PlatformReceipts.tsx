@@ -239,7 +239,7 @@ export default function PlatformReceipts() {
     <ScrollView ref={scrollRef} contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} />}>
       <View style={styles.headerRow}>
         <View style={styles.grow}>
-          <Text style={styles.eyebrow}>Modelo de negocio</Text>
+          <Text style={styles.eyebrow}>Modelo de negócio</Text>
           <Text style={styles.title}>Recebimentos da plataforma</Text>
           <Text style={styles.subtitle}>Acompanhe o que cada condomínio já pagou, o que está em aberto e confirme pagamentos.</Text>
         </View>

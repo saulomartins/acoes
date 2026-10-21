@@ -382,8 +382,8 @@ export default function Condominiums({ navigation }: any) {
     >
       <View style={styles.headerRow}>
         <View style={styles.grow}>
-          <Text style={styles.eyebrow}>Gestao</Text>
-          <Text style={styles.title}>Configuracao inicial</Text>
+          <Text style={styles.eyebrow}>Gestão</Text>
+          <Text style={styles.title}>Configuração inicial</Text>
           <Text style={styles.subtitle}>Cadastre os condomínios e depois defina os gestores responsáveis.</Text>
         </View>
         <Pressable onPress={openTour} style={styles.tourButton}><Text style={styles.tourButtonText}>? Tour desta tela</Text></Pressable>
@@ -543,7 +543,7 @@ export default function Condominiums({ navigation }: any) {
       </View>
 
       {items.length === 0 ? (
-        <EmptyState title="Nenhum condominio ainda" description="Quando voce cadastrar, ele aparecera nesta lista." />
+        <EmptyState title="Nenhum condomínio ainda" description="Quando voce cadastrar, ele aparecera nesta lista." />
       ) : (
         <CardGrid columns={{ mobile: 1, tablet: 2, desktop: 3 }}>
           {items.map((item) => (
@@ -563,7 +563,7 @@ export default function Condominiums({ navigation }: any) {
                 </View>
                 <Text style={styles.cardId}>ID: {item.id}</Text>
                 <Text style={styles.cardLine}>{item.cnpj ? formatCnpj(item.cnpj) : 'CNPJ não informado'}</Text>
-                <Text style={styles.cardLine}>{item.address || 'Endereco nao informado'}</Text>
+                <Text style={styles.cardLine}>{item.address || 'Endereço não informado'}</Text>
                 <Text style={styles.cardLine}>{item.phone ? formatPhone(item.phone) : 'Telefone/WhatsApp não informado'}</Text>
                 <Text style={styles.cardLine}>{item.email || 'E-mail não informado'}</Text>
               </View>
