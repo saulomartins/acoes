@@ -1329,3 +1329,21 @@ column, update, set default, set not null).
 - Troca de banco: boletos não guardam de qual configuração bancária vieram, o
   PDF do boleto não é armazenado e o vínculo "a partir de um período" apaga
   boletos anteriores. Proposta discutida em 05/10, ainda não implementada.
+
+## Publicação de 21/10/2026 — novo Início, Boletos e menu; Android 1.7.3
+
+Branch `feat/ui-redesign-2026-10-21` (commits `75be094`, `e84a6f4`, `dbf9e43`), sobre
+`feat/cobranca-plataforma-2026-09-26` — os commits de 18–19/10 dessa base foram
+publicados junto, com autorização do usuário.
+
+- Web: deployment Cloudflare `27f4b132.lar-em-dia.pages.dev`, bundle
+  `AppEntry-4e48ee06254908c31c0807cbf03b0e3d.js`; `gestaolaremdia.com` e `/login`
+  HTTP 200, login sem erro de JS em 1440 e 390 px.
+- API: **não publicada** — `railway up` respondeu "Deploys have been paused
+  temporarily" (pausa do Railway) e depois "Unauthorized" (sessão da CLI expirou).
+  Produção segue no deployment `8950a46a-c7c1-4f08-b71c-e576557d6cc1` (19/10),
+  compatível com a web nova (nenhum endpoint novo). Pendente: `railway login`,
+  `railway up` e o passo 3 (schema de 18–19/10, só aditivo).
+- Android: AAB 1.7.3 (versionCode 47), build EAS
+  `4aaf87eb-263b-40db-a8d3-aab72058a21b`, FINISHED. Envio à Play Store pelo
+  usuário. `blockedPermissions` de READ_MEDIA_* mantido.
