@@ -147,7 +147,7 @@ const residentTourSteps: TourStep[] = [
 const managerHomeTourSteps: TourStep[] = [
   { key: 'kpis', title: 'Números do mês', description: 'Quanto já foi recebido no mês (e a fatia do total emitido), quanto está vencido somando todo o histórico e quanto ainda está em aberto no prazo. Aparecem quando as funcionalidades Painel e Gestão de cobranças estão ativas.' },
   { key: 'pending', title: 'Pendências', description: 'A fila do que espera a gestão: reservas para aprovar, relatos abertos ou com mensagem nova, notificações em defesa, ocorrências abertas, pedidos de nada consta e boletos vencidos. "Aprovar" confirma a reserva aqui mesmo, depois de uma confirmação; os demais botões abrem a tela onde o item é resolvido.' },
-  { key: 'chart', title: 'Arrecadação por mês', description: 'Recebido em cada uma das últimas quatro referências, sobre o total emitido (barra cinza). O mês atual aparece mais claro porque ainda está em andamento.' },
+  { key: 'chart', title: 'Arrecadação por mês', description: 'Cada barra é o total emitido na referência: verde é o que já foi pago, azul o que está em aberto ainda no prazo e vermelho o que venceu sem pagamento. O número acima da barra é o valor recebido.' },
 ];
 export default function Home({ navigation }: any) {
   const { user, userToken, signOut, condominiumFeatures } = useContext(AuthContext);

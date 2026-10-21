@@ -157,23 +157,33 @@ export function ManagerHome({ navigation, registerSection, isActive, desktop }: 
         {finance && months.length ? (
           <View ref={registerSection('chart')} style={[styles.card, styles.chartCard, isActive('chart') && styles.tourHighlight]}>
             <Text style={styles.cardTitle}>Arrecadação por mês</Text>
-            <Text style={styles.cardMeta}>Recebido sobre o total emitido de cada referência</Text>
-            <View accessibilityLabel={`Recebido por mês: ${months.map(item => `${monthShort(item.month)} ${money(item.summary.paid.totalCents)}`).join('; ')}`} style={styles.chart}>
+            <Text style={styles.cardMeta}>Situação do total emitido em cada referência</Text>
+            <View accessibilityLabel={`Por mês: ${months.map(item => `${monthShort(item.month)}: pago ${money(item.summary.paid.totalCents)}, em aberto ${money(item.summary.open.totalCents + item.summary.pendingBank.totalCents)}, vencido ${money(item.summary.overdue.totalCents)}`).join('; ')}`} style={styles.chart}>
               {months.map(item => {
                 const total = emitted(item.summary);
                 const isCurrent = item.month === monthStart(0);
+                // Barra empilhada: pago embaixo, em aberto (no prazo) no meio e
+                // vencido em cima. Tudo pago = barra inteira verde.
+                const share = (cents: number) => `${total > 0 ? (cents / total) * 100 : 0}%` as const;
                 return (
                   <View key={item.month} style={styles.barCol}>
                     <Text style={styles.barValue}>{compact(item.summary.paid.totalCents)}</Text>
                     <View style={[styles.barTrack, { height: Math.max(8, Math.round((total / chartMax) * 150)) }]}>
-                      <View style={[styles.barFill, isCurrent && styles.barFillCurrent, { height: `${total > 0 ? Math.round((item.summary.paid.totalCents / total) * 100) : 0}%` }]} />
+                      <View style={[styles.barSegment, styles.barOverdue, { height: share(item.summary.overdue.totalCents) }]} />
+                      <View style={[styles.barSegment, styles.barOpen, { height: share(item.summary.open.totalCents + item.summary.pendingBank.totalCents) }]} />
+                      <View style={[styles.barSegment, styles.barPaid, { height: share(item.summary.paid.totalCents) }]} />
                     </View>
                     <Text style={styles.barLabel}>{monthShort(item.month)}{isCurrent ? '*' : ''}</Text>
                   </View>
                 );
               })}
             </View>
-            <Text style={styles.cardMeta}>* Mês em andamento. Barra cinza = total emitido.</Text>
+            <View style={styles.legend}>
+              <View style={styles.legendItem}><View style={[styles.legendDot, styles.barPaid]} /><Text style={styles.cardMeta}>Pago</Text></View>
+              <View style={styles.legendItem}><View style={[styles.legendDot, styles.barOpen]} /><Text style={styles.cardMeta}>Em aberto (no prazo)</Text></View>
+              <View style={styles.legendItem}><View style={[styles.legendDot, styles.barOverdue]} /><Text style={styles.cardMeta}>Vencido</Text></View>
+            </View>
+            <Text style={styles.cardMeta}>Valor acima da barra = recebido. * Mês em andamento.</Text>
             <Pressable onPress={() => navigation.navigate('Dashboard')}><Text style={styles.link}>Abrir painel financeiro ›</Text></Pressable>
           </View>
         ) : null}
@@ -219,8 +229,13 @@ const styles = StyleSheet.create({
   barCol: { flex: 1, alignItems: 'center', gap: 6, justifyContent: 'flex-end' },
   barValue: { color: colors.ink, fontSize: 12, fontWeight: '800' },
   barTrack: { width: '100%', maxWidth: 54, borderRadius: 8, backgroundColor: '#eef1f6', justifyContent: 'flex-end', overflow: 'hidden' },
-  barFill: { width: '100%', borderRadius: 8, backgroundColor: colors.primary },
-  barFillCurrent: { backgroundColor: '#8fb2e6' },
+  barSegment: { width: '100%' },
+  barPaid: { backgroundColor: colors.green },
+  barOpen: { backgroundColor: colors.primary },
+  barOverdue: { backgroundColor: colors.red },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 4 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendDot: { width: 10, height: 10, borderRadius: 3 },
   barLabel: { color: '#5b6577', fontSize: 13, fontWeight: '700', textTransform: 'capitalize' },
   link: { color: colors.primaryDark, fontSize: 14, fontWeight: '900', marginTop: 8 },
 });
