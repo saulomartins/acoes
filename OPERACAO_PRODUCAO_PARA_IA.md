@@ -1352,3 +1352,13 @@ publicados junto, com autorização do usuário.
   (vermelho). Deployment `f484b3e9.lar-em-dia.pages.dev`, bundle
   `AppEntry-4604f411c6bf994b115e6706ecdb2f51.js`, servido em `gestaolaremdia.com`.
   Só web — não exige versão nova do app.
+- Aviso de nova versão do app (commit `d564aaa`): tabela `app_store_versions`
+  (schema.sql, **exige o passo 3** depois do deploy da API), rota pública
+  `GET /app-version/:android|ios` e `GET/PUT /app-version` (admin_geral), tela
+  web "Versões do app" (menu Plataforma) e `AppUpdateNotice` no app nativo.
+  Web publicada (`69f6c3e6.lar-em-dia.pages.dev`, bundle
+  `AppEntry-9db7e9465ce6f2465d51be2ece5b05de.js`); a tela só funciona depois do
+  deploy da API + passo 3. O aviso no celular só existe a partir do binário que
+  incluir esse commit. Uso: depois que a versão estiver disponível na loja,
+  informar o número em "Versões do app"; "versão mínima" só quando a antiga
+  não puder mais ser usada (aviso que não fecha).
