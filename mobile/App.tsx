@@ -4,6 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
 import { AuthProvider } from './src/context/AuthContext';
 import BiometricGate from './src/ui/BiometricLock';
+import AppUpdateNotice from './src/ui/AppUpdateNotice';
 
 export default function App() {
   // Print/gravação de tela liberados no app inteiro (decisão explícita,
@@ -24,6 +25,7 @@ export default function App() {
         <BiometricGate>
           <AppNavigator />
         </BiometricGate>
+        <AppUpdateNotice />
       </AuthProvider>
     </SafeAreaProvider>
   );
