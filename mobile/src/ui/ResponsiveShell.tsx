@@ -39,7 +39,6 @@ const items: Item[] = [
   { label: 'Faturamento da plataforma', route: 'PlatformRevenue', symbol: '$', roles: ['admin_geral'] },
   { label: 'Recebimentos da plataforma', route: 'PlatformReceipts', symbol: '✓', roles: ['admin_geral'] },
   { label: 'Auditoria', route: 'AuditLog', symbol: '🛡', roles: ['admin_geral'] },
-  { label: 'Versões do app', route: 'AppVersions', symbol: '📲', roles: ['admin_geral'] },
   { label: 'Google Drive', route: 'GoogleDriveIntegrationGuide', symbol: '📁', roles: ['admin_geral'] },
   { label: 'Suporte', route: 'Support', symbol: '🛠', roles: ['admin_geral', 'sindico', 'subsindico'], feature: 'pessoas' },
   { label: 'Tipologias', route: 'UnitTypes', symbol: '▧', roles: ['sindico', 'subsindico'], feature: 'tipologias' },
@@ -80,7 +79,7 @@ const sections: Array<{ key: string; label: string; routes: string[] }> = [
   { key: 'records', label: 'Cadastros', routes: ['Users', 'Units', 'UnitTypes', 'Support'] },
   { key: 'community', label: 'Comunidade', routes: ['Communications', 'Reports', 'Polls', 'SpaceReservations'] },
   { key: 'regulation', label: 'Regimento', routes: ['Regulation', 'Occurrences', 'InfractionNotices', 'InfractionNoticeIssue', 'RegulationArticles'] },
-  { key: 'platform', label: 'Plataforma', routes: ['Condominiums', 'PlatformPlans', 'PlatformRevenue', 'PlatformReceipts', 'AuditLog', 'AppVersions', 'GoogleDriveIntegrationGuide'] },
+  { key: 'platform', label: 'Plataforma', routes: ['Condominiums', 'PlatformPlans', 'PlatformRevenue', 'PlatformReceipts', 'AuditLog', 'GoogleDriveIntegrationGuide'] },
   { key: 'banks', label: 'Bancos', routes: ['Banks', 'BankConfigurations', 'BankLink', 'BankIntegrationGuide'] },
 ];
 // Busca do "Ir para" ignora acento e caixa: "notificacao" acha "Notificações".

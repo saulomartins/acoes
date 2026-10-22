@@ -1352,13 +1352,13 @@ publicados junto, com autorização do usuário.
   (vermelho). Deployment `f484b3e9.lar-em-dia.pages.dev`, bundle
   `AppEntry-4604f411c6bf994b115e6706ecdb2f51.js`, servido em `gestaolaremdia.com`.
   Só web — não exige versão nova do app.
-- Aviso de nova versão do app (commit `d564aaa`): tabela `app_store_versions`
-  (schema.sql, **exige o passo 3** depois do deploy da API), rota pública
-  `GET /app-version/:android|ios` e `GET/PUT /app-version` (admin_geral), tela
-  web "Versões do app" (menu Plataforma) e `AppUpdateNotice` no app nativo.
-  Web publicada (`69f6c3e6.lar-em-dia.pages.dev`, bundle
-  `AppEntry-9db7e9465ce6f2465d51be2ece5b05de.js`); a tela só funciona depois do
-  deploy da API + passo 3. O aviso no celular só existe a partir do binário que
-  incluir esse commit. Uso: depois que a versão estiver disponível na loja,
-  informar o número em "Versões do app"; "versão mínima" só quando a antiga
-  não puder mais ser usada (aviso que não fecha).
+- Aviso de nova versão do app: a primeira versão (commit `d564aaa`, versão
+  informada à mão pelo admin_geral em "Versões do app", com tabela
+  `app_store_versions`) foi **desfeita** a pedido do usuário — ele quer que o
+  app descubra sozinho. A tabela nunca chegou à produção (a API não foi
+  publicada nesse intervalo). Substituída por `mobile/src/ui/AppUpdateNotice.tsx`,
+  sem API nem configuração: Android pergunta ao Google Play
+  (`expo-in-app-updates@0.12.0`, In-App Updates; só funciona em app instalado
+  pela Play Store) e iPhone consulta `itunes.apple.com/lookup?bundleId=...`
+  (começa a funcionar quando o app estiver na App Store). "Agora não" adia por
+  3 dias a mesma versão. Exige binário novo (módulo nativo).

@@ -2,44 +2,81 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Linking, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
-import { API_BASE_URL } from '../api/client';
-import { compareVersions } from '../utils/appVersion';
 import { AppDialog } from './components';
 
-// Aviso de versão nova na Play Store / App Store (só Android/iOS). Ao abrir o
-// app e ao voltar para ele, consulta GET /app-version/:plataforma e compara
-// com a versão instalada:
-// - abaixo da versão mínima: atualização obrigatória, o aviso não fecha;
-// - abaixo da mais recente: "Nova versão disponível", com "Agora não" — o
-//   mesmo aviso volta só depois de REMIND_AFTER_MS.
-// Falha de rede nunca bloqueia o app: sem resposta, nenhum aviso.
+// Aviso de versão nova nas lojas, sem nenhuma configuração manual: ao abrir o
+// app e ao voltar para ele, o próprio app pergunta à loja.
+// - Android: Google Play (In-App Updates, via expo-in-app-updates). O
+//   "Atualizar" abre a tela oficial do Google que baixa e instala sem sair do
+//   app. Só funciona em app instalado pela Play Store.
+// - iPhone: consulta pública da App Store pelo bundle id
+//   (itunes.apple.com/lookup); "Atualizar" abre a página do app na loja.
+// "Agora não" adia o aviso da mesma versão por REMIND_AFTER_MS. Qualquer falha
+// (sem internet, Expo Go, app ainda fora da loja) só significa nenhum aviso.
 
-type StoreVersion = { latestVersion: string | null; minVersion: string | null; storeUrl: string | null; releaseNotes: string | null };
-
+const BUNDLE_ID = 'com.appcond.condominio';
 const DISMISS_KEY = 'appUpdateDismissed';
 const REMIND_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
-const ANDROID_PACKAGE = 'com.appcond.condominio';
 
-// Com runtimeVersion = appVersion, uma atualização OTA só chega para a mesma
-// versão do binário, então a versão do expoConfig é a versão instalada da loja.
-const installedVersion = Constants.expoConfig?.version || null;
+const installedVersion = Constants.expoConfig?.version || '';
 
-const openStore = async (storeUrl: string) => {
-  // No Android, abre direto o app da Play Store; se não der, o link https.
-  if (Platform.OS === 'android' && storeUrl.includes('play.google.com')) {
-    try {
-      await Linking.openURL(`market://details?id=${ANDROID_PACKAGE}`);
-      return;
-    } catch {
-      // segue para o link https
-    }
+// "1.7.10" > "1.7.9": compara número a número, nunca como texto.
+const isNewer = (store: string, installed: string) => {
+  const a = store.split('.').map(Number);
+  const b = installed.split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
   }
-  await Linking.openURL(storeUrl).catch(() => undefined);
+  return false;
+};
+
+// O módulo nativo não existe no Expo Go nem na web: carregado sob demanda para
+// a falta dele não derrubar o app.
+const playUpdates = () => {
+  try {
+    return require('expo-in-app-updates') as typeof import('expo-in-app-updates');
+  } catch {
+    return null;
+  }
+};
+
+type Available = { storeVersion: string; label: string; update: () => Promise<void> };
+
+const checkAndroid = async (): Promise<Available | null> => {
+  const module = playUpdates();
+  if (!module) return null;
+  const result = await module.checkForUpdate();
+  if (!result.updateAvailable) return null;
+  return {
+    storeVersion: result.storeVersion,
+    label: 'na Play Store',
+    update: async () => {
+      if (result.immediateAllowed || result.flexibleAllowed) {
+        const started = await module.startUpdate(Boolean(result.immediateAllowed)).catch(() => false);
+        if (started) return;
+      }
+      await Linking.openURL(`market://details?id=${BUNDLE_ID}`)
+        .catch(() => Linking.openURL(`https://play.google.com/store/apps/details?id=${BUNDLE_ID}`))
+        .catch(() => undefined);
+    },
+  };
+};
+
+const checkIos = async (): Promise<Available | null> => {
+  const response = await fetch(`https://itunes.apple.com/lookup?bundleId=${BUNDLE_ID}&country=br&_=${Date.now()}`);
+  if (!response.ok) return null;
+  const app = (await response.json())?.results?.[0];
+  if (!app?.version || !app.trackViewUrl || !isNewer(app.version, installedVersion)) return null;
+  return {
+    storeVersion: app.version,
+    label: `${app.version} na App Store`,
+    update: async () => { await Linking.openURL(app.trackViewUrl).catch(() => undefined); },
+  };
 };
 
 export default function AppUpdateNotice() {
-  const [notice, setNotice] = useState<{ kind: 'required' | 'available'; version: StoreVersion } | null>(null);
+  const [available, setAvailable] = useState<Available | null>(null);
   const lastCheck = useRef(0);
 
   const check = useCallback(async () => {
@@ -47,21 +84,14 @@ export default function AppUpdateNotice() {
     if (Date.now() - lastCheck.current < CHECK_EVERY_MS) return;
     lastCheck.current = Date.now();
     try {
-      const response = await fetch(`${API_BASE_URL}/app-version/${Platform.OS}`);
-      if (!response.ok) return;
-      const version = (await response.json()) as StoreVersion;
-      if (!version.storeUrl || !version.latestVersion) { setNotice(null); return; }
-      if (version.minVersion && compareVersions(installedVersion, version.minVersion) < 0) {
-        setNotice({ kind: 'required', version });
-        return;
-      }
-      if (compareVersions(installedVersion, version.latestVersion) >= 0) { setNotice(null); return; }
+      const found = Platform.OS === 'android' ? await checkAndroid() : await checkIos();
+      if (!found) { setAvailable(null); return; }
       const dismissed = await SecureStore.getItemAsync(DISMISS_KEY).catch(() => null);
       const [dismissedVersion, dismissedAt] = (dismissed || '').split('|');
-      if (dismissedVersion === version.latestVersion && Date.now() - Number(dismissedAt || 0) < REMIND_AFTER_MS) return;
-      setNotice({ kind: 'available', version });
+      if (dismissedVersion === found.storeVersion && Date.now() - Number(dismissedAt || 0) < REMIND_AFTER_MS) return;
+      setAvailable(found);
     } catch {
-      // sem conexão: tenta de novo na próxima vez que o app voltar ao primeiro plano
+      // sem conexão ou loja indisponível: tenta de novo quando o app voltar ao primeiro plano
       lastCheck.current = 0;
     }
   }, []);
@@ -72,36 +102,21 @@ export default function AppUpdateNotice() {
     return () => subscription.remove();
   }, [check]);
 
-  if (!notice) return null;
-  const { kind, version } = notice;
-  const notes = version.releaseNotes ? `\n\nNovidades: ${version.releaseNotes}` : '';
-
-  if (kind === 'required') {
-    return (
-      <AppDialog
-        visible
-        title="Atualize o Lar em Dia"
-        message={`Esta versão do aplicativo (${installedVersion}) não é mais compatível. Atualize para a versão ${version.latestVersion} na loja para continuar usando.${notes}`}
-        confirmLabel="Atualizar agora"
-        onConfirm={() => { void openStore(version.storeUrl!); }}
-        onClose={() => undefined}
-      />
-    );
-  }
+  if (!available) return null;
 
   const later = () => {
-    void SecureStore.setItemAsync(DISMISS_KEY, `${version.latestVersion}|${Date.now()}`).catch(() => undefined);
-    setNotice(null);
+    void SecureStore.setItemAsync(DISMISS_KEY, `${available.storeVersion}|${Date.now()}`).catch(() => undefined);
+    setAvailable(null);
   };
 
   return (
     <AppDialog
       visible
       title="Nova versão disponível"
-      message={`A versão ${version.latestVersion} do Lar em Dia já está na loja. Você está usando a ${installedVersion}.${notes}`}
+      message={`Já existe uma versão mais nova do Lar em Dia ${available.label}. Atualize para ter as últimas melhorias e correções.`}
       confirmLabel="Atualizar"
       cancelLabel="Agora não"
-      onConfirm={() => { later(); void openStore(version.storeUrl!); }}
+      onConfirm={() => { const { update } = available; later(); void update(); }}
       onClose={later}
     />
   );

@@ -1638,22 +1638,3 @@ where o.id in (
                   and u.role = 'proprietario' and u.unit_rented_to_tenant)
   order by x.unit_id, x.started_at desc
 );
-
--- Versão do app nas lojas (2026-10-21). O app Android/iOS compara a versão
--- instalada com estas: abaixo de latest_version mostra "Nova versão
--- disponível" (pode adiar); abaixo de min_version a atualização é
--- obrigatória. Versão vazia = nenhum aviso. Editado pelo admin_geral em
--- "Versões do app".
-create table if not exists app_store_versions (
-  platform text primary key check (platform in ('android','ios')),
-  latest_version text,
-  min_version text,
-  store_url text,
-  release_notes text,
-  updated_at timestamptz not null default now(),
-  updated_by uuid references users(id) on delete set null
-);
-insert into app_store_versions (platform, store_url) values
-  ('android', 'https://play.google.com/store/apps/details?id=com.appcond.condominio'),
-  ('ios', null)
-on conflict (platform) do nothing;

@@ -32,6 +32,7 @@
     "expo-device": "~8.0.10",
     "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.24",
+    "expo-in-app-updates": "0.12.0",
     "expo-linear-gradient": "~15.0.8",
     "expo-local-authentication": "~17.0.9",
     "expo-notifications": "~0.32.17",
