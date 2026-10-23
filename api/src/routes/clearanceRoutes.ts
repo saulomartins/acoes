@@ -72,6 +72,14 @@ router.post('/', authorize('proprietario', 'inquilino'), asyncHandler(async (req
   const condominiumId = req.user!.condominiumId;
   if (!condominiumId) return res.status(400).json({ message: 'Condomínio obrigatório.' });
 
+  // Um pedido pendente por morador: evita avisar síndico/subsíndico de novo
+  // a cada toque repetido ou reenvio da requisição.
+  const open = await query(
+    `select 1 from clearance_certificates where condominium_id = $1 and requested_by = $2 and status = 'pending' limit 1`,
+    [condominiumId, req.user!.id],
+  );
+  if (open.rows.length) return res.status(409).json({ message: 'Você já tem um pedido aguardando emissão.' });
+
   const person = await query<any>(
     `select u.id, coalesce(u.full_name, u.username) as name, u.cpf, u.unit_id,
             coalesce(nullif(concat_ws(' - ', b.name, un.number), ''), un.number) as unit_label

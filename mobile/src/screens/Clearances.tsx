@@ -34,7 +34,9 @@ export default function Clearances() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [dialog, setDialog] = useState({ visible: false, title: '', message: '', tone: 'info' as 'info' | 'success' | 'error' });
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const show = (title: string, message: string, tone: 'info' | 'success' | 'error' = 'info') => setDialog({ visible: true, title, message, tone });
+  const pendingRequest = !manager && requests.some(item => item.status === 'pending');
 
   const load = useCallback(async (silent = false) => {
     if (!userToken) return;
@@ -52,8 +54,11 @@ export default function Clearances() {
   }, [userToken, manager]);
   useEffect(() => { load(); }, [load]);
 
+  // Só roda a partir da confirmação do diálogo: o pedido avisa síndico e
+  // subsíndico, então nunca sai sem o morador confirmar explicitamente.
   const request = async () => {
-    if (!userToken) return;
+    setConfirmOpen(false);
+    if (!userToken || busy) return;
     setBusy('request');
     try {
       const data = await apiRequest<{ request: ClearanceRequest; check: Check }>('/clearances', userToken, { method: 'POST', body: '{}' });
@@ -126,7 +131,7 @@ export default function Clearances() {
                 {check.blockers.length > 0 ? <View style={s.debtBox}><Text style={s.debtTitle}>Impede a emissão</Text>{renderDebtList(check.blockers, 'blocker')}</View> : null}
                 {check.pendings.length > 0 ? <View style={s.debtBox}><Text style={s.debtTitleMuted}>Informativo (não impede)</Text>{renderDebtList(check.pendings, 'pending')}</View> : null}
                 <View style={s.action}>
-                  <AppButton title="Solicitar nada consta" loading={busy === 'request'} disabled={!check.eligible} onPress={request} />
+                  <AppButton title={pendingRequest ? 'Pedido aguardando emissão' : 'Solicitar nada consta'} loading={busy === 'request'} disabled={!check.eligible || pendingRequest} onPress={() => setConfirmOpen(true)} />
                 </View>
               </>
             )}
@@ -165,6 +170,7 @@ export default function Clearances() {
       </View>
     </ScrollView>
     <AppDialog {...dialog} onClose={() => setDialog(d => ({ ...d, visible: false }))} />
+    <AppDialog visible={confirmOpen} title="Solicitar nada consta?" message="O síndico e o subsíndico serão avisados para emitir sua declaração de quitação." confirmLabel="Solicitar" cancelLabel="Cancelar" onConfirm={request} onClose={() => setConfirmOpen(false)} />
     <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} />
   </>;
 }
