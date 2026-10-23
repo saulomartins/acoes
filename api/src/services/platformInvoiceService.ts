@@ -35,21 +35,24 @@ const buildReceiptAttachment = async (row: InvoiceRow): Promise<EmailAttachment 
   }
 };
 
-// Manda o recibo pra síndicos/subsíndicos do condomínio da fatura, com o PDF anexo.
+// Todo e-mail da fatura da plataforma (fatura, lembretes, cancelamento,
+// recibo) vai só pro e-mail cadastrado do condomínio — nunca pros e-mails
+// pessoais de síndico/subsíndico, que seguem recebendo só o aviso no app.
+// Condomínio sem e-mail cadastrado não recebe e-mail.
+const loadCondominium = async (condominiumId: string) => (await query<{ name: string; email: string | null }>(
+  `select name, email from condominiums where id=$1`,
+  [condominiumId],
+)).rows[0] || null;
+
+// Manda o recibo pro e-mail do condomínio da fatura, com o PDF anexo.
 const sendReceiptEmails = async (row: InvoiceRow) => {
+  const condo = await loadCondominium(row.condominium_id);
+  if (!condo?.email) return;
   const receiptPdf = await buildReceiptAttachment(row);
-  const condo = await query<{ name: string }>(`select name from condominiums where id=$1`, [row.condominium_id]);
-  const managers = await query<{ full_name: string | null; username: string; email: string | null }>(
-    `select full_name, username, email from users where condominium_id=$1 and role in ('sindico','subsindico') and deleted_at is null`,
-    [row.condominium_id],
-  );
-  for (const manager of managers.rows) {
-    if (!manager.email) continue;
-    try {
-      await sendPlatformInvoiceReceiptEmail(manager.email, manager.full_name || manager.username, condo.rows[0]?.name || '', new Date(row.reference_month), row.amount_cents, receiptPdf);
-    } catch (error) {
-      console.warn('platform invoice receipt email failed', error);
-    }
+  try {
+    await sendPlatformInvoiceReceiptEmail(condo.email, condo.name, condo.name, new Date(row.reference_month), row.amount_cents, receiptPdf);
+  } catch (error) {
+    console.warn('platform invoice receipt email failed', error);
   }
 };
 
@@ -218,8 +221,8 @@ const loadManagers = async (condominiumId: string) => (await query<Manager>(
 // existe fatura para esse mês — a unique constraint em platform_invoices
 // impede duplicar o envio quando essa checagem roda em vários logins.
 export const checkAndSendPlatformInvoice = async (condominiumId: string): Promise<boolean> => {
-  const condo = await query<{ platform_status: string; name: string }>(
-    `select platform_status, name from condominiums where id=$1`,
+  const condo = await query<{ platform_status: string; name: string; email: string | null }>(
+    `select platform_status, name, email from condominiums where id=$1`,
     [condominiumId],
   );
   if (!condo.rows[0] || condo.rows[0].platform_status !== 'active') return false;
@@ -277,12 +280,12 @@ export const checkAndSendPlatformInvoice = async (condominiumId: string): Promis
   );
   for (const manager of managers) {
     await query(`insert into notification_recipients(notification_id,user_id) values($1,$2) on conflict do nothing`, [notificationId, manager.id]);
-    if (manager.email) {
-      try {
-        await sendPlatformInvoiceEmail(manager.email, manager.full_name || '', condo.rows[0].name, plan.name, planDetail, referenceMonth, amountCents, activeUsers, pix, dueDate);
-      } catch (error) {
-        console.warn('platform invoice email failed', error);
-      }
+  }
+  if (condo.rows[0].email) {
+    try {
+      await sendPlatformInvoiceEmail(condo.rows[0].email, condo.rows[0].name, condo.rows[0].name, plan.name, planDetail, referenceMonth, amountCents, activeUsers, pix, dueDate);
+    } catch (error) {
+      console.warn('platform invoice email failed', error);
     }
   }
 
@@ -342,22 +345,19 @@ export const reissuePlatformInvoicePix = async (
   const managers = await loadManagers(row.condominium_id);
   if (!managers.some(m => m.email)) return { ok: false, message: 'Nenhum síndico/subsíndico do condomínio tem e-mail cadastrado.' };
 
-  const condo = await query<{ name: string }>(`select name from condominiums where id=$1`, [row.condominium_id]);
+  const condo = await loadCondominium(row.condominium_id);
   const referenceMonth = new Date(row.reference_month);
-  const pix = await createAndStorePix(invoiceId, condo.rows[0]?.name || '', referenceMonth, row.amount_cents, managers, options.idempotencyKey || `${invoiceId}-${Date.now()}`);
+  const pix = await createAndStorePix(invoiceId, condo?.name || '', referenceMonth, row.amount_cents, managers, options.idempotencyKey || `${invoiceId}-${Date.now()}`);
   if (!pix) return { ok: false, message: 'O Mercado Pago recusou a criação do Pix. Veja o log da API para o motivo.' };
 
   const plan = (await query<PlatformPlan & { name: string }>(`select * from platform_plans where id=$1`, [row.plan_id])).rows[0];
-  if (plan) {
+  if (plan && condo?.email) {
     const tiers = await query<PlatformPlanTier>(`select * from platform_plan_tiers where plan_id=$1 order by min_active_users asc`, [row.plan_id]);
     const planDetail = buildPlanDetail(plan, tiers.rows, row.active_users);
-    for (const manager of managers) {
-      if (!manager.email) continue;
-      try {
-        await sendPlatformInvoiceEmail(manager.email, manager.full_name || '', condo.rows[0]?.name || '', plan.name, planDetail, referenceMonth, row.amount_cents, row.active_users, pix, row.due_date ? new Date(`${row.due_date}T00:00:00Z`) : null, options.pixRenewed);
-      } catch (error) {
-        console.warn('platform invoice email failed', error);
-      }
+    try {
+      await sendPlatformInvoiceEmail(condo.email, condo.name, condo.name, plan.name, planDetail, referenceMonth, row.amount_cents, row.active_users, pix, row.due_date ? new Date(`${row.due_date}T00:00:00Z`) : null, options.pixRenewed);
+    } catch (error) {
+      console.warn('platform invoice email failed', error);
     }
   }
   await query(`update platform_invoices set status='sent', sent_at=coalesce(sent_at, now()) where id=$1`, [invoiceId]);
@@ -424,8 +424,8 @@ export const renewExpiredPlatformInvoicePix = async (): Promise<{ renewed: numbe
 
 // Lembretes das faturas da plataforma (job diário): "vence em 3 dias" e
 // "em atraso" — cada um no máximo uma vez por fatura (marcadores
-// due_soon_notified_at / overdue_notified_at), por e-mail e aviso no app pra
-// síndico e subsíndico. Só avisa; nada é bloqueado. Nunca lança.
+// due_soon_notified_at / overdue_notified_at), por e-mail do condomínio e aviso
+// no app pra síndico e subsíndico. Só avisa; nada é bloqueado. Nunca lança.
 export const notifyPlatformInvoiceReminders = async (): Promise<{ dueSoon: number; overdue: number }> => {
   const counts = { dueSoon: 0, overdue: 0 };
   const run = async (kind: 'due_soon' | 'overdue', filter: string, marker: string) => {
@@ -437,7 +437,7 @@ export const notifyPlatformInvoiceReminders = async (): Promise<{ dueSoon: numbe
     for (const row of claimed.rows) {
       try {
         const managers = await loadManagers(row.condominium_id);
-        const condo = await query<{ name: string }>(`select name from condominiums where id=$1`, [row.condominium_id]);
+        const condo = await loadCondominium(row.condominium_id);
         const referenceMonth = new Date(row.reference_month);
         const dueDate = new Date(`${row.due_date}T00:00:00Z`);
         const pix = row.pix_copy_paste ? { copyPaste: row.pix_copy_paste, expiresAt: row.pix_expires_at } : null;
@@ -449,10 +449,9 @@ export const notifyPlatformInvoiceReminders = async (): Promise<{ dueSoon: numbe
           body: `A fatura de ${formatMonthLabel(referenceMonth)} (${formatCurrency(row.amount_cents)}) ${overdue ? 'venceu' : 'vence'} em ${dueDate.toLocaleDateString('pt-BR', { timeZone: 'UTC' })}. Veja e pague pelo Pix na tela Início.`,
           screen: 'Home',
         });
-        for (const manager of managers) {
-          if (!manager.email) continue;
+        if (condo?.email) {
           try {
-            await sendPlatformInvoiceReminderEmail(manager.email, manager.full_name || '', condo.rows[0]?.name || '', referenceMonth, row.amount_cents, dueDate, kind, pix);
+            await sendPlatformInvoiceReminderEmail(condo.email, condo.name, condo.name, referenceMonth, row.amount_cents, dueDate, kind, pix);
           } catch (error) {
             console.warn('platform invoice reminder email failed', error);
           }
@@ -492,7 +491,7 @@ type ActionResult = { ok: true; pixCanceled: boolean | null; created?: boolean }
 
 // Cancela uma fatura em aberto com motivo: cancela o Pix no Mercado Pago (pra
 // não dar pra pagar uma fatura cancelada), registra quem/por quê e avisa
-// síndico e subsíndico por e-mail e aviso no app. Se o Mercado Pago revelar
+// por e-mail do condomínio e aviso no app pra síndico e subsíndico. Se o Mercado Pago revelar
 // que ela JÁ foi paga, não cancela — confirma o pagamento.
 export const cancelPlatformInvoice = async (invoiceId: string, reason: string, canceledBy: string | null, replaced = false): Promise<ActionResult> => {
   const invoice = await query<{ id: string; condominium_id: string; reference_month: string; amount_cents: number; status: string; pix_payment_id: string | null }>(
@@ -525,7 +524,7 @@ export const cancelPlatformInvoice = async (invoiceId: string, reason: string, c
   );
 
   const managers = await loadManagers(row.condominium_id);
-  const condo = await query<{ name: string }>(`select name from condominiums where id=$1`, [row.condominium_id]);
+  const condo = await loadCondominium(row.condominium_id);
   const referenceMonth = new Date(row.reference_month);
   try {
     await notifyUsers({
@@ -538,10 +537,9 @@ export const cancelPlatformInvoice = async (invoiceId: string, reason: string, c
   } catch (error) {
     console.warn('platform invoice cancel notification failed', error);
   }
-  for (const manager of managers) {
-    if (!manager.email) continue;
+  if (condo?.email) {
     try {
-      await sendPlatformInvoiceCanceledEmail(manager.email, manager.full_name || '', condo.rows[0]?.name || '', referenceMonth, row.amount_cents, reason, replaced);
+      await sendPlatformInvoiceCanceledEmail(condo.email, condo.name, condo.name, referenceMonth, row.amount_cents, reason, replaced);
     } catch (error) {
       console.warn('platform invoice canceled email failed', error);
     }

@@ -1381,5 +1381,5 @@ Commits `aa0e69a` (correção) e `4675b07` (versão 1.7.5), branch
   `pill_questions` já existiam — passo 3 não necessário.
 - Web: deployment Cloudflare `cfa0ce4f.lar-em-dia.pages.dev`, bundle
   `AppEntry-7ae5214f0d8b0806b390f1dd008c8ebc.js`, servido em `gestaolaremdia.com`.
-- Android: AAB 1.7.5, build EAS `b150931b-956d-4ab0-b1c6-46bccd773f85`.
+- Android: AAB 1.7.5 (versionCode 49), build EAS `b150931b-956d-4ab0-b1c6-46bccd773f85`, FINISHED.
   Envio à Play Store pelo usuário.

@@ -29,6 +29,7 @@ type Invoice = {
 const db = vi.hoisted(() => ({
   invoices: new Map<string, any>(),
   managers: [] as { id: string; full_name: string | null; username: string; email: string | null; cpf: string | null }[],
+  condominiumEmail: null as string | null,
 }));
 
 vi.mock('../db', () => {
@@ -101,8 +102,7 @@ vi.mock('../db', () => {
       return [{ id: params[0], name: 'Essencial', plan_type: 'included_overage', included_quantity: 40, base_price_cents: 9900, overage_price_cents: 500, minimum_price_cents: 0, price_per_active_user_cents: null, active_user_metric: 'registered' }];
     }
     if (s.startsWith('select * from platform_plan_tiers')) return [];
-    if (s === 'select name from condominiums where id=$1') return [{ name: 'Residencial Teste' }];
-    if (s.startsWith('select full_name, username, email from users')) return db.managers;
+    if (s === 'select name, email from condominiums where id=$1') return [{ name: 'Residencial Teste', email: db.condominiumEmail }];
     if (s.startsWith('select id, full_name, email, cpf from users')) return db.managers;
     throw new Error(`fake db: SQL não reconhecido: ${s}`);
   };
@@ -183,6 +183,7 @@ beforeEach(() => {
     { id: 'u-bruno', full_name: null, username: 'bruno', email: 'bruno@example.com', cpf: null },
     { id: 'u-carla', full_name: 'Sem Email', username: 'carla', email: null, cpf: null },
   ];
+  db.condominiumEmail = 'contato@residencial.example.com';
   vi.clearAllMocks();
   vi.mocked(isMercadoPagoConfigured).mockReturnValue(true);
   getOrderMock.mockImplementation(async (orderId: string) => ({ id: orderId, status: 'processed', statusDetail: 'accredited', externalReference: null, paid: true }));
@@ -191,7 +192,7 @@ beforeEach(() => {
 });
 
 describe('settlePlatformInvoiceById', () => {
-  it('marca a fatura como paga e manda o recibo pra cada gestor com e-mail', async () => {
+  it('marca a fatura como paga e manda o recibo só pro e-mail do condomínio (não pros gestores)', async () => {
     const invoice = addInvoice();
     await expect(settlePlatformInvoiceById('inv-1')).resolves.toBe(true);
 
@@ -199,17 +200,24 @@ describe('settlePlatformInvoiceById', () => {
     expect(invoice.paid_at).toBeInstanceOf(Date);
     expect(invoice.payment_method).toBe('pix_mercadopago');
     expect(invoice.receipt_sent_at).toBeInstanceOf(Date);
-    expect(receiptEmail).toHaveBeenCalledTimes(2);
+    expect(receiptEmail).toHaveBeenCalledTimes(1);
     const pdf = { filename: 'recibo-lar-em-dia-2026-09.pdf', content: Buffer.from('%PDF-recibo'), contentType: 'application/pdf' };
-    expect(receiptEmail).toHaveBeenCalledWith('ana@example.com', 'Ana Síndica', 'Residencial Teste', new Date('2026-09-01'), 19900, pdf);
-    expect(receiptEmail).toHaveBeenCalledWith('bruno@example.com', 'bruno', 'Residencial Teste', new Date('2026-09-01'), 19900, pdf);
+    expect(receiptEmail).toHaveBeenCalledWith('contato@residencial.example.com', 'Residencial Teste', 'Residencial Teste', new Date('2026-09-01'), 19900, pdf);
+  });
+
+  it('condomínio sem e-mail cadastrado: paga normalmente, mas nenhum e-mail sai (nem pros gestores)', async () => {
+    db.condominiumEmail = null;
+    const invoice = addInvoice();
+    await expect(settlePlatformInvoiceById('inv-1')).resolves.toBe(true);
+    expect(invoice.status).toBe('paid');
+    expect(receiptEmail).not.toHaveBeenCalled();
   });
 
   it('o recibo em PDF vai anexo, gerado uma vez só com os dados da fatura paga', async () => {
     addInvoice({ active_users: 42, amount_cents: 13400 });
     await settlePlatformInvoiceById('inv-1', { method: 'manual', note: 'transferência' });
 
-    expect(buildPdfMock).toHaveBeenCalledTimes(1); // um PDF, mesmo com 2 gestores
+    expect(buildPdfMock).toHaveBeenCalledTimes(1);
     expect(buildPdfMock.mock.calls[0][0]).toMatchObject({
       invoiceId: 'inv-1', condominiumName: 'Residencial Teste', referenceMonth: '2026-09-01',
       amountCents: 13400, activeUsers: 42, planName: 'Essencial', paymentMethod: 'manual',
@@ -223,7 +231,7 @@ describe('settlePlatformInvoiceById', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     await expect(settlePlatformInvoiceById('inv-1')).resolves.toBe(true);
-    expect(receiptEmail).toHaveBeenCalledTimes(2);
+    expect(receiptEmail).toHaveBeenCalledTimes(1);
     for (const call of receiptEmail.mock.calls) expect(call[5]).toBeNull();
     warn.mockRestore();
   });
@@ -245,7 +253,7 @@ describe('settlePlatformInvoiceById', () => {
     await expect(settlePlatformInvoiceById('inv-1')).resolves.toBe(true);
     await settlePlatformInvoiceById('inv-1');
 
-    expect(receiptEmail).toHaveBeenCalledTimes(2); // só os 2 da primeira vez
+    expect(receiptEmail).toHaveBeenCalledTimes(1); // só o da primeira vez
     expect(invoice.paid_at).toBe(firstPaidAt);
     expect(invoice.receipt_sent_at).toBe(firstReceiptAt);
   });
@@ -261,8 +269,8 @@ describe('settlePlatformInvoiceById', () => {
 
     expect(results[0]).toBe(true);
     expect(results[2]).toBe(true);
-    expect(receiptEmail).toHaveBeenCalledTimes(2); // 2 gestores com e-mail, uma vez cada
-    expect(new Set(receiptEmail.mock.calls.map(call => call[0]))).toEqual(new Set(['ana@example.com', 'bruno@example.com']));
+    expect(receiptEmail).toHaveBeenCalledTimes(1);
+    expect(receiptEmail.mock.calls[0][0]).toBe('contato@residencial.example.com');
   });
 
   it('confirmação manual registra método, nota e quem confirmou; webhook depois não sobrescreve', async () => {
@@ -273,7 +281,7 @@ describe('settlePlatformInvoiceById', () => {
     expect(invoice.payment_method).toBe('manual');
     expect(invoice.manual_note).toBe('transferência');
     expect(invoice.confirmed_by).toBe('admin-1');
-    expect(receiptEmail).toHaveBeenCalledTimes(2);
+    expect(receiptEmail).toHaveBeenCalledTimes(1);
   });
 
   it('pagamento em fatura cancelada: não reabre, não manda recibo, levanta alerta pro admin', async () => {
@@ -304,13 +312,13 @@ describe('settlePlatformInvoiceById', () => {
     expect(receiptEmail).not.toHaveBeenCalled();
   });
 
-  it('falha no e-mail de um gestor não impede o recibo dos outros', async () => {
+  it('falha no envio do recibo não impede a confirmação do pagamento', async () => {
     addInvoice();
     receiptEmail.mockRejectedValueOnce(new Error('SMTP fora'));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     await expect(settlePlatformInvoiceById('inv-1')).resolves.toBe(true);
-    expect(receiptEmail).toHaveBeenCalledTimes(2);
+    expect(receiptEmail).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });
 });
@@ -327,14 +335,14 @@ describe('reconcilePlatformInvoices', () => {
     await expect(reconcilePlatformInvoices()).resolves.toEqual({ checked: 2, paid: 1 });
     expect(paid.status).toBe('paid');
     expect(waiting.status).toBe('sent');
-    expect(receiptEmail).toHaveBeenCalledTimes(2);
+    expect(receiptEmail).toHaveBeenCalledTimes(1);
   });
 
   it('rodar a reconciliação de novo não reenvia recibo', async () => {
     addInvoice();
     await reconcilePlatformInvoices();
     await expect(reconcilePlatformInvoices()).resolves.toEqual({ checked: 0, paid: 0 });
-    expect(receiptEmail).toHaveBeenCalledTimes(2);
+    expect(receiptEmail).toHaveBeenCalledTimes(1);
   });
 
   it('erro ao consultar uma order não impede as outras', async () => {
@@ -366,7 +374,7 @@ describe('resendPlatformInvoiceReceipt', () => {
     addInvoice();
     await settlePlatformInvoiceById('inv-1');
     await expect(resendPlatformInvoiceReceipt('inv-1')).resolves.toBe(true);
-    expect(receiptEmail).toHaveBeenCalledTimes(4);
+    expect(receiptEmail).toHaveBeenCalledTimes(2); // o recibo original + o reenvio
   });
 
   it('recusa reenviar recibo de fatura não paga', async () => {
@@ -401,7 +409,8 @@ describe('renewExpiredPlatformInvoicePix', () => {
     expect(invoice.pix_expires_at!.getTime()).toBeGreaterThan(Date.now() + 29 * 86400000);
     expect(invoice.status).toBe('sent');
 
-    expect(invoiceEmail).toHaveBeenCalledTimes(2); // os 2 gestores com e-mail
+    expect(invoiceEmail).toHaveBeenCalledTimes(1); // só o e-mail do condomínio
+    expect(invoiceEmail.mock.calls[0][0]).toBe('contato@residencial.example.com');
     for (const call of invoiceEmail.mock.calls) {
       expect(call[8]).toMatchObject({ copyPaste: 'PIX-NOVO' });
       expect(call[10]).toBe(true); // e-mail no formato "novo código Pix"
@@ -413,7 +422,7 @@ describe('renewExpiredPlatformInvoicePix', () => {
 
     await expect(renewExpiredPlatformInvoicePix()).resolves.toEqual({ renewed: 0, paid: 1, failed: 0 });
     expect(invoice.status).toBe('paid');
-    expect(receiptEmail).toHaveBeenCalledTimes(2);
+    expect(receiptEmail).toHaveBeenCalledTimes(1);
     expect(createPixChargeMock).not.toHaveBeenCalled();
     expect(cancelOrderMock).not.toHaveBeenCalled();
   });
