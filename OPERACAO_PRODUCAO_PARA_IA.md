@@ -1382,4 +1382,11 @@ Commits `aa0e69a` (correção) e `4675b07` (versão 1.7.5), branch
 - Web: deployment Cloudflare `cfa0ce4f.lar-em-dia.pages.dev`, bundle
   `AppEntry-7ae5214f0d8b0806b390f1dd008c8ebc.js`, servido em `gestaolaremdia.com`.
 - Android: AAB 1.7.5 (versionCode 49), build EAS `b150931b-956d-4ab0-b1c6-46bccd773f85`, FINISHED.
+- Mesmo dia, commit `644f8b4`: e-mails da fatura da plataforma (fatura, Pix
+  renovado, lembretes, cancelamento, recibo) vão só para `condominiums.email`,
+  não mais para síndico/subsíndico (avisos no app e push seguem para eles).
+  API: deployment `d88411df-99e5-4bc2-8663-36d3e9d66fba`, `SUCCESS`. Na
+  publicação, o Residencial Progresso estava sem e-mail cadastrado — fica sem
+  e-mail de fatura até cadastrar. O pagador do Pix no Mercado Pago continua
+  sendo o primeiro gestor com e-mail.
   Envio à Play Store pelo usuário.
