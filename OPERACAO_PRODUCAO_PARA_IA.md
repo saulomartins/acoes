@@ -1362,3 +1362,24 @@ publicados junto, com autorização do usuário.
   pela Play Store) e iPhone consulta `itunes.apple.com/lookup?bundleId=...`
   (começa a funcionar quando o app estiver na App Store). "Agora não" adia por
   3 dias a mesma versão. Exige binário novo (módulo nativo).
+
+## Publicação de 23/10/2026 — nada consta só com confirmação; Android 1.7.5
+
+Commits `aa0e69a` (correção) e `4675b07` (versão 1.7.5), branch
+`feat/ui-redesign-2026-10-21`.
+
+- Relato do usuário: "ao entrar em Nada consta já solicita ao síndico e
+  subsíndico". Não reproduzido: o código só faz o POST no clique e a produção
+  tinha 6 pedidos, cada aviso "Nada consta solicitado" casando com um pedido.
+  Blindagem: o botão abre confirmação antes do POST e fica desabilitado com
+  pedido pendente; a API devolve 409 se já há pedido `pending` do morador (sem
+  novo aviso aos gestores).
+- API: `railway up` a partir de `externals` → deployment
+  `c21ee594-0a93-499d-911c-1dc2479154fc`, `SUCCESS`. Substituiu o de 19/10, então
+  levou junto as mudanças de 18–22/10. Schema de 18–19/10 conferido (leitura):
+  colunas `is_financial_responsible`/`is_representative` e tabela
+  `pill_questions` já existiam — passo 3 não necessário.
+- Web: deployment Cloudflare `cfa0ce4f.lar-em-dia.pages.dev`, bundle
+  `AppEntry-7ae5214f0d8b0806b390f1dd008c8ebc.js`, servido em `gestaolaremdia.com`.
+- Android: AAB 1.7.5, build EAS `b150931b-956d-4ab0-b1c6-46bccd773f85`.
+  Envio à Play Store pelo usuário.
