@@ -1389,4 +1389,34 @@ Commits `aa0e69a` (correção) e `4675b07` (versão 1.7.5), branch
   publicação, o Residencial Progresso estava sem e-mail cadastrado — fica sem
   e-mail de fatura até cadastrar. O pagador do Pix no Mercado Pago continua
   sendo o primeiro gestor com e-mail.
+
+## Publicação de 24/10/2026 — segurança (sessões, origem das ações, toque fantasma); Android 1.7.6
+
+Commits `ec80a96` (código) e `24fe093` (versão 1.7.6).
+
+- Motivo: o usuário (proprietário) viu um nada consta e uma ocorrência
+  ("Barulho", texto = o próprio CPF) que não enviou. Investigação (leitura):
+  mesma conta e sessões dele, sem sinal de terceiro. Causa provável: no
+  react-native-web o onPress dispara com qualquer `click` do navegador, e no
+  celular o click cai no botão que ficou sob o dedo depois que o teclado/a
+  sugestão de autofill some. Reproduzido no Chrome headless com toque (CDP):
+  sem trava o click chega ao botão; com `mobile/src/ui/ghostClickGuard.ts`, não.
+- Sessões: produção tinha `JWT_REFRESH_EXPIRES_IN` ≈ 100 anos (41 sessões ativas
+  só do usuário). Agora o prazo é fixo em `SESSION_POLICY` (authService): 14 dias
+  sem uso / 60 dias no total; admin_geral 12 h / 7 dias. A variável não é mais
+  lida (pode ser apagada no Railway). Biometria 90 dias.
+- Banco: delta aplicado via `railway ssh` + script node (o setupDatabase do
+  contêiner usa o schema.sql DA VERSÃO PUBLICADA — não serve para schema novo
+  antes do deploy). 92 sessões ativas tiveram expires_at trazido para 14 dias.
+  Novas: `refresh_tokens.session_started_at/ip_address/user_agent`,
+  `request_log` (toda escrita autenticada, 180 dias), `audit_log.ip_address/user_agent`.
+- API: deployment `41d1221c-386e-4e20-97f6-e97a950aba94`, `SUCCESS`; health 200,
+  `nosniff`/`DENY` presentes, `POST ?token=` recusado (401).
+- Web: deployment Cloudflare `af5e4128.lar-em-dia.pages.dev`, bundle
+  `AppEntry-3e0578af9ed71f6cd88cd06c72c57fce.js`. Login testado no Chrome headless
+  com o bundle real (mouse, toque e Enter) com a API interceptada.
+- Android: AAB 1.7.6, build EAS `374f3e02-c42c-4914-ace4-e5425d4af3ca`.
+- Pendente (decisão do usuário): senha inicial previsível (síndico = 6 primeiros
+  dígitos do CPF; morador = unidade + 4 do CPF), em `passwordRuleService.ts`.
+  Em 24/10, 4 proprietários ainda estavam com a senha inicial.
   Envio à Play Store pelo usuário.
