@@ -18,9 +18,8 @@ export const config = {
   accessTokenSecret: requiredInProduction('JWT_SECRET', 'dev-secret-change-me'),
   refreshTokenSecret: requiredInProduction('JWT_REFRESH_SECRET', 'dev-refresh-secret-change-me'),
   accessTokenExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
-  // Sessão renovável por rotação (ver refresh() em authService) até este limite;
-  // depois disso o usuário precisa logar de novo mesmo com uso contínuo do app.
-  refreshTokenExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
+  // Prazo da sessão (refresh token): fixo em SESSION_POLICY no authService.
+  // JWT_REFRESH_EXPIRES_IN não é mais lido — em produção estava em ~100 anos.
   webUrl: process.env.APP_WEB_URL || 'http://localhost:8081',
   allowedOrigins: (process.env.CORS_ORIGINS || process.env.APP_WEB_URL || 'http://localhost:8081,http://localhost:8082,http://localhost:19006')
     .split(',').map(value => value.trim()).filter(Boolean),

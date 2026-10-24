@@ -145,7 +145,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
   const displayName = (user?.fullName || '').trim() || user?.username || '';
   const initials = (displayName.split(/\s+/).map(part => part[0]).join('').slice(0, 2) || 'U').toUpperCase();
   const activeItem = items.find((item) => item.route === activeRoute);
-  const activeLabel = activeItem ? labelFor(activeItem) : 'Lar em Dia';
+  const activeLabel = activeItem ? labelFor(activeItem) : activeRoute === 'Sessions' ? 'Dispositivos conectados' : 'Lar em Dia';
   // "Ir para…" (Ctrl+K na web): procura entre as telas do menu deste perfil.
   const searchRef = useRef<any>(null);
   const [search, setSearch] = useState('');
@@ -298,6 +298,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                 </View>
                 {manualUrl ? <Pressable onPress={openManual} accessibilityLabel="Manual do usuário" style={[styles.profileTourButton, styles.profileManualButton]}><Text style={styles.profileTourIcon}>📘</Text></Pressable> : null}
                 {biometric.available ? <Pressable onPress={() => void biometric.toggle()} accessibilityLabel={biometricLabel} style={[styles.profileTourButton, !biometric.enabled && styles.profileBiometricOff]}><Text style={styles.profileTourIcon}>{biometric.enabled ? '🔒' : '🔓'}</Text></Pressable> : null}
+                <Pressable onPress={() => goTo('Sessions')} accessibilityLabel="Dispositivos conectados" style={styles.profileTourButton}><Text style={styles.profileTourIcon}>🛡</Text></Pressable>
                 <Pressable onPress={startSystemTour} accessibilityLabel="Refazer tour" style={styles.profileTourButton}><Text style={styles.profileTourIcon}>?</Text></Pressable>
                 <Pressable onPress={() => signOut()}>
                   <Text style={styles.exit}>↪</Text>
@@ -464,6 +465,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
                 {manualUrl ? <Pressable style={styles.mobileTourFooter} onPress={() => { setMobileMenuOpen(false); openManual(); }}><Text style={styles.mobileTourText}>📘 Manual do usuário</Text></Pressable> : null}
                 {canReview ? <Pressable style={styles.mobileTourFooter} onPress={() => { setMobileMenuOpen(false); rateApp(); }}><Text style={styles.mobileTourText}>⭐ Avaliar o app na {reviewStoreName}</Text></Pressable> : null}
                 {biometric.available ? <Pressable style={styles.mobileTourFooter} onPress={() => void biometric.toggle()}><Text style={styles.mobileTourText}>{biometric.enabled ? '🔒' : '🔓'} {biometricLabel}</Text></Pressable> : null}
+                <Pressable style={styles.mobileTourFooter} onPress={() => { setMobileMenuOpen(false); goTo('Sessions'); }}><Text style={styles.mobileTourText}>🛡 Dispositivos conectados</Text></Pressable>
                 <Pressable style={styles.mobileTourFooter} onPress={() => { setMobileMenuOpen(false); startSystemTour(); }}><Text style={styles.mobileTourText}>? Refazer tour do sistema</Text></Pressable>
                 <Pressable style={styles.mobileMenuFooter} onPress={() => { setMobileMenuOpen(false); signOut(); }}>
                   <Text style={styles.mobileMenuLogout}>Sair da conta</Text>

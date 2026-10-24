@@ -67,6 +67,8 @@ export default function Reports({ navigation }: any) {
     message: "",
     tone: "info" as "info" | "success" | "error",
   });
+  // Enviar relato e mudar situação avisam a outra parte: só depois de confirmar.
+  const [ask, setAsk] = useState<{ title: string; message: string; label: string; run: () => void } | null>(null);
   const load = useCallback(async () => {
     if (!userToken) return;
     try {
@@ -230,7 +232,7 @@ export default function Reports({ navigation }: any) {
             <View style={styles.action}>
               <AppButton
                 title={sending ? "Enviando..." : "Enviar para a administração"}
-                onPress={create}
+                onPress={() => setAsk({ title: "Enviar este relato?", message: `"${subject.trim()}"\n\nO síndico e o subsíndico serão avisados.`, label: "Enviar", run: () => void create() })}
                 disabled={
                   sending ||
                   subject.trim().length < 3 ||
@@ -306,12 +308,12 @@ export default function Reports({ navigation }: any) {
               {manager ? (
                 <View style={styles.statusActions}>
                   {selected.status !== "in_progress" ? (
-                    <Pressable onPress={() => status("in_progress")}>
+                    <Pressable onPress={() => setAsk({ title: 'Marcar como "Em atendimento"?', message: "O morador é avisado da mudança.", label: "Confirmar", run: () => void status("in_progress") })}>
                       <Text style={styles.link}>Atender</Text>
                     </Pressable>
                   ) : null}
                   {selected.status !== "resolved" ? (
-                    <Pressable onPress={() => status("resolved")}>
+                    <Pressable onPress={() => setAsk({ title: "Resolver este relato?", message: "O morador é avisado e a conversa é fechada — ninguém mais envia mensagem nela.", label: "Resolver", run: () => void status("resolved") })}>
                       <Text style={styles.linkGreen}>Resolver</Text>
                     </Pressable>
                   ) : null}
@@ -369,6 +371,15 @@ export default function Reports({ navigation }: any) {
       <AppDialog
         {...dialog}
         onClose={() => setDialog((x) => ({ ...x, visible: false }))}
+      />
+      <AppDialog
+        visible={!!ask}
+        title={ask?.title || ""}
+        message={ask?.message || ""}
+        confirmLabel={ask?.label}
+        cancelLabel="Cancelar"
+        onConfirm={() => { const run = ask?.run; setAsk(null); run?.(); }}
+        onClose={() => setAsk(null)}
       />
       <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step=>scrollToSection(step.key)}/>
     </>

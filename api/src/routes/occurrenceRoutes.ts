@@ -102,7 +102,16 @@ router.post('/', asyncHandler(async (req, res) => {
   if (!CATEGORIES.includes(category)) return res.status(400).json({ message: 'Selecione uma categoria válida.' });
   if (!String(description || '').trim()) return res.status(400).json({ message: 'Descreva a ocorrência.' });
 
-  const resolvedUnitId = unitId || await ownUnitId(req.user!.id);
+  // Morador registra sempre na própria unidade — o unitId do corpo só vale
+  // para síndico/subsíndico. E qualquer unidade informada precisa ser deste
+  // condomínio (antes dava para apontar unidade de outro condomínio).
+  const isManager = manager(req.user?.role);
+  const resolvedUnitId = isManager && unitId ? String(unitId) : await ownUnitId(req.user!.id);
+  const unitIds = [resolvedUnitId, relatedUnitId].filter(Boolean).map(String);
+  if (unitIds.length) {
+    const valid = await query(`select id from units where id = any($1::uuid[]) and condominium_id = $2`, [unitIds, condominiumId]).catch(() => ({ rows: [] }));
+    if (valid.rows.length !== new Set(unitIds).size) return res.status(400).json({ message: 'Unidade inválida para este condomínio.' });
+  }
 
   const result = await query<any>(
     `insert into occurrences(id, condominium_id, unit_id, related_unit_id, reported_by, category, description)

@@ -24,6 +24,7 @@ import LegalDocument from '../screens/LegalDocument';
 import Pills from '../screens/Pills';
 import TermsAcceptance,{CURRENT_TERMS_VERSION} from '../screens/TermsAcceptance';
 import SpaceReservations from '../screens/SpaceReservations';
+import Sessions from '../screens/Sessions';
 import ForgotPassword from '../screens/ForgotPassword';
 import ResetPassword from '../screens/ResetPassword';
 import ForcePasswordChange from '../screens/ForcePasswordChange';
@@ -87,6 +88,7 @@ type RootStackParamList = {
   InfractionNotices: undefined;
   Polls: undefined;
   SpaceReservations: undefined;
+  Sessions: undefined;
   LegalDocument: { document: 'privacy' | 'terms' };
   Pills: { slug?: string; q?: string } | undefined;
   TermsAcceptance: undefined;
@@ -142,6 +144,7 @@ const RegulationScreen = withRoleGuard(withResponsiveShell(Regulation, 'Regulati
 const InfractionNoticesScreen = withRoleGuard(withResponsiveShell(InfractionNotices, 'InfractionNotices'), 'InfractionNotices');
 const PollsScreen = withRoleGuard(withResponsiveShell(Polls, 'Polls'), 'Polls');
 const SpaceReservationsScreen = withRoleGuard(withResponsiveShell(SpaceReservations, 'SpaceReservations'), 'SpaceReservations');
+const SessionsScreen = withResponsiveShell(Sessions, 'Sessions');
 
 // Pré-computadas pelo mesmo motivo das de cima: manter a identidade da função
 // estável entre renders para o React Navigation não remontar a tela ativa.
@@ -285,6 +288,7 @@ export default function AppNavigator() {
               <Stack.Screen name="InfractionNotices" component={InfractionNoticesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Polls" component={PollsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="SpaceReservations" component={SpaceReservationsScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Sessions" component={SessionsScreen} options={{ headerShown: false, title: 'Dispositivos conectados' }} />
               {ManagementStackScreens()}
             </>
           ) : (

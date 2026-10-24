@@ -6,18 +6,26 @@ vi.mock('../services/platformSuspensionService', async (importOriginal) => {
   return { ...original, isPlatformRestricted: vi.fn() };
 });
 
+vi.mock('../services/authService', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../services/authService')>();
+  return { ...original, isSessionRevoked: vi.fn(async () => false) };
+});
+
 import { config } from '../config';
+import { isSessionRevoked } from '../services/authService';
 import { isPlatformRestricted, isWriteAllowedWhileRestricted } from '../services/platformSuspensionService';
 import { authenticate, forgetPlatformRestriction } from './auth';
 
 const restrictedMock = vi.mocked(isPlatformRestricted);
+const revokedMock = vi.mocked(isSessionRevoked);
 
-const tokenFor = (role: string, condominiumId: string | null = 'condo-1') =>
-  jwt.sign({ sub: 'u-1', id: 'u-1', username: 'ana', role, condominiumId, condominiumName: 'X', mustChangePassword: false }, config.accessTokenSecret);
+const tokenFor = (role: string, condominiumId: string | null = 'condo-1', sid?: string) =>
+  jwt.sign({ sub: 'u-1', id: 'u-1', username: 'ana', role, condominiumId, condominiumName: 'X', mustChangePassword: false, ...(sid ? { sid } : {}) }, config.accessTokenSecret);
 
 // Roda o middleware e devolve o que aconteceu: next() ou a resposta enviada.
-const run = (method: string, url: string, token: string) => new Promise<{ next: boolean; status?: number; body?: any }>((resolve) => {
-  const req: any = { method, originalUrl: url, headers: { authorization: `Bearer ${token}` }, query: {} };
+// token null + queryToken: simula o token vindo na URL (?token=).
+const run = (method: string, url: string, token: string | null, queryToken?: string) => new Promise<{ next: boolean; status?: number; body?: any }>((resolve) => {
+  const req: any = { method, originalUrl: url, headers: token ? { authorization: `Bearer ${token}` } : {}, query: queryToken ? { token: queryToken } : {} };
   const res: any = {
     status(code: number) { this.statusCode = code; return this; },
     json(body: unknown) { resolve({ next: false, status: this.statusCode, body }); return this; },
@@ -28,7 +36,42 @@ const run = (method: string, url: string, token: string) => new Promise<{ next: 
 beforeEach(() => {
   restrictedMock.mockReset();
   restrictedMock.mockResolvedValue(true);
+  revokedMock.mockReset();
+  revokedMock.mockResolvedValue(false);
   forgetPlatformRestriction();
+});
+
+describe('authenticate — sessão e token na URL', () => {
+  it('sessão encerrada (logout, "sair dos outros aparelhos") corta o access token na hora', async () => {
+    restrictedMock.mockResolvedValue(false);
+    revokedMock.mockResolvedValue(true);
+    expect(await run('GET', '/invoices', tokenFor('proprietario', 'condo-1', 'sess-1'))).toMatchObject({ next: false, status: 401 });
+    expect(revokedMock).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('sessão ativa segue normal; token antigo sem sid não consulta a sessão', async () => {
+    restrictedMock.mockResolvedValue(false);
+    expect(await run('GET', '/invoices', tokenFor('proprietario', 'condo-1', 'sess-1'))).toEqual({ next: true });
+    expect(await run('GET', '/invoices', tokenFor('proprietario'))).toEqual({ next: true });
+    expect(revokedMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('falha ao consultar a sessão libera (mesma política da restrição)', async () => {
+    restrictedMock.mockResolvedValue(false);
+    revokedMock.mockRejectedValue(new Error('db fora'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await run('GET', '/invoices', tokenFor('proprietario', 'condo-1', 'sess-1'))).toEqual({ next: true });
+    warn.mockRestore();
+  });
+
+  it('token na URL vale só pra leitura (downloads), nunca pra alterar dados', async () => {
+    restrictedMock.mockResolvedValue(false);
+    const token = tokenFor('sindico');
+    expect(await run('GET', '/invoices/abc/pdf', null, token)).toEqual({ next: true });
+    for (const method of ['POST', 'PATCH', 'DELETE']) {
+      expect(await run(method, '/users', null, token)).toMatchObject({ next: false, status: 401 });
+    }
+  });
 });
 
 describe('authenticate — gestão somente leitura por inadimplência', () => {

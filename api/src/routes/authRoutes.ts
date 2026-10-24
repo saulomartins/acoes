@@ -1,7 +1,8 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { authenticate, forgetPlatformRestriction } from '../middleware/auth';
 import { isPlatformRestricted, RESIDENT_SUSPENDED_MESSAGE } from '../services/platformSuspensionService';
-import { AMBIGUOUS_LOGIN, changePassword, createBiometricToken, listProfiles, login, loginWithBiometricToken, refresh, register, requestPasswordReset, resetPassword, revokeBiometricToken, revokeRefreshToken, switchProfile } from '../services/authService';
+import { AMBIGUOUS_LOGIN, changePassword, createBiometricToken, listProfiles, listSessions, login, loginWithBiometricToken, refresh, register, requestPasswordReset, resetPassword, revokeBiometricToken, revokeOtherSessions, revokeRefreshToken, revokeSession, switchProfile } from '../services/authService';
+import { requestMeta } from '../services/requestMeta';
 import { query } from '../db';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { FEATURE_KEYS, type FeatureKey } from '../services/featureCatalog';
@@ -25,8 +26,16 @@ const limit = (maximum: number, windowMs: number) => (req: Request, res: Respons
   const entry = !current || current.resetAt <= now ? { count: 0, resetAt: now + windowMs } : current;
   entry.count += 1;
   attempts.set(key, entry);
+  pruneExpired(attempts, now, item => item.resetAt);
   if (entry.count > maximum) return res.status(429).json({ message: 'Muitas tentativas. Aguarde alguns minutos.' });
   return next();
+};
+
+// Os mapas de tentativas vivem em memória: sem limpeza, crescem com cada IP e
+// usuário digitado (inclusive inventados por quem tenta força bruta).
+const pruneExpired = <T>(map: Map<string, T>, now: number, expiresAt: (item: T) => number) => {
+  if (map.size < 5000) return;
+  for (const [key, item] of map) if (expiresAt(item) <= now) map.delete(key);
 };
 
 // Bloqueio por conta (além do limite por IP acima): a senha inicial de
@@ -51,6 +60,7 @@ const registerLoginFailure = (username: string) => {
   entry.count += 1;
   if (entry.count >= LOGIN_MAX_FAILURES) entry.lockedUntil = now + LOGIN_LOCKOUT_MS;
   loginFailuresByUsername.set(username, entry);
+  pruneExpired(loginFailuresByUsername, now, item => Math.max(item.windowResetAt, item.lockedUntil));
 };
 
 const clearLoginFailures = (username: string) => loginFailuresByUsername.delete(username);
@@ -102,7 +112,7 @@ router.post('/login', limit(20, 15 * 60_000), async (req, res) => {
       return res.status(429).json({ message: 'Muitas tentativas para este usuário. Aguarde alguns minutos e tente novamente.' });
     }
 
-    const response = await login(username, password);
+    const response = await login(username, password, requestMeta(req));
     // Senha correta, mas o CPF/e-mail informado serve a mais de uma conta —
     // não conta como tentativa falha, já que a credencial está certa.
     if (response === AMBIGUOUS_LOGIN) {
@@ -151,7 +161,7 @@ router.post('/refresh', async (req, res) => {
       return res.status(400).json({ message: 'refreshToken is required' });
     }
 
-    const response = await refresh(refreshToken);
+    const response = await refresh(refreshToken, requestMeta(req));
     if (!response) {
       return res.status(401).json({ message: 'invalid refresh token' });
     }
@@ -191,7 +201,7 @@ router.post('/biometric', authenticate, asyncHandler(async (req, res) => {
 router.post('/biometric/login', limit(20, 15 * 60_000), asyncHandler(async (req, res) => {
   const { biometricToken } = req.body ?? {};
   if (!biometricToken || typeof biometricToken !== 'string') return res.status(400).json({ message: 'biometricToken is required' });
-  const response = await loginWithBiometricToken(biometricToken);
+  const response = await loginWithBiometricToken(biometricToken, requestMeta(req));
   if (!response) return res.status(401).json({ message: 'A entrada por biometria não vale mais neste aparelho. Entre com sua senha.' });
   return res.json(response);
 }));
@@ -218,7 +228,7 @@ router.post('/switch-profile', asyncHandler(async (req, res) => {
   }
 
   try {
-    const response = await switchProfile(refreshToken, profileId ? String(profileId) : null);
+    const response = await switchProfile(refreshToken, profileId ? String(profileId) : null, requestMeta(req));
     if (!response) return res.status(401).json({ message: 'invalid refresh token or profile' });
     return res.json(response);
   } catch {
@@ -229,9 +239,37 @@ router.post('/switch-profile', asyncHandler(async (req, res) => {
 router.post('/change-password', authenticate, asyncHandler(async (req, res) => {
   const password = String(req.body?.password || '');
   if (password.length < 8) return res.status(400).json({ message: 'A nova senha deve ter pelo menos 8 caracteres.' });
-  const user = await changePassword(req.user!.id, password);
+  const user = await changePassword(req.user!.id, password, req.user!.sessionId ?? null);
   if (!user) return res.status(404).json({ message: 'Usuário não encontrado.' });
   return res.json({ user });
+}));
+
+// "Dispositivos conectados" — as sessões ativas do próprio login.
+router.get('/sessions', authenticate, asyncHandler(async (req, res) => {
+  const sessions = await listSessions(req.user!.id);
+  return res.json({
+    sessions: sessions.map(session => ({
+      id: session.id,
+      startedAt: session.session_started_at,
+      lastActiveAt: session.created_at,
+      ipAddress: session.ip_address,
+      userAgent: session.user_agent,
+      current: session.id === req.user!.sessionId,
+    })),
+  });
+}));
+
+router.delete('/sessions/:id', authenticate, asyncHandler(async (req, res) => {
+  if (req.params.id === req.user!.sessionId) return res.status(400).json({ message: 'Para sair deste aparelho, use "Sair".' });
+  const revoked = await revokeSession(req.user!.id, req.params.id);
+  if (!revoked) return res.status(404).json({ message: 'Sessão não encontrada ou já encerrada.' });
+  return res.status(204).send();
+}));
+
+router.post('/sessions/revoke-others', authenticate, asyncHandler(async (req, res) => {
+  const keepBiometricToken = typeof req.body?.keepBiometricToken === 'string' ? req.body.keepBiometricToken : null;
+  const revoked = await revokeOtherSessions(req.user!.id, req.user!.sessionId ?? null, keepBiometricToken);
+  return res.json({ revoked });
 }));
 
 // O app (moradores) pergunta ao abrir e no "Tentar novamente" da tela de

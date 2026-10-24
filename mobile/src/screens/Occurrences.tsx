@@ -42,6 +42,9 @@ export default function Occurrences({ navigation }: any) {
   const [sending, setSending] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [dialog, setDialog] = useState({ visible: false, title: '', message: '', tone: 'info' as 'info' | 'success' | 'error' });
+  // Registrar ocorrência e mudar status avisam outras pessoas: só depois de
+  // confirmar aqui (nunca direto do toque no botão).
+  const [confirm, setConfirm] = useState<{ title: string; message: string; label: string; run: () => Promise<void> } | null>(null);
   const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
   const managerTourSteps: TourStep[] = [
     { key: 'create', title: 'Registrar ocorrência', description: 'Escolha a categoria (barulho, dano, manutenção, segurança, conduta ou outros) e a unidade envolvida entre as opções listadas, depois descreva o que aconteceu. Como síndico/subsíndico você precisa selecionar a unidade antes de conseguir enviar — sem ela o botão fica desabilitado.' },
@@ -86,8 +89,19 @@ export default function Occurrences({ navigation }: any) {
     setUpdates(data.updates);
   };
 
+  const askCreate = () => {
+    if (description.trim().length < 3 || (manager && !unitId)) return;
+    const unitLabel = manager ? units.find(u => u.id === unitId)?.label : null;
+    setConfirm({
+      title: 'Registrar esta ocorrência?',
+      message: `${categoryLabels[category]}${unitLabel ? ` · ${unitLabel}` : ''}\n\n"${description.trim()}"\n\n${manager ? 'O morador da unidade pode ser avisado.' : 'O síndico e o subsíndico serão avisados.'}`,
+      label: 'Registrar',
+      run: create,
+    });
+  };
+
   const create = async () => {
-    if (!userToken || description.trim().length < 3) return;
+    if (!userToken || sending || description.trim().length < 3) return;
     if (manager && !unitId) return;
     setSending(true);
     try {
@@ -114,11 +128,22 @@ export default function Occurrences({ navigation }: any) {
     }
   };
 
+  const askChangeStatus = (status: string) => setConfirm({
+    title: `Marcar como "${statusLabels[status]}"?`,
+    message: 'Quem registrou a ocorrência é avisado da mudança.',
+    label: 'Confirmar',
+    run: () => changeStatus(status),
+  });
+
   const changeStatus = async (status: string) => {
     if (!userToken || !selected) return;
-    await apiRequest(`/occurrences/${selected.id}`, userToken, { method: 'PATCH', body: JSON.stringify({ status }) });
-    setSelected(current => current ? { ...current, status } : current);
-    await load();
+    try {
+      await apiRequest(`/occurrences/${selected.id}`, userToken, { method: 'PATCH', body: JSON.stringify({ status }) });
+      setSelected(current => current ? { ...current, status } : current);
+      await load();
+    } catch (e) {
+      setDialog({ visible: true, title: 'Não foi possível alterar', message: e instanceof Error ? e.message : 'Tente novamente.', tone: 'error' });
+    }
   };
 
   const transformIntoNotice = () => {
@@ -168,7 +193,7 @@ export default function Occurrences({ navigation }: any) {
           <Text style={styles.label}>Descrição</Text>
           <TextInput value={description} onChangeText={setDescription} multiline placeholder="Descreva o que aconteceu" style={[styles.input, styles.area]} />
           <View style={styles.action}>
-            <AppButton title={sending ? 'Enviando...' : 'Registrar ocorrência'} onPress={create} loading={sending} disabled={description.trim().length < 3 || (manager && !unitId)} />
+            <AppButton title={sending ? 'Enviando...' : 'Registrar ocorrência'} onPress={askCreate} loading={sending} disabled={description.trim().length < 3 || (manager && !unitId)} />
           </View>
         </Panel>
         </View>
@@ -213,7 +238,7 @@ export default function Occurrences({ navigation }: any) {
             {manager ? (
               <View style={styles.statusActions}>
                 {['em_analise', 'respondida', 'resolvida', 'arquivada'].filter(s => s !== selected.status).map(s => (
-                  <Pressable key={s} onPress={() => changeStatus(s)}><Text style={styles.link}>{statusLabels[s]}</Text></Pressable>
+                  <Pressable key={s} onPress={() => askChangeStatus(s)}><Text style={styles.link}>{statusLabels[s]}</Text></Pressable>
                 ))}
               </View>
             ) : null}
@@ -243,6 +268,15 @@ export default function Occurrences({ navigation }: any) {
         ) : null}
       </ScrollView>
       <AppDialog {...dialog} onClose={() => setDialog(x => ({ ...x, visible: false }))} />
+      <AppDialog
+        visible={!!confirm}
+        title={confirm?.title || ''}
+        message={confirm?.message || ''}
+        confirmLabel={confirm?.label}
+        cancelLabel="Cancelar"
+        onConfirm={() => { const run = confirm?.run; setConfirm(null); if (run) void run(); }}
+        onClose={() => setConfirm(null)}
+      />
       <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} />
     </>
   );

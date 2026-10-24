@@ -1,5 +1,6 @@
 import type { Request } from 'express';
 import { query } from '../db';
+import { requestMeta } from './requestMeta';
 
 export type AuditFeature =
   | 'pessoas'
@@ -40,10 +41,11 @@ export const logAudit = async (
   if (!isManager && !isAuditableResident) return;
   const condominiumId = req.user?.condominiumId;
   if (!condominiumId) return;
+  const meta = requestMeta(req);
   try {
     await query(
-      `insert into audit_log(condominium_id,actor_id,actor_role,actor_name,feature,action,entity_id,description,details)
-       values($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      `insert into audit_log(condominium_id,actor_id,actor_role,actor_name,feature,action,entity_id,description,details,ip_address,user_agent)
+       values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [
         condominiumId,
         req.user?.id || null,
@@ -54,6 +56,8 @@ export const logAudit = async (
         opts?.entityId || null,
         description,
         opts?.details ? JSON.stringify(opts.details) : null,
+        meta.ip,
+        meta.userAgent,
       ],
     );
   } catch (error) {

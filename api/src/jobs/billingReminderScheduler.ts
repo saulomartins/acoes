@@ -1,4 +1,5 @@
 import cron from 'node-cron';
+import { query } from '../db';
 import { notifyDueSoonInvoices, transitionOverdueInvoices } from '../services/invoiceReminderService';
 import { generatePlatformInvoices, notifyPlatformInvoiceReminders, reconcilePlatformInvoices, renewExpiredPlatformInvoicePix } from '../services/platformInvoiceService';
 import { notifyPlatformSuspensionReminders } from '../services/platformSuspensionService';
@@ -21,6 +22,19 @@ const runDailyChecks = async () => {
     if (suspension.warnings || suspension.restricted) console.log(`Faturas da plataforma: ${suspension.warnings} aviso(s) de suspensão, ${suspension.restricted} condomínio(s) com gestão restrita.`);
   } catch (error) {
     console.error('Falha ao rodar os lembretes diários de boleto', error);
+  }
+  // Retenção do request_log (origem de cada escrita): 180 dias bastam pra
+  // investigar um "não fui eu" sem acumular IP/aparelho pra sempre (LGPD).
+  // refresh_tokens NÃO é apagada: "Logou no sistema" (condominiumRoutes)
+  // depende de existir pelo menos uma linha; lá só o IP/aparelho é limpo.
+  try {
+    await query(`delete from request_log where created_at < now() - interval '180 days'`);
+    await query(
+      `update refresh_tokens set ip_address = null, user_agent = null
+       where ip_address is not null and coalesce(revoked_at, expires_at) < now() - interval '180 days'`,
+    );
+  } catch (error) {
+    console.error('Falha na limpeza do request_log', error);
   }
 };
 

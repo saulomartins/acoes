@@ -345,6 +345,38 @@ alter table refresh_tokens add column if not exists active_profile_id uuid refer
 -- validateRefreshSession em authService.ts).
 alter table refresh_tokens add column if not exists replaced_by uuid references refresh_tokens(id) on delete set null;
 
+-- Prazo das sessões (ver SESSION_POLICY em authService): session_started_at é
+-- o login que originou a cadeia de rotações — passa adiante a cada renovação
+-- e limita a duração total, mesmo com uso contínuo. IP e aparelho da última
+-- renovação alimentam a tela "Dispositivos conectados".
+alter table refresh_tokens add column if not exists session_started_at timestamptz not null default now();
+alter table refresh_tokens add column if not exists ip_address text;
+alter table refresh_tokens add column if not exists user_agent text;
+create index if not exists refresh_tokens_user_active_idx on refresh_tokens(user_id) where revoked_at is null;
+-- Até 24/10/2026 a produção emitia sessões de ~100 anos (JWT_REFRESH_EXPIRES_IN).
+-- Traz as ativas para o prazo novo; idempotente (sessões novas nunca passam disso).
+update refresh_tokens set expires_at = now() + interval '14 days'
+where revoked_at is null and expires_at > now() + interval '14 days';
+
+-- Registro de toda ação de escrita autenticada (POST/PUT/PATCH/DELETE): quem,
+-- de qual sessão, IP e aparelho. É o que permite responder "fui eu mesmo que
+-- fiz isto?" — o audit_log descreve a ação, este registra a origem.
+create table if not exists request_log (
+  id bigserial primary key,
+  user_id uuid,
+  session_id uuid,
+  role text,
+  condominium_id uuid,
+  method text not null,
+  path text not null,
+  status integer,
+  ip_address text,
+  user_agent text,
+  created_at timestamptz not null default now()
+);
+create index if not exists request_log_user_idx on request_log(user_id, created_at desc);
+create index if not exists request_log_created_idx on request_log(created_at);
+
 -- "Entrar com biometria" no app nativo: credencial do aparelho, separada da
 -- sessão, que sobrevive ao "Sair" (que continua revogando a sessão de
 -- verdade). password_fingerprint é um hash do password_hash da época da
@@ -1298,6 +1330,8 @@ create table if not exists audit_log (
   created_at timestamptz not null default now()
 );
 create index if not exists audit_log_condominium_idx on audit_log(condominium_id, created_at desc);
+alter table audit_log add column if not exists ip_address text;
+alter table audit_log add column if not exists user_agent text;
 create index if not exists audit_log_feature_idx on audit_log(condominium_id, feature, created_at desc);
 
 -- audit_log já existe em bancos antigos — "create table if not exists" acima

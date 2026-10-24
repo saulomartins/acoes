@@ -22,6 +22,19 @@ export const Text = ({ maxFontSizeMultiplier = MAX_FONT_SCALE, ...props }: TextP
 // A cor padrão do texto também é fixada aqui: sem ela, Android com tema escuro
 // usa texto branco e campos sem "color" no estilo ficam invisíveis sobre o fundo
 // branco (inclusive as bolinhas de senha). Um "color" no style continua vencendo.
-export const TextInput = ({ maxFontSizeMultiplier = MAX_FONT_SCALE, style, ...props }: TextInputProps) => (
-  <RNTextInput maxFontSizeMultiplier={maxFontSizeMultiplier} style={[{ color: colors.ink }, style]} {...props} />
+//
+// Campo de texto livre (multiline: descrição de ocorrência, relato, resposta)
+// nasce com o preenchimento automático desligado: o navegador do celular
+// oferecia o CPF salvo como sugestão e ele acabou virando o texto de uma
+// ocorrência (out/2026). Campos de uma linha (login, CPF, e-mail) mantêm o
+// autofill — quem precisar desligar passa autoComplete explicitamente.
+export const TextInput = ({ maxFontSizeMultiplier = MAX_FONT_SCALE, style, multiline, autoComplete, importantForAutofill, ...props }: TextInputProps) => (
+  <RNTextInput
+    maxFontSizeMultiplier={maxFontSizeMultiplier}
+    style={[{ color: colors.ink }, style]}
+    multiline={multiline}
+    autoComplete={autoComplete ?? (multiline ? 'off' : undefined)}
+    importantForAutofill={importantForAutofill ?? (multiline ? 'no' : undefined)}
+    {...props}
+  />
 );

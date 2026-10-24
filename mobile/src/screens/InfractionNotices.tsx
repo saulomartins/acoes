@@ -3,7 +3,7 @@ import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, View } from '
 import { Text, TextInput } from '../ui/text';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
-import { AppButton, EmptyState, Panel } from '../ui/components';
+import { AppButton, AppDialog, EmptyState, Panel } from '../ui/components';
 import { colors } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import { formatCents } from '../utils/money';
@@ -39,6 +39,9 @@ export default function InfractionNotices({ navigation }: any) {
   const [cancelModal, setCancelModal] = useState<Notice | null>(null);
   const [reasonText, setReasonText] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // "Dar ciência" e "Confirmar" têm efeito formal (prazo de defesa, multa):
+  // só saem depois de confirmar neste diálogo.
+  const [ask, setAsk] = useState<{ kind: 'acknowledge' | 'confirm'; notice: Notice } | null>(null);
 
   const load = useCallback(async () => {
     if (!userToken) return;
@@ -213,9 +216,9 @@ export default function InfractionNotices({ navigation }: any) {
 
                   <View style={styles.modalActions}>
                     <AppButton title="Fechar" variant="secondary" onPress={() => setDetail(null)} />
-                    {canAcknowledge(detail.notice) ? <AppButton title="Dar ciência" onPress={() => acknowledge(detail.notice)} loading={submitting} /> : null}
+                    {canAcknowledge(detail.notice) ? <AppButton title="Dar ciência" onPress={() => setAsk({ kind: 'acknowledge', notice: detail.notice })} loading={submitting} /> : null}
                     {canContest(detail.notice) ? <AppButton title="Contestar" variant="secondary" onPress={() => { setContestModal(detail.notice); setReasonText(''); }} /> : null}
-                    {canConfirm(detail.notice) ? <AppButton title="Confirmar" onPress={() => confirm(detail.notice)} loading={submitting} /> : null}
+                    {canConfirm(detail.notice) ? <AppButton title="Confirmar" onPress={() => setAsk({ kind: 'confirm', notice: detail.notice })} loading={submitting} /> : null}
                     {canCancel(detail.notice) ? <AppButton title="Cancelar notificação" variant="danger" onPress={() => { setCancelModal(detail.notice); setReasonText(''); }} /> : null}
                   </View>
                 </>
@@ -252,6 +255,17 @@ export default function InfractionNotices({ navigation }: any) {
           </View>
         </View>
       </Modal>
+      <AppDialog
+        visible={!!ask}
+        title={ask?.kind === 'acknowledge' ? 'Dar ciência desta notificação?' : 'Confirmar esta notificação?'}
+        message={ask?.kind === 'acknowledge'
+          ? 'Fica registrado que você recebeu e leu a notificação, com data e hora, e o prazo de pagamento começa a contar.'
+          : 'A defesa é considerada analisada, a notificação é mantida e a multa é lançada como cobrança para a unidade.'}
+        confirmLabel={ask?.kind === 'acknowledge' ? 'Dar ciência' : 'Confirmar'}
+        cancelLabel="Cancelar"
+        onConfirm={() => { const current = ask; setAsk(null); if (current?.kind === 'acknowledge') void acknowledge(current.notice); else if (current) void confirm(current.notice); }}
+        onClose={() => setAsk(null)}
+      />
     </>
   );
 }

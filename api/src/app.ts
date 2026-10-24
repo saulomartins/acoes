@@ -58,6 +58,19 @@ app.use((req, res, next) => {
 });
 
 app.disable('x-powered-by');
+// Atrás do proxy do Railway: confia em UM salto, então req.ip é o IP que o
+// proxy viu (o do cliente). Sem isso, todo mundo aparecia com o IP do proxy —
+// o limite de tentativas de login virava um balde único e a auditoria não
+// registrava a origem. Não usar `true`: aceitaria X-Forwarded-For forjado.
+app.set('trust proxy', 1);
+// A API só devolve JSON e PDFs; estes cabeçalhos fecham o básico (sniffing de
+// tipo, embutir em iframe de terceiros, vazar a URL de origem).
+app.use((_req, res, next) => {
+  res.header('X-Content-Type-Options', 'nosniff');
+  res.header('X-Frame-Options', 'DENY');
+  res.header('Referrer-Policy', 'no-referrer');
+  next();
+});
 
 app.use(express.json());
 

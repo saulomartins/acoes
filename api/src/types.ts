@@ -15,8 +15,12 @@ export type AuthenticatedUser = {
   // null = perfil padrão (role/condominiumId direto da linha em `users`).
   // Setado = um dos perfis extras em `user_profiles` (ver authService.switchProfile).
   activeProfileId?: string | null;
+  // Sessão (refresh_tokens.id) que emitiu o access token. null em tokens
+  // emitidos antes de 24/10/2026, que não traziam `sid`.
+  sessionId?: string | null;
 };
 
 export type AccessTokenPayload = AuthenticatedUser & {
   sub: string;
+  sid?: string;
 };

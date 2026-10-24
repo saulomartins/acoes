@@ -5,6 +5,10 @@ import AppNavigator from './src/navigation/AppNavigator';
 import { AuthProvider } from './src/context/AuthContext';
 import BiometricGate from './src/ui/BiometricLock';
 import AppUpdateNotice from './src/ui/AppUpdateNotice';
+import { installGhostClickGuard } from './src/ui/ghostClickGuard';
+
+// Só na web (no app nativo não faz nada): ver ghostClickGuard.ts.
+installGhostClickGuard();
 
 export default function App() {
   // Print/gravação de tela liberados no app inteiro (decisão explícita,

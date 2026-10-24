@@ -5,6 +5,21 @@ import { config } from '../config';
 import { query, withTransaction } from '../db';
 import type { AccessTokenPayload, AuthenticatedUser, UserRole } from '../types';
 import { sendPasswordResetEmail } from './emailService';
+import type { RequestMeta } from './requestMeta';
+
+// Prazo das sessões, fixo no código de propósito: até 24/10/2026 vinha de
+// JWT_REFRESH_EXPIRES_IN e a produção emitia sessões de ~100 anos.
+// - idle: sem uso por esse tempo, a sessão cai (cada renovação recomeça a conta).
+// - max: duração total desde o login, mesmo com uso contínuo — depois disso
+//   entra de novo (no app, a biometria resolve em um toque).
+// admin_geral enxerga todos os condomínios, então tem o prazo mais curto.
+const DAY_MS = 24 * 60 * 60_000;
+const SESSION_POLICY: Record<'admin' | 'default', { idleMs: number; maxMs: number }> = {
+  admin: { idleMs: 12 * 60 * 60_000, maxMs: 7 * DAY_MS },
+  default: { idleMs: 14 * DAY_MS, maxMs: 60 * DAY_MS },
+};
+const sessionPolicy = (baseRole: UserRole) => SESSION_POLICY[baseRole === 'admin_geral' ? 'admin' : 'default'];
+const NO_META: RequestMeta = { ip: null, userAgent: null };
 
 type DbUser = {
   id: string;
@@ -35,10 +50,11 @@ const publicUser = (user: Pick<DbUser, 'id' | 'username' | 'role' | 'condominium
   tourCompletedAt: user.tour_completed_at?.toISOString() || null,
 });
 
-const signAccessToken = (user: AuthenticatedUser) =>
+const signAccessToken = (user: AuthenticatedUser, sessionId: string) =>
   jwt.sign(
     {
       sub: user.id,
+      sid: sessionId,
       id: user.id,
       username: user.username,
       role: user.role,
@@ -51,29 +67,29 @@ const signAccessToken = (user: AuthenticatedUser) =>
     { expiresIn: config.accessTokenExpiresIn } as SignOptions,
   );
 
-const signRefreshToken = (sessionId: string, userId: string) =>
-  jwt.sign({ sub: userId, sid: sessionId }, config.refreshTokenSecret, {
-    expiresIn: config.refreshTokenExpiresIn,
-  } as SignOptions);
+const signRefreshToken = (sessionId: string, userId: string, expiresAt: Date) =>
+  jwt.sign({ sub: userId, sid: sessionId, exp: Math.floor(expiresAt.getTime() / 1000) }, config.refreshTokenSecret);
 
 // Grava `user.activeProfileId` na sessão (refresh_tokens.active_profile_id) —
 // é o que permite um /auth/refresh em segundo plano restaurar o mesmo perfil
 // trocado via switchProfile, em vez de reverter pro perfil padrão.
-const createSession = async (user: AuthenticatedUser) => {
+// `startedAt` é o login original (rotação passa adiante); `baseRole` é o papel
+// da linha em `users`, que define o prazo — não o do perfil ativo.
+const createSession = async (user: AuthenticatedUser, baseRole: UserRole, meta: RequestMeta, startedAt = new Date()) => {
   const sessionId = randomUUID();
-  const refreshToken = signRefreshToken(sessionId, user.id);
+  const policy = sessionPolicy(baseRole);
+  const expiresAt = new Date(Math.min(Date.now() + policy.idleMs, startedAt.getTime() + policy.maxMs));
+  const refreshToken = signRefreshToken(sessionId, user.id, expiresAt);
   const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
-  const decoded = jwt.decode(refreshToken) as { exp?: number } | null;
-  const expiresAt = decoded?.exp ? new Date(decoded.exp * 1000) : new Date('9999-12-31T23:59:59.999Z');
 
   await query(
-    `insert into refresh_tokens (id, user_id, token_hash, expires_at, active_profile_id)
-     values ($1, $2, $3, $4, $5)`,
-    [sessionId, user.id, refreshTokenHash, expiresAt, user.activeProfileId ?? null],
+    `insert into refresh_tokens (id, user_id, token_hash, expires_at, active_profile_id, session_started_at, ip_address, user_agent)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [sessionId, user.id, refreshTokenHash, expiresAt, user.activeProfileId ?? null, startedAt, meta.ip, meta.userAgent],
   );
 
   return {
-    token: signAccessToken(user),
+    token: signAccessToken(user, sessionId),
     refreshToken,
     user,
   };
@@ -82,8 +98,8 @@ const createSession = async (user: AuthenticatedUser) => {
 // Troca a sessão `oldSid` por uma nova e registra a substituta em
 // replaced_by — é isso que validateRefreshSession usa para distinguir perda
 // de resposta (recupera) de reuso de token vazado (derruba tudo).
-const rotateSession = async (oldSid: string, user: AuthenticatedUser) => {
-  const response = await createSession(user);
+const rotateSession = async (oldSid: string, user: AuthenticatedUser, baseRole: UserRole, meta: RequestMeta, startedAt: Date) => {
+  const response = await createSession(user, baseRole, meta, startedAt);
   const newSid = (jwt.decode(response.refreshToken) as { sid: string }).sid;
   await query(
     `update refresh_tokens set revoked_at = coalesce(revoked_at, now()), replaced_by = $2 where id = $1`,
@@ -131,8 +147,8 @@ const resolveActiveProfile = async (
 // validação antes de decidir qual perfil ativar.
 const validateRefreshSession = async (refreshToken: string) => {
   const payload = jwt.verify(refreshToken, config.refreshTokenSecret) as { sub: string; sid: string };
-  const sessionResult = await query<{ id: string; token_hash: string; revoked_at: Date | null; active_profile_id: string | null; replaced_by: string | null }>(
-    `select id, token_hash, revoked_at, active_profile_id, replaced_by
+  const sessionResult = await query<{ id: string; token_hash: string; revoked_at: Date | null; active_profile_id: string | null; replaced_by: string | null; session_started_at: Date }>(
+    `select id, token_hash, revoked_at, active_profile_id, replaced_by, session_started_at
      from refresh_tokens
      where id = $1 and user_id = $2 and expires_at > now()`,
     [payload.sid, payload.sub],
@@ -161,7 +177,7 @@ const validateRefreshSession = async (refreshToken: string) => {
       [session.replaced_by, payload.sub],
     );
     if (child.rows[0]) {
-      return { sid: payload.sid as string, userId: payload.sub as string, activeProfileId: child.rows[0].active_profile_id };
+      return { sid: payload.sid as string, userId: payload.sub as string, activeProfileId: child.rows[0].active_profile_id, startedAt: session.session_started_at };
     }
 
     // A substituta também já foi rotacionada: alguém reapresentou um token
@@ -174,7 +190,7 @@ const validateRefreshSession = async (refreshToken: string) => {
     return null;
   }
 
-  return { sid: payload.sid as string, userId: payload.sub as string, activeProfileId: session.active_profile_id };
+  return { sid: payload.sid as string, userId: payload.sub as string, activeProfileId: session.active_profile_id, startedAt: session.session_started_at };
 };
 
 export const register = async (username: string, password: string, role: UserRole = 'admin_geral') => {
@@ -192,7 +208,7 @@ export const register = async (username: string, password: string, role: UserRol
     return result.rows[0];
   });
 
-  return createSession(publicUser(created));
+  return createSession(publicUser(created), created.role, NO_META);
 };
 
 // Resultado especial de login(): o identificador informado (CPF ou e-mail)
@@ -214,7 +230,7 @@ export const AMBIGUOUS_LOGIN = 'ambiguous_login' as const;
 // A senha é conferida antes de qualquer aviso de ambiguidade de propósito:
 // avisar só pela existência de duplicata vazaria que aquele CPF/e-mail tem
 // conta no sistema para quem não sabe a senha.
-export const login = async (identifier: string, password: string) => {
+export const login = async (identifier: string, password: string, meta: RequestMeta = NO_META) => {
   const normalizedIdentifier = identifier.trim().toLowerCase();
   // CPF é gravado quase sempre com 11 dígitos, mas há registro com máscara —
   // por isso a comparação normaliza os dois lados para dígitos.
@@ -258,10 +274,10 @@ export const login = async (identifier: string, password: string) => {
   }
   if (!user) return null;
 
-  return createSession(publicUser(user));
+  return createSession(publicUser(user), user.role, meta);
 };
 
-export const refresh = async (refreshToken: string) => {
+export const refresh = async (refreshToken: string, meta: RequestMeta = NO_META) => {
   const session = await validateRefreshSession(refreshToken);
   if (!session) return null;
 
@@ -272,8 +288,7 @@ export const refresh = async (refreshToken: string) => {
   // sem isso, o app trocaria de volta pro perfil padrão a cada refresh.
   const activeProfile = await resolveActiveProfile(session.activeProfileId, user);
 
-  // Rotaciona sessões antigas para a política persistente atual.
-  return rotateSession(session.sid, { ...publicUser(user), ...activeProfile });
+  return rotateSession(session.sid, { ...publicUser(user), ...activeProfile }, user.role, meta, session.startedAt);
 };
 
 // Perfis disponíveis para este login: o padrão (a própria linha em `users`,
@@ -304,7 +319,7 @@ export const listProfiles = async (userId: string) => {
 // token exatamente como refresh() (mesma detecção de reuso), confirma que o
 // profileId pedido pertence a este login, e rotaciona a sessão já com o
 // novo perfil ativo.
-export const switchProfile = async (refreshToken: string, profileId: string | null) => {
+export const switchProfile = async (refreshToken: string, profileId: string | null, meta: RequestMeta = NO_META) => {
   const session = await validateRefreshSession(refreshToken);
   if (!session) return null;
 
@@ -317,7 +332,51 @@ export const switchProfile = async (refreshToken: string, profileId: string | nu
   }
 
   const activeProfile = await resolveActiveProfile(profileId, user);
-  return rotateSession(session.sid, { ...publicUser(user), ...activeProfile });
+  return rotateSession(session.sid, { ...publicUser(user), ...activeProfile }, user.role, meta, session.startedAt);
+};
+
+// "Dispositivos conectados": as sessões ativas do login. Cada renovação cria
+// uma linha nova e revoga a anterior, então a linha ativa é a ponta da cadeia
+// e created_at é a última atividade daquele aparelho.
+export const listSessions = async (userId: string) => (await query<{ id: string; session_started_at: Date; created_at: Date; ip_address: string | null; user_agent: string | null }>(
+  `select id, session_started_at, created_at, ip_address, user_agent
+   from refresh_tokens
+   where user_id = $1 and revoked_at is null and expires_at > now()
+   order by created_at desc`,
+  [userId],
+)).rows;
+
+export const revokeSession = async (userId: string, sessionId: string) => (await query(
+  `update refresh_tokens set revoked_at = now() where id = $1 and user_id = $2 and revoked_at is null returning id`,
+  [sessionId, userId],
+)).rows.length > 0;
+
+// "Sair de todos os outros aparelhos": derruba as outras sessões e também a
+// entrada por biometria dos outros aparelhos (senão ela abriria uma sessão
+// nova lá). `keepBiometricToken` é a credencial deste aparelho, que fica.
+export const revokeOtherSessions = async (userId: string, currentSessionId: string | null, keepBiometricToken?: string | null) => {
+  const sessions = await query(
+    `update refresh_tokens set revoked_at = now()
+     where user_id = $1 and revoked_at is null and ($2::uuid is null or id <> $2::uuid) returning id`,
+    [userId, currentSessionId],
+  );
+  await query(
+    `update biometric_tokens set revoked_at = now()
+     where user_id = $1 and revoked_at is null and ($2::text is null or token_hash <> $2::text)`,
+    [userId, keepBiometricToken ? hashBiometricToken(keepBiometricToken) : null],
+  );
+  return sessions.rows.length;
+};
+
+// Sessão revogada de verdade (logout, "sair dos outros", troca de senha,
+// suspensão) — não por rotação, que é a renovação normal. O middleware usa
+// pra cortar na hora o access token ainda dentro dos 15 min de validade.
+export const isSessionRevoked = async (sessionId: string) => {
+  const result = await query<{ revoked: boolean }>(
+    `select (revoked_at is not null and replaced_by is null) or expires_at <= now() as revoked from refresh_tokens where id = $1`,
+    [sessionId],
+  );
+  return result.rows[0]?.revoked ?? true;
 };
 
 export const revokeRefreshToken = async (refreshToken: string) => {
@@ -338,7 +397,7 @@ const hashResetToken = (token: string) => createHash('sha256').update(token).dig
 // (guardado no SecureStore) por uma sessão nova, como se fosse um login.
 // Vale BIOMETRIC_TOKEN_TTL_DAYS desde o último uso e cai sozinha quando a
 // senha muda (password_fingerprint) ou o login é desabilitado.
-const BIOMETRIC_TOKEN_TTL_DAYS = 180;
+const BIOMETRIC_TOKEN_TTL_DAYS = 90;
 const hashBiometricToken = (token: string) => createHash('sha256').update(token).digest('hex');
 const passwordFingerprint = (passwordHash: string) => createHash('sha256').update(passwordHash).digest('hex');
 
@@ -354,7 +413,7 @@ export const createBiometricToken = async (userId: string) => {
   return token;
 };
 
-export const loginWithBiometricToken = async (token: string) => {
+export const loginWithBiometricToken = async (token: string, meta: RequestMeta = NO_META) => {
   const result = await query<DbUser & { biometric_id: string; password_fingerprint: string }>(
     `select b.id biometric_id, b.password_fingerprint, u.id, u.username, u.password_hash, u.role, u.condominium_id, u.full_name, u.must_change_password, u.terms_accepted_version, u.terms_accepted_at, u.tour_completed_version, u.tour_completed_at, c.name condominium_name
      from biometric_tokens b
@@ -373,7 +432,7 @@ export const loginWithBiometricToken = async (token: string) => {
     `update biometric_tokens set last_used_at=now(), expires_at=now() + make_interval(days => $2) where id=$1`,
     [row.biometric_id, BIOMETRIC_TOKEN_TTL_DAYS],
   );
-  return createSession(publicUser(row));
+  return createSession(publicUser(row), row.role, meta);
 };
 
 export const revokeBiometricToken = async (token: string) => {
@@ -425,7 +484,10 @@ export const resetPassword = async (token: string, password: string) => {
   });
 };
 
-export const changePassword = async (userId: string, password: string) => {
+// Trocar a senha derruba as sessões dos outros aparelhos (quem pegou a senha
+// antiga perde o acesso); a deste aparelho continua. A biometria dos outros
+// cai sozinha pelo password_fingerprint.
+export const changePassword = async (userId: string, password: string, currentSessionId: string | null = null) => {
   const passwordHash = await bcrypt.hash(password, 10);
   const result = await query<DbUser>(
     `update users set password_hash=$1, must_change_password=false where id=$2
@@ -434,6 +496,10 @@ export const changePassword = async (userId: string, password: string) => {
   );
   const user = result.rows[0];
   if (!user) return null;
+  await query(
+    `update refresh_tokens set revoked_at = now() where user_id = $1 and revoked_at is null and ($2::uuid is null or id <> $2::uuid)`,
+    [userId, currentSessionId],
+  );
   const condominium = await query<{ name: string | null }>(`select name from condominiums where id=$1`, [user.condominium_id]);
   return publicUser({ ...user, condominium_name: condominium.rows[0]?.name || null });
 };
@@ -443,6 +509,7 @@ export const verifyAccessToken = (token: string): AuthenticatedUser => {
 
   return {
     id: payload.sub,
+    sessionId: payload.sid ?? null,
     username: payload.username,
     role: payload.role,
     condominiumId: payload.condominiumId,
