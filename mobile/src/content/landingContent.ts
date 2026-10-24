@@ -85,17 +85,6 @@ export const LEGAL_BASES = [
   { purpose: 'Medir visitas ao site público', basis: 'Consentimento, pelo aviso de cookies (art. 7º, I)' },
 ];
 
-// Quem processa dados em nome do Lar em Dia (operadores/suboperadores).
-export const PROCESSORS = [
-  { name: 'Railway', role: 'Servidores e banco de dados da plataforma' },
-  { name: 'Cloudflare', role: 'Hospedagem do site' },
-  { name: 'Google Drive', role: 'Arquivos do condomínio, na pasta do próprio condomínio' },
-  { name: 'Banco Inter', role: 'Emissão de boletos e Pix das cobranças' },
-  { name: 'Mercado Pago', role: 'Pix da assinatura da plataforma' },
-  { name: 'Resend', role: 'Envio de e-mails' },
-  { name: 'Expo', role: 'Notificações no celular' },
-  { name: 'Google Analytics e Ads', role: 'Medição do site público, só com o seu aceite' },
-];
 
 export const RETENTION = [
   'Enquanto o condomínio usa o Lar em Dia, os dados ficam disponíveis para ele.',
@@ -113,7 +102,7 @@ export const PRIVACY_FAQ = [
   { question: 'E se alguém entrar na minha conta?', answer: 'Abra "Dispositivos conectados" no menu: lá aparecem todos os aparelhos com a sua conta aberta, com data e IP. Toque em "Sair dos outros aparelhos" e troque a senha — isso desconecta todo mundo, menos você. Cada alteração fica registrada com o aparelho que fez, e a equipe pode investigar com você.' },
   { question: 'Onde ficam os documentos e comprovantes?', answer: 'No Google Drive do próprio condomínio, que é o dono dos arquivos. O sistema abre os arquivos para quem tem permissão, sem precisar de conta Google. Nada fica guardado dentro do nosso banco de dados.' },
   { question: 'Como corrijo ou apago meus dados?', answer: `Dados do cadastro (nome, unidade, telefone) são corrigidos pelo síndico ou subsíndico. Para os demais direitos da LGPD — acesso, cópia, eliminação —, escreva para ${PRIVACY_EMAIL}. Dados financeiros podem ter guarda obrigatória por lei.` },
-  { question: 'Com quem vocês compartilham meus dados?', answer: 'Só com os serviços que fazem o sistema funcionar: Railway (servidores), Cloudflare (site), Google Drive (arquivos do condomínio), Banco Inter (boletos e Pix), Resend (e-mails) e Expo (notificações). Cada um recebe apenas o necessário para a sua tarefa.' },
+  { question: 'Com quem vocês compartilham meus dados?', answer: `Só com os serviços que fazem o sistema funcionar — hospedagem e banco de dados, o banco que emite os boletos e o Pix, envio de e-mails, notificações no celular e o Google Drive do próprio condomínio. Cada um recebe apenas o necessário para a sua tarefa, e nenhum usa os dados para publicidade. A lista completa pode ser pedida pelo ${PRIVACY_EMAIL}.` },
   { question: 'E se o condomínio deixar de usar o Lar em Dia?', answer: 'Os dados são do condomínio. Ele pode pedir uma cópia e, depois, a exclusão — respeitando os prazos de guarda que a lei exige para registros financeiros e de acesso. Os arquivos continuam no Google Drive do condomínio.' },
   { question: 'E se acontecer um incidente de segurança?', answer: 'A LGPD (art. 48) obriga a avisar o condomínio e, quando houver risco relevante, a Autoridade Nacional de Proteção de Dados (ANPD) e as pessoas afetadas. É o que fazemos: identificar, conter, registrar e avisar quem precisa saber.' },
 ];

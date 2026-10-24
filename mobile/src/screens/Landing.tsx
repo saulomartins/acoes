@@ -9,7 +9,7 @@ import { CardGrid } from '../ui/grid';
 import { openCookiePreferences, trackConversion, trackEvent } from '../utils/analytics';
 import ChatAssistant from '../ui/ChatAssistant';
 import CookieConsent from '../ui/CookieConsent';
-import { BENEFITS, DATA_RIGHTS, DATA_WE_PROCESS, FEATURES, FEATURE_GROUPS, LEGAL_BASES, LGPD_ROLES, PRIVACY_EMAIL, PRIVACY_FAQ, PROCESSORS, PROFILES, RETENTION, SECURITY_PILLARS, Feature } from '../content/landingContent';
+import { BENEFITS, DATA_RIGHTS, DATA_WE_PROCESS, FEATURES, FEATURE_GROUPS, LEGAL_BASES, LGPD_ROLES, PRIVACY_EMAIL, PROFILES, RETENTION, SECURITY_PILLARS, Feature } from '../content/landingContent';
 
 // Sistema visual próprio da landing: paleta sofisticada (índigo/violeta),
 // cantos arredondados generosos e sombra suave discreta — deliberadamente
@@ -223,7 +223,6 @@ const LGPD_TABS = [
   { key: 'papeis', label: 'Quem é quem' },
   { key: 'dados', label: 'Dados que tratamos' },
   { key: 'finalidades', label: 'Para quê' },
-  { key: 'compartilhamento', label: 'Com quem' },
   { key: 'retencao', label: 'Por quanto tempo' },
   { key: 'direitos', label: 'Seus direitos' },
 ];
@@ -248,14 +247,6 @@ const LgpdTabContent = ({ tab, columns }: { tab: string; columns: number }) => {
         </View>
       ))}
     </View>
-  );
-  if (tab === 'compartilhamento') return (
-    <>
-      <CardGrid columns={{ mobile: 1, tablet: 2, desktop: columns >= 3 ? 4 : 2 }} gap={10}>
-        {PROCESSORS.map((item) => <View key={item.name} style={styles.lgpdBox}><Text style={styles.lgpdBoxTitle}>{item.name}</Text><Text style={styles.lgpdBoxText}>{item.role}</Text></View>)}
-      </CardGrid>
-      <Text style={styles.lgpdNote}>Cada serviço recebe só o necessário para a sua tarefa. Não vendemos dados, e nenhum deles usa os dados dos moradores para publicidade.</Text>
-    </>
   );
   if (tab === 'retencao') return (
     <View style={{ gap: 10 }}>
@@ -324,9 +315,6 @@ export default function Landing({ navigation, route }: any) {
   const [demoTab, setDemoTab] = useState(DEMO_TABS[0].key);
   const activeDemo = DEMO_TABS.find((d) => d.key === demoTab) || DEMO_TABS[0];
   const [lgpdTab, setLgpdTab] = useState(LGPD_TABS[0].key);
-  const [openFaq, setOpenFaq] = useState<number | null>(0);
-  // Incrementado pelo "Perguntar à Lari" da seção de segurança (abre o chat no assunto).
-  const [lariSecurityRequest, setLariSecurityRequest] = useState(0);
   const openPrivacyPolicy = () => navigation.navigate('LegalDocument', { document: 'privacy' });
 
   const phoneFloat = useRef(new Animated.Value(0)).current;
@@ -684,35 +672,6 @@ export default function Landing({ navigation, route }: any) {
             </ScrollView>
             <LgpdTabContent tab={lgpdTab} columns={desktop ? 4 : tablet ? 2 : 1} />
           </View>
-
-          <View style={[styles.faqWrap, desktop && styles.faqWrapDesktop]}>
-            <View style={[styles.faqIntro, desktop && styles.faqIntroDesktop]}>
-              <Text style={styles.lgpdPanelEyebrow}>PERGUNTAS FREQUENTES</Text>
-              <Text style={styles.lgpdPanelTitle}>O que moradores e síndicos mais perguntam</Text>
-              <Text style={styles.securitySubtitleSmall}>Não achou a sua? A Lari responde na hora, e o canal de privacidade responde por e-mail.</Text>
-              <View style={styles.securityActions}>
-                <PillButton title="Perguntar à Lari" onPress={() => setLariSecurityRequest((current) => current + 1)} />
-                <PillButton title="Política de Privacidade" onPress={openPrivacyPolicy} tone="ghostLight" />
-              </View>
-              <Pressable onPress={() => Linking.openURL(`mailto:${PRIVACY_EMAIL}?subject=${encodeURIComponent('Privacidade e dados pessoais (LGPD)')}`)}>
-                <Text style={styles.privacyChannel}>Canal de privacidade: {PRIVACY_EMAIL}</Text>
-              </Pressable>
-            </View>
-            <View style={styles.faqList}>
-              {PRIVACY_FAQ.map((item, index) => {
-                const isOpen = openFaq === index;
-                return (
-                  <Pressable key={item.question} onPress={() => setOpenFaq(isOpen ? null : index)} style={[styles.faqItem, isOpen && styles.faqItemOpen]} accessibilityRole="button" accessibilityState={{ expanded: isOpen }}>
-                    <View style={styles.faqQuestionRow}>
-                      <Text style={styles.faqQuestion}>{item.question}</Text>
-                      <Text style={styles.faqToggle}>{isOpen ? '−' : '+'}</Text>
-                    </View>
-                    {isOpen ? <Text style={styles.faqAnswer}>{item.answer}</Text> : null}
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
         </LinearGradient>
 
         {/* 11. PLANOS / ORÇAMENTO — formulário inteligente */}
@@ -827,7 +786,7 @@ export default function Landing({ navigation, route }: any) {
           </View>
         </View>
       </ScrollView>
-      <ChatAssistant onOpenPill={(slug) => navigation.navigate('Pills', { slug })} onRequestProposal={() => scrollToSection('planos')} onOpenLogin={goToLogin} onOpenPrivacy={openPrivacyPolicy} securityRequest={lariSecurityRequest} />
+      <ChatAssistant onOpenPill={(slug) => navigation.navigate('Pills', { slug })} onRequestProposal={() => scrollToSection('planos')} onOpenLogin={goToLogin} onOpenPrivacy={openPrivacyPolicy} />
       <CookieConsent onOpenPrivacy={openPrivacyPolicy} />
     </View>
   );
@@ -896,7 +855,7 @@ const styles = StyleSheet.create({
   aurora: { position: 'absolute', borderRadius: 999, ...({ filter: 'blur(90px)' } as any) },
   auroraPrimary: { width: 460, height: 460, top: -140, right: '8%', backgroundColor: '#C7CAFF', opacity: 0.55 },
   auroraViolet: { width: 380, height: 380, top: 120, right: '32%', backgroundColor: '#E5D4FF', opacity: 0.5 },
-  auroraEmerald: { width: 320, height: 320, bottom: -160, left: -60, backgroundColor: '#C9F3E4', opacity: 0.55 },
+  auroraEmerald: { width: 320, height: 320, top: '60%', left: -60, backgroundColor: '#C9F3E4', opacity: 0.55 },
   newsPill: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(255,255,255,0.75)', borderWidth: 1, borderColor: '#DCDDFB', borderRadius: 999, paddingLeft: 5, paddingRight: 14, paddingVertical: 5, marginBottom: 22, flexShrink: 1 },
   newsPillTag: { backgroundColor: C.primary, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
   newsPillTagText: { color: '#fff', fontSize: 10.5, fontWeight: '900', letterSpacing: 0.6 },
@@ -1024,13 +983,14 @@ const styles = StyleSheet.create({
   // de landing SaaS), contrastando com o resto da página clara.
   securitySection: { paddingVertical: 76, position: 'relative', overflow: 'hidden' },
   securityGlowA: { width: 520, height: 520, top: -180, right: -120, backgroundColor: '#4F46E5', opacity: 0.35 },
-  securityGlowB: { width: 420, height: 420, bottom: -160, left: -100, backgroundColor: '#0EA57A', opacity: 0.18 },
+  // Ancorada pelo topo: com `bottom` negativo, o navegador esticava a seção
+  // (sobrava um vão vazio abaixo do painel LGPD).
+  securityGlowB: { width: 420, height: 420, top: '45%', left: -140, backgroundColor: '#0EA57A', opacity: 0.18 },
   securityEyebrowPill: { alignSelf: 'flex-start', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, marginBottom: 18 },
   securityEyebrowText: { color: '#C7CCFF', fontSize: 12, fontWeight: '900', letterSpacing: 0.8 },
   securityTitle: { color: '#fff', fontSize: 30, lineHeight: 36, fontWeight: '900', letterSpacing: -0.5, maxWidth: 720 },
   securityTitleDesktop: { fontSize: 40, lineHeight: 46 },
   securitySubtitle: { color: '#AEB6CF', fontSize: 16.5, lineHeight: 24, marginTop: 14, marginBottom: 34, maxWidth: 680, fontWeight: '500' },
-  securitySubtitleSmall: { color: '#AEB6CF', fontSize: 14.5, lineHeight: 21, marginTop: 8, fontWeight: '500' },
   securityCard: { backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.11)', borderRadius: 20, padding: 20, minHeight: 188 },
   securityCardIcon: { width: 42, height: 42, borderRadius: 13, backgroundColor: 'rgba(124,58,237,0.22)', borderWidth: 1, borderColor: 'rgba(199,204,255,0.25)', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   securityCardIconText: { fontSize: 19 },
@@ -1057,19 +1017,6 @@ const styles = StyleSheet.create({
   lgpdRights: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   lgpdRight: { borderRadius: 999, backgroundColor: 'rgba(14,165,122,0.16)', borderWidth: 1, borderColor: 'rgba(142,240,203,0.3)', paddingHorizontal: 13, paddingVertical: 8 },
   lgpdRightText: { color: '#D8FBEC', fontWeight: '800', fontSize: 13 },
-  faqWrap: { marginTop: 40, gap: 24 },
-  faqWrapDesktop: { flexDirection: 'row', alignItems: 'flex-start' },
-  faqIntro: { gap: 4 },
-  faqIntroDesktop: { flex: 0.8, paddingRight: 12 },
-  securityActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 20 },
-  privacyChannel: { color: '#C7CCFF', fontSize: 13, fontWeight: '800', textDecorationLine: 'underline', marginTop: 14 },
-  faqList: { flex: 1.2, gap: 10 },
-  faqItem: { backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 16, paddingHorizontal: 18, paddingVertical: 15 },
-  faqItemOpen: { backgroundColor: 'rgba(255,255,255,0.09)', borderColor: 'rgba(199,204,255,0.35)' },
-  faqQuestionRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  faqQuestion: { flex: 1, color: '#fff', fontWeight: '800', fontSize: 15 },
-  faqToggle: { color: '#C7CCFF', fontSize: 22, fontWeight: '700', width: 22, textAlign: 'center' },
-  faqAnswer: { color: '#C0C7DB', fontSize: 14, lineHeight: 21, marginTop: 10, fontWeight: '500' },
 
   pillSearchRow: { maxWidth: 720, marginBottom: 26 },
   pillSearchField: { backgroundColor: C.surface },
