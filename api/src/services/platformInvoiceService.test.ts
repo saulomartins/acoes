@@ -102,7 +102,7 @@ vi.mock('../db', () => {
       return [{ id: params[0], name: 'Essencial', plan_type: 'included_overage', included_quantity: 40, base_price_cents: 9900, overage_price_cents: 500, minimum_price_cents: 0, price_per_active_user_cents: null, active_user_metric: 'registered' }];
     }
     if (s.startsWith('select * from platform_plan_tiers')) return [];
-    if (s === 'select name, email from condominiums where id=$1') return [{ name: 'Residencial Teste', email: db.condominiumEmail }];
+    if (s === 'select name, email, cnpj from condominiums where id=$1') return [{ name: 'Residencial Teste', email: db.condominiumEmail, cnpj: '11222333000181' }];
     if (s.startsWith('select id, full_name, email, cpf from users')) return db.managers;
     throw new Error(`fake db: SQL não reconhecido: ${s}`);
   };
@@ -401,7 +401,9 @@ describe('renewExpiredPlatformInvoicePix', () => {
     expect(createPixChargeMock.mock.calls[0][0]).toMatchObject({
       amountCents: 19900,
       externalReference: 'inv-1',
-      payerEmail: 'ana@example.com',
+      payerEmail: 'contato@residencial.example.com',
+      payerFirstName: 'Residencial',
+      payerDocument: '11222333000181',
       idempotencyKey: expect.stringMatching(/^inv-1-renova-ORD-ANTIGA-\d{4}-\d{2}-\d{2}T\d{2}$/),
     });
     expect(invoice.pix_payment_id).toBe('ORD-NOVA');

@@ -39,8 +39,8 @@ const buildReceiptAttachment = async (row: InvoiceRow): Promise<EmailAttachment 
 // recibo) vai só pro e-mail cadastrado do condomínio — nunca pros e-mails
 // pessoais de síndico/subsíndico, que seguem recebendo só o aviso no app.
 // Condomínio sem e-mail cadastrado não recebe e-mail.
-const loadCondominium = async (condominiumId: string) => (await query<{ name: string; email: string | null }>(
-  `select name, email from condominiums where id=$1`,
+const loadCondominium = async (condominiumId: string) => (await query<CondominiumContact>(
+  `select name, email, cnpj from condominiums where id=$1`,
   [condominiumId],
 )).rows[0] || null;
 
@@ -173,30 +173,41 @@ const formatMonthLabel = (referenceMonth: Date) =>
   referenceMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
 type Manager = { id: string; full_name: string | null; email: string | null; cpf: string | null };
+type CondominiumContact = { name: string; email: string | null; cnpj: string | null };
+
+// Quem aparece como pagador no Mercado Pago: o próprio condomínio (e-mail,
+// nome e CNPJ do cadastro), que é quem paga a assinatura — o mesmo e-mail que
+// recebe a fatura. Sem e-mail no cadastro do condomínio, cai no primeiro
+// gestor com e-mail (comportamento anterior).
+const resolvePayer = (condo: CondominiumContact | null, managers: Manager[]) => {
+  if (condo?.email) return { email: condo.email, name: condo.name, document: condo.cnpj };
+  const manager = managers.find(m => m.email);
+  return manager?.email ? { email: manager.email, name: manager.full_name || '', document: manager.cpf } : null;
+};
 
 // Cria a cobrança Pix da fatura e guarda no banco — uma só, compartilhada
-// entre síndico e subsíndico (qualquer um paga). O pagador é o primeiro
-// gestor com e-mail cadastrado. Devolve null (sem lançar) quando o Mercado
-// Pago não está configurado, não há e-mail de gestor ou a criação falha —
-// nesses casos o e-mail da fatura sai só informativo, e o admin pode gerar
-// o Pix depois pelo painel de Recebimentos.
+// entre síndico e subsíndico (qualquer um paga). Pagador: ver resolvePayer.
+// Devolve null (sem lançar) quando o Mercado Pago não está configurado, não
+// há e-mail de pagador ou a criação falha — nesses casos o e-mail da fatura
+// sai só informativo, e o admin pode gerar o Pix depois pelo painel de
+// Recebimentos.
 const createAndStorePix = async (
-  invoiceId: string, condominiumName: string, referenceMonth: Date, amountCents: number, managers: Manager[], idempotencyKey?: string,
+  invoiceId: string, condo: CondominiumContact | null, referenceMonth: Date, amountCents: number, managers: Manager[], idempotencyKey?: string,
 ): Promise<PlatformInvoicePix | null> => {
-  const payer = managers.find(m => m.email);
-  if (!isMercadoPagoConfigured() || !payer?.email) return null;
+  const payer = resolvePayer(condo, managers);
+  if (!isMercadoPagoConfigured() || !payer) return null;
   try {
-    const [firstName, ...rest] = (payer.full_name || '').trim().split(/\s+/);
+    const [firstName, ...rest] = payer.name.trim().split(/\s+/);
     const charge = await createPixCharge({
       amountCents,
-      description: `Assinatura Lar em Dia — ${condominiumName} — ${formatMonthLabel(referenceMonth)}`,
+      description: `Assinatura Lar em Dia — ${condo?.name || ''} — ${formatMonthLabel(referenceMonth)}`,
       externalReference: invoiceId,
       idempotencyKey,
       expiresInDays: PLATFORM_PIX_VALID_DAYS,
       payerEmail: payer.email,
       payerFirstName: firstName || undefined,
       payerLastName: rest.length ? rest.join(' ') : undefined,
-      payerDocument: payer.cpf,
+      payerDocument: payer.document,
     });
     await query(
       `update platform_invoices set pix_payment_id=$2, pix_copy_paste=$3, pix_qr_code_base64=$4, pix_expires_at=$5 where id=$1`,
@@ -221,8 +232,8 @@ const loadManagers = async (condominiumId: string) => (await query<Manager>(
 // existe fatura para esse mês — a unique constraint em platform_invoices
 // impede duplicar o envio quando essa checagem roda em vários logins.
 export const checkAndSendPlatformInvoice = async (condominiumId: string): Promise<boolean> => {
-  const condo = await query<{ platform_status: string; name: string; email: string | null }>(
-    `select platform_status, name, email from condominiums where id=$1`,
+  const condo = await query<{ platform_status: string } & CondominiumContact>(
+    `select platform_status, name, email, cnpj from condominiums where id=$1`,
     [condominiumId],
   );
   if (!condo.rows[0] || condo.rows[0].platform_status !== 'active') return false;
@@ -267,7 +278,7 @@ export const checkAndSendPlatformInvoice = async (condominiumId: string): Promis
   }
 
   const managers = await loadManagers(condominiumId);
-  const pix = await createAndStorePix(invoiceId, condo.rows[0].name, referenceMonth, amountCents, managers);
+  const pix = await createAndStorePix(invoiceId, condo.rows[0], referenceMonth, amountCents, managers);
   const dueDate = new Date((await query<{ due_date: string }>(`select to_char(due_date,'YYYY-MM-DD') as due_date from platform_invoices where id=$1`, [invoiceId])).rows[0].due_date + 'T00:00:00Z');
 
   const title = 'Fatura da plataforma disponível';
@@ -343,11 +354,11 @@ export const reissuePlatformInvoicePix = async (
   if (row.status !== 'pending' && row.status !== 'sent') return { ok: false, message: 'Só é possível gerar Pix para fatura em aberto.' };
 
   const managers = await loadManagers(row.condominium_id);
-  if (!managers.some(m => m.email)) return { ok: false, message: 'Nenhum síndico/subsíndico do condomínio tem e-mail cadastrado.' };
-
   const condo = await loadCondominium(row.condominium_id);
+  if (!resolvePayer(condo, managers)) return { ok: false, message: 'Nem o condomínio nem os síndicos/subsíndicos têm e-mail cadastrado.' };
+
   const referenceMonth = new Date(row.reference_month);
-  const pix = await createAndStorePix(invoiceId, condo?.name || '', referenceMonth, row.amount_cents, managers, options.idempotencyKey || `${invoiceId}-${Date.now()}`);
+  const pix = await createAndStorePix(invoiceId, condo, referenceMonth, row.amount_cents, managers, options.idempotencyKey || `${invoiceId}-${Date.now()}`);
   if (!pix) return { ok: false, message: 'O Mercado Pago recusou a criação do Pix. Veja o log da API para o motivo.' };
 
   const plan = (await query<PlatformPlan & { name: string }>(`select * from platform_plans where id=$1`, [row.plan_id])).rows[0];

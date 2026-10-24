@@ -84,7 +84,7 @@ export default function GoogleDriveIntegrationGuide() {
       <Panel>
         <Text style={s.sectionTitle}>Integração com o Google Drive</Text>
         <Text style={s.sectionDescription}>
-          Como vincular a pasta do Google Drive de um condomínio. Desde 24/10/2026 ela é obrigatória para a prestação de contas: notas, comprovantes e extratos vão sempre para o Drive do condomínio, nunca para o banco de dados. Sem pasta, o síndico não consegue anexar.
+          Como vincular a pasta do Google Drive de um condomínio. Desde 24/10/2026 ela é obrigatória: notas, comprovantes e extratos da prestação de contas, o PDF do regimento e os anexos de ocorrência vão sempre para o Drive do condomínio, nunca para o banco de dados. Sem pasta, ninguém consegue anexar.
         </Text>
         <View style={s.callout}>
           <Text style={s.calloutTitle}>Importante: é uma conta só para toda a plataforma</Text>

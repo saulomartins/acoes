@@ -8,6 +8,7 @@ import { query } from '../db';
 import { logAudit } from '../services/auditService';
 import { STARTER_REGULATION_TEMPLATE } from '../db/seeds/regulationArticleTemplate';
 import { uploadDriveFile, downloadDriveFile, deleteDriveFile } from '../services/googleDriveService';
+import { DRIVE_REQUIRED_MESSAGE } from '../services/driveMigrationService';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
@@ -129,6 +130,8 @@ router.post('/document', receivePdf, asyncHandler(async (req, res) => {
   }
   const condominium = await query<{ google_drive_folder_id: string | null }>(`select google_drive_folder_id from condominiums where id=$1`, [condominiumId]);
   const rootFolderId = condominium.rows[0]?.google_drive_folder_id;
+  // Arquivo sempre no Google Drive do condomínio (desde 24/10/2026).
+  if (!rootFolderId) return res.status(400).json({ message: DRIVE_REQUIRED_MESSAGE });
   const previous = await query<{ drive_file_id: string | null }>(`select drive_file_id from regulation_documents where condominium_id=$1`, [condominiumId]);
   let driveFileId: string | null = null;
   let content: Buffer | null = req.file.buffer;

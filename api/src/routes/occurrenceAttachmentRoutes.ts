@@ -7,6 +7,7 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { query } from '../db';
 import { findOrCreateMonthFolder, uploadDriveFile, downloadDriveFile, deleteDriveFile } from '../services/googleDriveService';
 import { logAudit } from '../services/auditService';
+import { DRIVE_REQUIRED_MESSAGE, DRIVE_REQUIRED_RESIDENT_MESSAGE } from '../services/driveMigrationService';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -51,6 +52,8 @@ router.post('/:occurrenceId', upload.single('file'), asyncHandler(async (req, re
   const occurrence = await query<{ created_at: string }>(`select created_at from occurrences where id=$1`, [req.params.occurrenceId]);
   const condominium = await query<{ google_drive_folder_id: string | null }>(`select google_drive_folder_id from condominiums where id=$1`, [condominiumId]);
   const rootFolderId = condominium.rows[0]?.google_drive_folder_id;
+  // Arquivo sempre no Google Drive do condomínio (desde 24/10/2026).
+  if (!rootFolderId) return res.status(400).json({ message: manager(req.user?.role) ? DRIVE_REQUIRED_MESSAGE : DRIVE_REQUIRED_RESIDENT_MESSAGE });
 
   let driveFileId: string | null = null;
   let content: Buffer | null = req.file.buffer;

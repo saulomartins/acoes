@@ -443,7 +443,7 @@ export default function Condominiums({ navigation }: any) {
               </>
             ) : null}
           </View>
-          <Text style={styles.whatsappHint}>Obrigatória para a prestação de contas: sem pasta, o síndico não consegue anexar notas, comprovantes nem extrato. Cole o link da pasta do Drive do condomínio, compartilhada como Editor com laremdia.condominio@gmail.com. Ao salvar, os arquivos que ainda estiverem no sistema são levados para o Drive automaticamente ("Mover arquivos" faz isso na hora e mostra o resultado).</Text>
+          <Text style={styles.whatsappHint}>Obrigatória: todos os arquivos do condomínio (prestação de contas, PDF do regimento e anexos de ocorrência) ficam só nela. Sem pasta, ninguém consegue anexar. Cole o link da pasta do Drive do condomínio, compartilhada como Editor com laremdia.condominio@gmail.com. Ao salvar, os arquivos que ainda estiverem no sistema são levados para o Drive automaticamente ("Mover arquivos" faz isso na hora e mostra o resultado).</Text>
           {driveError ? <Text style={styles.error}>{driveError}</Text> : null}
           {driveNotice ? <Text style={styles.success}>{driveNotice}</Text> : null}
         </FormFieldFull>

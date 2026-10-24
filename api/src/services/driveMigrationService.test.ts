@@ -5,14 +5,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const db = vi.hoisted(() => ({
   folder: 'pasta-raiz' as string | null,
   attachments: [] as Array<{ expense_id: string; kind: string; reference_month: string; file_name: string; mime_type: string; content: Buffer | null; drive_file_id: string | null }>,
+  regulation: null as null | { content: Buffer | null; drive_file_id: string | null; folder?: string },
 }));
 
 vi.mock('../db', () => ({
   query: vi.fn(async (sql: string, params: any[] = []) => {
     const s = sql.replace(/\s+/g, ' ').trim();
     if (s.startsWith('select google_drive_folder_id from condominiums')) return { rows: [{ google_drive_folder_id: db.folder }] };
-    if (s.includes('from accountability_report_statements')) return { rows: [], rowCount: 0 };
-    if (s.startsWith('select expense_id, kind, to_char')) {
+    if (s.includes('from accountability_report_statements') || s.includes('from occurrence_attachments')) return { rows: [], rowCount: 0 };
+    if (s.startsWith('select t.condominium_id, null reference_month')) {
+      return { rows: db.regulation && !db.regulation.drive_file_id ? [{ condominium_id: 'condo-1', reference_month: null, file_name: 'regimento.pdf', mime_type: 'application/pdf' }] : [] };
+    }
+    if (s.startsWith('select content from regulation_documents')) return { rows: db.regulation ? [{ content: db.regulation.content }] : [] };
+    if (s.startsWith('update regulation_documents set drive_file_id')) {
+      if (!db.regulation || db.regulation.drive_file_id) return { rowCount: 0 };
+      db.regulation.drive_file_id = params[1]; db.regulation.content = null; db.regulation.folder = drive.lastFolder;
+      return { rowCount: 1 };
+    }
+    if (s.startsWith('select t.expense_id, t.kind,')) {
       return { rows: db.attachments.filter(a => a.content && !a.drive_file_id).map(({ content, drive_file_id, ...rest }) => rest) };
     }
     const find = () => db.attachments.find(a => a.expense_id === params[0] && a.kind === params[1]);
@@ -27,13 +37,14 @@ vi.mock('../db', () => ({
   }),
 }));
 
-const drive = vi.hoisted(() => ({ files: new Map<string, number>(), next: 0, failUpload: false, wrongSize: false }));
+const drive = vi.hoisted(() => ({ files: new Map<string, number>(), next: 0, failUpload: false, wrongSize: false, lastFolder: '' }));
 vi.mock('./googleDriveService', () => ({
   isGoogleDriveConfigured: () => true,
   getDriveFolderMeta: vi.fn(async () => ({ id: 'pasta-raiz' })),
   findOrCreateMonthFolder: vi.fn(async (_root: string, month: string) => `mes-${month.slice(0, 7)}`),
-  uploadDriveFile: vi.fn(async (_folder: string, _name: string, _mime: string, buffer: Buffer) => {
+  uploadDriveFile: vi.fn(async (folder: string, _name: string, _mime: string, buffer: Buffer) => {
     if (drive.failUpload) throw new Error('Drive fora');
+    drive.lastFolder = folder;
     const id = `arquivo-${++drive.next}`;
     drive.files.set(id, drive.wrongSize ? buffer.length - 1 : buffer.length);
     return id;
@@ -52,6 +63,7 @@ const addAttachment = (expenseId: string, bytes = 1000) => db.attachments.push({
 beforeEach(() => {
   db.folder = 'pasta-raiz';
   db.attachments = [];
+  db.regulation = null;
   drive.files.clear(); drive.next = 0; drive.failUpload = false; drive.wrongSize = false;
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -88,6 +100,13 @@ describe('migrateCondominiumFilesToDrive', () => {
     expect(result.moved).toBe(0);
     expect(result.skipped).toBeTruthy();
     expect(db.attachments[0].content?.length).toBe(1000);
+  });
+
+  it('regimento em PDF vai para a raiz da pasta do condomínio', async () => {
+    db.regulation = { content: Buffer.alloc(300, 2), drive_file_id: null };
+    await expect(migrateCondominiumFilesToDrive('condo-1')).resolves.toEqual({ moved: 1, failed: 0 });
+    expect(db.regulation.content).toBeNull();
+    expect(db.regulation.folder).toBe('pasta-raiz');
   });
 
   it('rodar de novo não envia o mesmo arquivo duas vezes', async () => {
