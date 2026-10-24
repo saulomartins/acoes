@@ -4,7 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Text, TextInput } from './text';
 import { API_BASE_URL } from '../api/client';
 import { useBreakpoint } from './responsive';
-import { BENEFITS, FEATURE_GROUPS, PROFILES } from '../content/landingContent';
+import { BENEFITS, FEATURE_GROUPS, LGPD_ROLES, PRIVACY_EMAIL, PRIVACY_FAQ, PROFILES, SECURITY_PILLARS } from '../content/landingContent';
 import LariMascot from './LariMascot';
 import { useCookieBannerHeight } from './CookieConsent';
 import { trackEvent } from '../utils/analytics';
@@ -24,7 +24,8 @@ type PillDetail = PillSummary & { sources: Array<{ label: string; url?: string }
 type Message =
   | { id: number; from: 'bot' | 'user'; kind: 'text'; text: string }
   | { id: number; from: 'bot'; kind: 'answer'; pill: PillDetail; related: PillSummary[] }
-  | { id: number; from: 'bot'; kind: 'about'; topic: AboutTopic; profile?: Profile };
+  | { id: number; from: 'bot'; kind: 'about'; topic: AboutTopic; profile?: Profile }
+  | { id: number; from: 'bot'; kind: 'privacy'; faqIndex: number };
 // Omit "distributivo": aplica o Omit em cada variante da união, senão o TS
 // achata a união e perde os campos específicos de cada tipo de mensagem.
 type WithoutId<T> = T extends unknown ? Omit<T, 'id'> : never;
@@ -53,7 +54,7 @@ const CONTACT_EMAIL = 'laremdia.condominio@gmail.com';
 const LOGIN_URL = 'https://gestaolaremdia.com/login';
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.appcond.condominio';
 
-export type AboutTopic = 'hiring' | 'features' | 'benefits' | 'independence' | 'login' | 'mobileApp';
+export type AboutTopic = 'hiring' | 'features' | 'benefits' | 'independence' | 'login' | 'mobileApp' | 'security';
 type Profile = (typeof PROFILES)[number]['key'];
 
 const TOPIC_LABELS: Record<Exclude<AboutTopic, 'independence'>, string> = {
@@ -62,17 +63,38 @@ const TOPIC_LABELS: Record<Exclude<AboutTopic, 'independence'>, string> = {
   hiring: 'Como contratar',
   login: 'Como entrar no sistema',
   mobileApp: 'Tem aplicativo?',
+  security: 'Segurança e LGPD',
 };
 type LabeledTopic = keyof typeof TOPIC_LABELS;
 // Menu de "Conhecer o Lar em Dia" e atalhos no fim de cada cartão.
-const MENU_TOPICS: LabeledTopic[] = ['features', 'benefits', 'hiring', 'mobileApp', 'login'];
+const MENU_TOPICS: LabeledTopic[] = ['features', 'benefits', 'security', 'hiring', 'mobileApp', 'login'];
 const FOLLOW_UPS: Record<AboutTopic, LabeledTopic[]> = {
-  features: ['benefits', 'hiring'],
+  features: ['benefits', 'security', 'hiring'],
   benefits: ['features', 'hiring'],
-  hiring: ['features', 'benefits'],
+  hiring: ['features', 'security'],
   independence: ['features', 'hiring'],
-  login: ['mobileApp'],
+  login: ['mobileApp', 'security'],
   mobileApp: ['login'],
+  security: ['features', 'hiring'],
+};
+
+// Pergunta de segurança/privacidade escrita livremente → qual das perguntas
+// frequentes (PRIVACY_FAQ, mesma ordem) responde. null = mostra o panorama.
+const PRIVACY_FAQ_MATCHERS: RegExp[] = [
+  /(quem (ve|pode ver|tem acesso|enxerga)|outros moradores (veem|podem ver)|sindico (ve|pode ver))/,
+  /(vend|propaganda|anuncio|publicidade|comercializ)/,
+  /(senha)/,
+  /(entr(ou|aram)|invad|hacke|us(ou|aram)|acess(ou|aram)|mexeu|mexeram).{0,25}(minha )?conta|nao fui eu|alguem (entrou|usou|acessou)|conta invadida|clonad/,
+  /(documento|comprovante|arquivo|anexo|drive|nota fiscal|onde ficam)/,
+  /(apag|exclu|corrig|delet|remov|alterar meus dados|direito)/,
+  /(compartilh|parceir|terceir|fornecedor|quem recebe)/,
+  /(sair do|deixar de usar|cancel|encerr|rescind)/,
+  /(vazament|vazou|incidente|ataque|anpd)/,
+];
+export const matchPrivacyFaq = (text: string): number | null => {
+  const value = normalize(text);
+  const index = PRIVACY_FAQ_MATCHERS.findIndex((pattern) => pattern.test(value));
+  return index >= 0 && index < PRIVACY_FAQ.length ? index : null;
 };
 
 // Perguntas sobre o Lar em Dia em si (e não sobre direito condominial), e
@@ -84,6 +106,10 @@ const normalize = (text: string) => text.toLowerCase().normalize('NFD').replace(
 export const detectLarEmDiaIntent = (text: string): AboutTopic | null => {
   const value = normalize(text);
   if (/plano de reforma/.test(value)) return null;
+  // Segurança e privacidade vêm antes do login: "minha senha é segura?" é
+  // sobre proteção, não sobre como entrar ("esqueci minha senha" segue login).
+  if (/(lgpd|privacidade|dados pessoais|meus dados|protecao de dados|seguranc|segur[oa]s?\b|vazament|vazou|hacke|invadi|criptograf|cookies?|anpd|nao fui eu|alguem (entrou|usou|acessou)|(vend|compartilh)\w* (os |meus )?dados|(apagar|excluir|deletar) (os |meus )?dados|quem (ve|pode ver|tem acesso a)( os)? meus)/.test(value)
+    && !/esqueci/.test(value)) return 'security';
   if (/(\blogar\b|\blogin\b|loguin|entrar no (sistema|app|aplicativo|lar)|como (eu )?(entro|acesso|faco para entrar)|acessar (o sistema|minha conta|a plataforma|o app|o aplicativo)|esqueci (a |minha )?senha|minha senha|nao consigo (entrar|acessar))/.test(value)) return 'login';
   if (/(\bbaix(ar|o|e)\b|download|instal(ar|o|e)\b|android|iphone|\bios\b|play ?store|app ?store|google play|\bloja\b|celular|\bmobile\b|(tem|existe|possui|voces tem) (um )?(app|aplicativo))/.test(value)) return 'mobileApp';
   const mentionsProduct = /(lar ?em ?dia|\bsistema\b|aplicativo|\bapp\b|software|plataforma|\bvoces\b)/.test(value);
@@ -127,15 +153,47 @@ const IndependenceNote = () => (
   </View>
 );
 
+// Perguntas frequentes de privacidade em botões (cartão de segurança e
+// respostas individuais), para a pessoa seguir sem precisar digitar.
+const PrivacyQuestionChips = ({ exclude, onAsk, limit }: { exclude?: number; onAsk: (index: number) => void; limit?: number }) => (
+  <View style={styles.salesActions}>
+    {PRIVACY_FAQ.map((item, index) => ({ item, index })).filter(({ index }) => index !== exclude).slice(0, limit ?? PRIVACY_FAQ.length).map(({ item, index }) => (
+      <Pressable key={item.question} onPress={() => onAsk(index)} style={styles.chip}><Text style={styles.chipText}>{item.question}</Text></Pressable>
+    ))}
+  </View>
+);
+
+const PrivacyContactActions = ({ onOpenPrivacy }: { onOpenPrivacy?: () => void }) => (
+  <View style={styles.salesActions}>
+    {onOpenPrivacy ? <Pressable onPress={onOpenPrivacy} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Ler a Política de Privacidade</Text></Pressable> : null}
+    <Pressable onPress={() => Linking.openURL(`mailto:${PRIVACY_EMAIL}?subject=${encodeURIComponent('Privacidade e dados pessoais (LGPD)')}`)} style={styles.chip}><Text style={styles.chipText}>Falar com o canal de privacidade</Text></Pressable>
+  </View>
+);
+
+// Resposta a uma pergunta de privacidade (PRIVACY_FAQ), com o mesmo texto da landing.
+const PrivacyAnswerCard = ({ faqIndex, onAsk, onOpenPrivacy }: { faqIndex: number; onAsk: (index: number) => void; onOpenPrivacy?: () => void }) => {
+  const item = PRIVACY_FAQ[faqIndex];
+  return (
+    <View style={[styles.bubble, styles.bubbleBot, styles.answer]}>
+      <Text style={styles.answerCategory}>SEGURANÇA E LGPD</Text>
+      <Text style={styles.answerTitle}>{item.question}</Text>
+      <Text style={styles.answerText}>{item.answer}</Text>
+      <PrivacyContactActions onOpenPrivacy={onOpenPrivacy} />
+      <Text style={styles.followUpLabel}>Outras dúvidas sobre seus dados:</Text>
+      <PrivacyQuestionChips exclude={faqIndex} onAsk={onAsk} limit={3} />
+    </View>
+  );
+};
+
 // Respostas fixas sobre o próprio Lar em Dia. Cada cartão termina com atalhos
 // para os outros temas, para a conversa seguir sem a pessoa precisar digitar.
-const AboutCard = ({ topic, profile, onFollowUp, onRequestProposal, onOpenLogin }: { topic: AboutTopic; profile?: Profile; onFollowUp: (topic: LabeledTopic) => void; onRequestProposal?: () => void; onOpenLogin: () => void }) => {
+const AboutCard = ({ topic, profile, onFollowUp, onRequestProposal, onOpenLogin, onAskPrivacy, onOpenPrivacy }: { topic: AboutTopic; profile?: Profile; onFollowUp: (topic: LabeledTopic) => void; onRequestProposal?: () => void; onOpenLogin: () => void; onAskPrivacy: (index: number) => void; onOpenPrivacy?: () => void }) => {
   const followUps = FOLLOW_UPS[topic];
   const profileContent = PROFILES.find((item) => item.key === profile);
   const isManager = profile !== 'moradores';
   return (
     <View style={[styles.bubble, styles.bubbleBot, styles.answer]}>
-      <Text style={styles.answerCategory}>SOBRE O LAR EM DIA</Text>
+      <Text style={styles.answerCategory}>{topic === 'security' ? 'SEGURANÇA E LGPD' : 'SOBRE O LAR EM DIA'}</Text>
 
       {topic === 'features' ? (
         <>
@@ -228,6 +286,22 @@ const AboutCard = ({ topic, profile, onFollowUp, onRequestProposal, onOpenLogin 
         </>
       ) : null}
 
+      {topic === 'security' ? (
+        <>
+          <Text style={styles.answerTitle}>Seus dados protegidos — e como tratamos cada um</Text>
+          <Text style={styles.answerText}>Sem promessa vaga: isto é o que o sistema faz hoje.</Text>
+          {SECURITY_PILLARS.slice(0, 6).map((pillar) => (
+            <View key={pillar.title} style={styles.stepRow}><Text style={styles.check}>✓</Text><Text style={styles.stepText}><Text style={styles.bold}>{pillar.title}.</Text> {pillar.description}</Text></View>
+          ))}
+          <View style={styles.independence}>
+            <Text style={styles.independenceText}><Text style={styles.bold}>LGPD:</Text> {LGPD_ROLES.map((item) => `${item.role} — ${item.text}`).join(' ')}</Text>
+          </View>
+          <Text style={styles.followUpLabel}>Perguntas que as pessoas mais fazem:</Text>
+          <PrivacyQuestionChips onAsk={onAskPrivacy} />
+          <PrivacyContactActions onOpenPrivacy={onOpenPrivacy} />
+        </>
+      ) : null}
+
       <Text style={styles.followUpLabel}>Quer saber mais?</Text>
       <View style={styles.salesActions}>
         {followUps.map((key) => <Pressable key={key} onPress={() => onFollowUp(key)} style={styles.chip}><Text style={styles.chipText}>{TOPIC_LABELS[key]}</Text></Pressable>)}
@@ -236,7 +310,9 @@ const AboutCard = ({ topic, profile, onFollowUp, onRequestProposal, onOpenLogin 
   );
 };
 
-export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLogin }: { onOpenPill: (slug: string) => void; onRequestProposal?: () => void; onOpenLogin?: () => void }) {
+// `securityRequest`: a landing muda esse número (botão "Perguntar à Lari" da
+// seção de segurança) para abrir o chat já no assunto Segurança e LGPD.
+export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLogin, onOpenPrivacy, securityRequest }: { onOpenPill: (slug: string) => void; onRequestProposal?: () => void; onOpenLogin?: () => void; onOpenPrivacy?: () => void; securityRequest?: number }) {
   const { isDesktop, isTablet } = useBreakpoint();
   // No celular o aviso de cookies ocupa a largura toda: o balão (e o chat
   // aberto) sobem acima dele, senão o aviso cobriria o botão e o campo de texto.
@@ -279,9 +355,33 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLog
     setTeaser(false);
     if (messages.length) return;
     await botSays('Oi! Eu sou a Lari, assistente virtual do Lar em Dia. 👋', 500);
-    await botSays('Posso ajudar com dúvidas de condomínio: cobrança, assembleias, obras, inquilinos e mais. Sempre mostro a lei de onde tirei a resposta. Também explico como funciona, como contratar e como acessar o Lar em Dia.');
+    await botSays('Posso ajudar com dúvidas de condomínio: cobrança, assembleias, obras, inquilinos e mais. Sempre mostro a lei de onde tirei a resposta. Também explico como funciona, como contratar, como acessar o Lar em Dia e como protegemos os seus dados (LGPD).');
     await botSays('Escreva sua pergunta ou escolha um assunto abaixo.', 400);
   };
+
+  // Resposta a uma das perguntas frequentes de privacidade (botão ou texto livre).
+  const askPrivacy = async (faqIndex: number, typed?: string) => {
+    setChipMode('default');
+    push({ from: 'user', kind: 'text', text: typed || PRIVACY_FAQ[faqIndex].question });
+    trackEvent('lari_question', { answer_type: 'privacidade', topic: `faq_${faqIndex}` });
+    setTyping(true);
+    await wait(650);
+    setTyping(false);
+    push({ from: 'bot', kind: 'privacy', faqIndex });
+  };
+
+  // Aberto pela landing ("Perguntar à Lari" na seção de segurança).
+  useEffect(() => {
+    if (!securityRequest) return;
+    setOpen(true);
+    setTeaser(false);
+    trackEvent('lari_open', { origin: 'seguranca' });
+    void (async () => {
+      if (!messages.length) await botSays('Oi! Eu sou a Lari, assistente virtual do Lar em Dia. 👋', 400);
+      await explainAbout('Quero saber sobre segurança e LGPD', 'security');
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [securityRequest]);
 
   const sendQuestionToTeam = async (question: string, email: string) => {
     setTyping(true);
@@ -332,6 +432,11 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLog
   const ask = async (question: string) => {
     setChipMode('default');
     const topic = detectLarEmDiaIntent(question);
+    if (topic === 'security') {
+      // Pergunta específica ("vocês vendem meus dados?") vai direto à resposta.
+      const faqIndex = matchPrivacyFaq(question);
+      if (faqIndex !== null) { await askPrivacy(faqIndex, question); return; }
+    }
     if (topic) { await explainAbout(question, topic); return; }
     push({ from: 'user', kind: 'text', text: question });
     setTyping(true);
@@ -375,7 +480,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLog
   // Nesse caso quem rola é o onLayout da própria resposta (até o topo dela).
   const lastMessage = messages[messages.length - 1];
   useEffect(() => {
-    if (!open || ((lastMessage?.kind === 'answer' || lastMessage?.kind === 'about') && !typing)) return;
+    if (!open || ((lastMessage?.kind === 'answer' || lastMessage?.kind === 'about' || lastMessage?.kind === 'privacy') && !typing)) return;
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
   }, [messages, typing, open]);
 
@@ -402,7 +507,14 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLog
               if (message.kind === 'about') {
                 return (
                   <View key={message.id} style={styles.botRow} onLayout={(event) => { if (message.id === lastMessage?.id) scrollRef.current?.scrollTo({ y: Math.max(event.nativeEvent.layout.y - 8, 0), animated: true }); }}>
-                    <AboutCard topic={message.topic} profile={message.profile} onFollowUp={(topic) => explainAbout(TOPIC_LABELS[topic], topic)} onOpenLogin={() => { setOpen(false); if (onOpenLogin) onOpenLogin(); else Linking.openURL(LOGIN_URL); }} onRequestProposal={onRequestProposal ? () => { setOpen(false); onRequestProposal(); } : undefined} />
+                    <AboutCard topic={message.topic} profile={message.profile} onFollowUp={(topic) => explainAbout(TOPIC_LABELS[topic], topic)} onOpenLogin={() => { setOpen(false); if (onOpenLogin) onOpenLogin(); else Linking.openURL(LOGIN_URL); }} onRequestProposal={onRequestProposal ? () => { setOpen(false); onRequestProposal(); } : undefined} onAskPrivacy={(index) => askPrivacy(index)} onOpenPrivacy={onOpenPrivacy ? () => { setOpen(false); onOpenPrivacy(); } : undefined} />
+                  </View>
+                );
+              }
+              if (message.kind === 'privacy') {
+                return (
+                  <View key={message.id} style={styles.botRow} onLayout={(event) => { if (message.id === lastMessage?.id) scrollRef.current?.scrollTo({ y: Math.max(event.nativeEvent.layout.y - 8, 0), animated: true }); }}>
+                    <PrivacyAnswerCard faqIndex={message.faqIndex} onAsk={(index) => askPrivacy(index)} onOpenPrivacy={onOpenPrivacy ? () => { setOpen(false); onOpenPrivacy(); } : undefined} />
                   </View>
                 );
               }
@@ -457,6 +569,7 @@ export default function ChatAssistant({ onOpenPill, onRequestProposal, onOpenLog
                 ) : (
                   <>
                     {TOPICS.map((topic) => <Pressable key={topic.label} onPress={() => ask(topic.query)} style={styles.chip}><Text style={styles.chipText}>{topic.label}</Text></Pressable>)}
+                    <Pressable onPress={() => explainAbout('Quero saber sobre segurança e LGPD', 'security')} style={styles.chip}><Text style={styles.chipText}>🛡 Segurança e LGPD</Text></Pressable>
                     <Pressable onPress={() => explainAbout('Como entro no sistema?', 'login')} style={styles.chip}><Text style={styles.chipText}>Acessar o sistema</Text></Pressable>
                     <Pressable onPress={showAboutMenu} style={[styles.chip, styles.chipStrong]}><Text style={[styles.chipText, styles.chipStrongText]}>Conhecer o Lar em Dia</Text></Pressable>
                   </>

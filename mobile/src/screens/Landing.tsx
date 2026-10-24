@@ -9,7 +9,7 @@ import { CardGrid } from '../ui/grid';
 import { openCookiePreferences, trackConversion, trackEvent } from '../utils/analytics';
 import ChatAssistant from '../ui/ChatAssistant';
 import CookieConsent from '../ui/CookieConsent';
-import { BENEFITS, FEATURES, FEATURE_GROUPS, PROFILES, Feature } from '../content/landingContent';
+import { BENEFITS, DATA_RIGHTS, DATA_WE_PROCESS, FEATURES, FEATURE_GROUPS, LEGAL_BASES, LGPD_ROLES, PRIVACY_EMAIL, PRIVACY_FAQ, PROCESSORS, PROFILES, RETENTION, SECURITY_PILLARS, Feature } from '../content/landingContent';
 
 // Sistema visual próprio da landing: paleta sofisticada (índigo/violeta),
 // cantos arredondados generosos e sombra suave discreta — deliberadamente
@@ -103,7 +103,7 @@ const MockupFrame = ({ device, children, style }: { device: 'desktop' | 'phone';
     <View style={[styles.frameDesktop, style]}>
       <View style={styles.frameDesktopBar}>
         <View style={styles.frameDot} /><View style={styles.frameDot} /><View style={styles.frameDot} />
-        <View style={styles.frameUrl}><Text style={styles.frameUrlText}>app.laremdia.com.br</Text></View>
+        <View style={styles.frameUrl}><Text style={styles.frameUrlText}>🔒 gestaolaremdia.com</Text></View>
       </View>
       <View style={styles.frameDesktopBody}>{children}</View>
     </View>
@@ -186,11 +186,13 @@ const NAV_ITEMS = [
   { key: 'planos', label: 'Planos' },
   { key: 'conteudos', label: 'Conteúdos' },
   { key: 'pilulas', label: 'Pílulas' },
+  { key: 'seguranca', label: 'Segurança' },
   { key: 'contato', label: 'Contato' },
 ];
 
 const HERO_KPIS: Kpi[] = [{ label: 'saldo do mês', value: 'R$ 42.380' }, { label: 'inadimplência', value: '6%' }];
-const HERO_ROWS: Row[] = [{ label: 'Boletos emitidos', value: '48' }, { label: 'Pagos', value: '42' }, { label: 'Assembleia geral', value: '22/09' }];
+// Só módulos que existem (não há assembleias no sistema).
+const HERO_ROWS: Row[] = [{ label: 'Boletos emitidos', value: '48' }, { label: 'Pagos', value: '42' }, { label: 'Prestação de contas', value: 'Homologada' }];
 const HERO_PHONE_KPIS: Kpi[] = [{ label: 'meu boleto', value: 'R$ 412' }];
 const HERO_PHONE_ROWS: Row[] = [{ label: 'Aviso novo', value: 'Elevador' }, { label: 'Reserva', value: 'Salão · sáb' }];
 
@@ -215,16 +217,60 @@ const DEMO_TABS = [
   { key: 'app', label: 'Experiência no app', device: 'phone' as const, kpis: [{ label: 'meu boleto', value: 'R$ 412' }, { label: 'vencimento', value: '10/09' }], rows: [{ label: 'Aviso novo', value: 'Elevador' }, { label: 'Relato', value: 'Em andamento' }], note: 'Tudo que o morador precisa, direto do próprio login no celular.' },
 ];
 
-// Cada item aqui corresponde a algo real e verificável no código — nada de
-// promessa genérica de "backup" ou "compliance" que não dá pra sustentar.
-const SECURITY_ITEMS = [
-  { icon: '🔑', title: 'Controle de acessos e permissões', description: 'Cada perfil (síndico, subsíndico ou morador) vê e faz só o que pode, por função.' },
-  { icon: '🕓', title: 'Histórico de alterações', description: 'Edição, pagamento parcial e exclusão de débito registrados com data, motivo e responsável.' },
-  { icon: '🔒', title: 'Autenticação segura', description: 'Login com sessão protegida e senha criptografada — sem acesso indevido.' },
-  { icon: '📁', title: 'Comprovantes protegidos', description: 'Anexos da prestação de contas guardados com acesso controlado, organizados por mês.' },
-  { icon: '📋', title: 'Boas práticas de LGPD', description: 'Tratamento dos dados dos moradores alinhado aos princípios da lei.' },
-  { icon: '🎧', title: 'Suporte direto', description: 'Fala com quem desenvolve o sistema, sem central de atendimento terceirizada.' },
+// Abas do painel "Como tratamos seus dados" (conteúdo em content/landingContent.ts,
+// o mesmo que a Lari usa — cada frase corresponde a algo real do sistema).
+const LGPD_TABS = [
+  { key: 'papeis', label: 'Quem é quem' },
+  { key: 'dados', label: 'Dados que tratamos' },
+  { key: 'finalidades', label: 'Para quê' },
+  { key: 'compartilhamento', label: 'Com quem' },
+  { key: 'retencao', label: 'Por quanto tempo' },
+  { key: 'direitos', label: 'Seus direitos' },
 ];
+
+const LgpdTabContent = ({ tab, columns }: { tab: string; columns: number }) => {
+  if (tab === 'papeis') return (
+    <CardGrid columns={{ mobile: 1, tablet: 2, desktop: 2 }} gap={12}>
+      {LGPD_ROLES.map((item) => <View key={item.role} style={styles.lgpdBox}><Text style={styles.lgpdBoxTitle}>{item.role}</Text><Text style={styles.lgpdBoxText}>{item.text}</Text></View>)}
+    </CardGrid>
+  );
+  if (tab === 'dados') return (
+    <CardGrid columns={{ mobile: 1, tablet: 2, desktop: columns >= 3 ? 3 : 2 }} gap={12}>
+      {DATA_WE_PROCESS.map((item) => <View key={item.title} style={styles.lgpdBox}><Text style={styles.lgpdBoxTitle}>{item.title}</Text><Text style={styles.lgpdBoxText}>{item.text}</Text></View>)}
+    </CardGrid>
+  );
+  if (tab === 'finalidades') return (
+    <View style={styles.lgpdTable}>
+      {LEGAL_BASES.map((item) => (
+        <View key={item.purpose} style={styles.lgpdTableRow}>
+          <Text style={styles.lgpdTablePurpose}>{item.purpose}</Text>
+          <Text style={styles.lgpdTableBasis}>{item.basis}</Text>
+        </View>
+      ))}
+    </View>
+  );
+  if (tab === 'compartilhamento') return (
+    <>
+      <CardGrid columns={{ mobile: 1, tablet: 2, desktop: columns >= 3 ? 4 : 2 }} gap={10}>
+        {PROCESSORS.map((item) => <View key={item.name} style={styles.lgpdBox}><Text style={styles.lgpdBoxTitle}>{item.name}</Text><Text style={styles.lgpdBoxText}>{item.role}</Text></View>)}
+      </CardGrid>
+      <Text style={styles.lgpdNote}>Cada serviço recebe só o necessário para a sua tarefa. Não vendemos dados, e nenhum deles usa os dados dos moradores para publicidade.</Text>
+    </>
+  );
+  if (tab === 'retencao') return (
+    <View style={{ gap: 10 }}>
+      {RETENTION.map((item) => <View key={item} style={styles.lgpdBullet}><Text style={styles.lgpdBulletMark}>●</Text><Text style={styles.lgpdBoxText}>{item}</Text></View>)}
+    </View>
+  );
+  return (
+    <>
+      <View style={styles.lgpdRights}>
+        {DATA_RIGHTS.map((item) => <View key={item} style={styles.lgpdRight}><Text style={styles.lgpdRightText}>✓ {item}</Text></View>)}
+      </View>
+      <Text style={styles.lgpdNote}>Dados do cadastro (nome, unidade, telefone) são corrigidos pelo síndico ou subsíndico. Para os demais pedidos, escreva para {PRIVACY_EMAIL} — confirmamos a identidade e respondemos no prazo da LGPD.</Text>
+    </>
+  );
+};
 
 const QUOTE_PROFILES = ['Síndico(a)', 'Subsíndico(a)', 'Morador(a)'];
 const QUOTE_FEATURES = FEATURES.map((feature) => feature.title);
@@ -236,7 +282,7 @@ const FOOTER_COLUMNS = [
   { title: 'Institucional', links: ['Início', 'Soluções', 'Planos', 'Conteúdos', 'Pílulas do Condomínio'] },
   { title: 'Funcionalidades', links: ['Gestão financeira', 'Cobrança Pix e boleto', 'Enquetes', 'Reserva de espaços', 'APP do Morador'] },
   { title: 'Soluções por perfil', links: PROFILES.map((p) => p.label) },
-  { title: 'Suporte', links: ['Política de privacidade', 'Termos de uso', 'Preferências de cookies', 'Contato'] },
+  { title: 'Suporte', links: ['Segurança e LGPD', 'Política de privacidade', 'Termos de uso', 'Preferências de cookies', 'Contato'] },
 ];
 
 const onlyPersonName = (value: string) => value.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ' -]/g, '').replace(/\s{2,}/g, ' ').slice(0, 100);
@@ -277,6 +323,11 @@ export default function Landing({ navigation, route }: any) {
   const activeProfile = PROFILES.find((p) => p.key === profileTab) || PROFILES[0];
   const [demoTab, setDemoTab] = useState(DEMO_TABS[0].key);
   const activeDemo = DEMO_TABS.find((d) => d.key === demoTab) || DEMO_TABS[0];
+  const [lgpdTab, setLgpdTab] = useState(LGPD_TABS[0].key);
+  const [openFaq, setOpenFaq] = useState<number | null>(0);
+  // Incrementado pelo "Perguntar à Lari" da seção de segurança (abre o chat no assunto).
+  const [lariSecurityRequest, setLariSecurityRequest] = useState(0);
+  const openPrivacyPolicy = () => navigation.navigate('LegalDocument', { document: 'privacy' });
 
   const phoneFloat = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -357,7 +408,7 @@ export default function Landing({ navigation, route }: any) {
 
   const goToLogin = () => navigation.navigate('Login');
   const handleFooterLink = (link: string) => {
-    const sectionByLabel: Record<string,string> = { 'Início':'inicio', 'Soluções':'solucoes', 'Planos':'planos', 'Conteúdos':'conteudos' };
+    const sectionByLabel: Record<string,string> = { 'Início':'inicio', 'Soluções':'solucoes', 'Planos':'planos', 'Conteúdos':'conteudos', 'Segurança e LGPD':'seguranca' };
     if (sectionByLabel[link]) { scrollToSection(sectionByLabel[link]); return; }
     if (link === 'Pílulas do Condomínio') { navigation.navigate('Pills'); return; }
     if (link === 'Política de privacidade') { navigation.navigate('LegalDocument',{document:'privacy'}); return; }
@@ -408,9 +459,16 @@ export default function Landing({ navigation, route }: any) {
 
         {/* 2. HERO */}
         <View style={[styles.hero, hPad]}>
+          {/* Brilho de fundo (aurora) — decorativo, atrás do conteúdo. */}
+          <View pointerEvents="none" style={[styles.aurora, styles.auroraPrimary]} />
+          <View pointerEvents="none" style={[styles.aurora, styles.auroraViolet]} />
+          <View pointerEvents="none" style={[styles.aurora, styles.auroraEmerald]} />
           <View style={[styles.heroBody, desktop && styles.heroBodyDesktop]}>
             <View style={[styles.heroContent, desktop && styles.heroContentDesktop]}>
-              <View style={styles.eyebrowPill}><Text style={styles.eyebrowPillText}>GESTÃO CONDOMINIAL INTELIGENTE</Text></View>
+              <Pressable onPress={() => scrollToSection('seguranca')} style={styles.newsPill}>
+                <View style={styles.newsPillTag}><Text style={styles.newsPillTagText}>NOVO</Text></View>
+                <Text style={styles.newsPillText}>Privacidade transparente: veja como tratamos seus dados (LGPD) →</Text>
+              </Pressable>
               <Text style={[styles.heroTitle, desktop && styles.heroTitleDesktop]}>Gestão condominial inteligente, transparente e sem complicação.</Text>
               <Text style={styles.heroSubtitle}>Centralize finanças, comunicação, ocorrências, reservas, documentos e atividades administrativas em uma única plataforma.</Text>
 
@@ -420,10 +478,9 @@ export default function Landing({ navigation, route }: any) {
               </View>
 
               <View style={styles.trustRow}>
-                <Text style={styles.trustItem}>✓ Implantação simplificada</Text>
-                <Text style={styles.trustItem}>✓ Suporte especializado</Text>
-                <Text style={styles.trustItem}>✓ Dados protegidos</Text>
-                <Text style={styles.trustItem}>✓ Acesso pelo celular</Text>
+                {['Implantação simplificada', 'Suporte direto com quem desenvolve', 'Dados protegidos (LGPD)', 'App Android e navegador'].map((item) => (
+                  <View key={item} style={styles.trustChip}><Text style={styles.trustChipMark}>✓</Text><Text style={styles.trustItem}>{item}</Text></View>
+                ))}
               </View>
             </View>
 
@@ -436,6 +493,10 @@ export default function Landing({ navigation, route }: any) {
                 <View style={styles.brandStamp}>
                   <Image source={require('../../assets/lar-em-dia-wordmark.png')} style={styles.brandStampLogo} resizeMode="contain" />
                   <Text style={styles.brandStampTag}>gestão condominial</Text>
+                </View>
+                <View style={styles.glassChip}>
+                  <Text style={styles.glassChipIcon}>🛡</Text>
+                  <View><Text style={styles.glassChipTitle}>Dados protegidos</Text><Text style={styles.glassChipText}>Sessão com prazo · tudo registrado</Text></View>
                 </View>
               </View>
             ) : null}
@@ -593,22 +654,66 @@ export default function Landing({ navigation, route }: any) {
           <View style={styles.pillMore}><PillButton title={pills.length ? `Ver todas as ${pills.length} pílulas` : 'Ver as pílulas'} onPress={() => navigation.navigate('Pills')} tone="outline" small /></View>
         </View>
 
-        {/* 10. SEGURANÇA E CONFIANÇA */}
-        <View style={[styles.section, hPad]}>
-          <SectionMark id="seguranca" />
-          <Text style={styles.sectionEyebrow}>SEGURANÇA</Text>
-          <Text style={styles.sectionTitle}>Suas informações protegidas, do jeito certo</Text>
+        {/* 10. SEGURANÇA E PRIVACIDADE (LGPD) — conteúdo em content/landingContent.ts, o mesmo da Lari */}
+        <LinearGradient colors={['#0B1024', '#161D45']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.securitySection, hPad]} onLayout={registerSection('seguranca')}>
+          <View pointerEvents="none" style={[styles.aurora, styles.securityGlowA]} />
+          <View pointerEvents="none" style={[styles.aurora, styles.securityGlowB]} />
+          <View style={styles.securityEyebrowPill}><Text style={styles.securityEyebrowText}>🛡 SEGURANÇA E PRIVACIDADE · LGPD</Text></View>
+          <Text style={[styles.securityTitle, desktop && styles.securityTitleDesktop]}>Suas informações protegidas, do jeito certo</Text>
+          <Text style={styles.securitySubtitle}>Transparência de verdade: o que protegemos, quais dados tratamos, para quê, com quem e por quanto tempo. Sem selo inventado — só o que o sistema faz hoje.</Text>
 
           <CardGrid columns={{ mobile: 1, tablet: 2, desktop: 4 }} gap={14}>
-            {SECURITY_ITEMS.map((item) => (
-              <View key={item.title} style={styles.securityItem}>
-                <Text style={styles.securityIcon}>{item.icon}</Text>
-                <Text style={styles.securityTitle}>{item.title}</Text>
-                <Text style={styles.securityDescription}>{item.description}</Text>
+            {SECURITY_PILLARS.map((item) => (
+              <View key={item.title} style={styles.securityCard}>
+                <View style={styles.securityCardIcon}><Text style={styles.securityCardIconText}>{item.icon}</Text></View>
+                <Text style={styles.securityCardTitle}>{item.title}</Text>
+                <Text style={styles.securityCardText}>{item.description}</Text>
               </View>
             ))}
           </CardGrid>
-        </View>
+
+          <View style={styles.lgpdPanel}>
+            <Text style={styles.lgpdPanelEyebrow}>LGPD · LEI 13.709/2018</Text>
+            <Text style={styles.lgpdPanelTitle}>Como tratamos seus dados</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.lgpdTabs}>
+              {LGPD_TABS.map((tab) => (
+                <Pressable key={tab.key} onPress={() => setLgpdTab(tab.key)} style={[styles.lgpdTab, lgpdTab === tab.key && styles.lgpdTabOn]}>
+                  <Text style={[styles.lgpdTabText, lgpdTab === tab.key && styles.lgpdTabTextOn]}>{tab.label}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <LgpdTabContent tab={lgpdTab} columns={desktop ? 4 : tablet ? 2 : 1} />
+          </View>
+
+          <View style={[styles.faqWrap, desktop && styles.faqWrapDesktop]}>
+            <View style={[styles.faqIntro, desktop && styles.faqIntroDesktop]}>
+              <Text style={styles.lgpdPanelEyebrow}>PERGUNTAS FREQUENTES</Text>
+              <Text style={styles.lgpdPanelTitle}>O que moradores e síndicos mais perguntam</Text>
+              <Text style={styles.securitySubtitleSmall}>Não achou a sua? A Lari responde na hora, e o canal de privacidade responde por e-mail.</Text>
+              <View style={styles.securityActions}>
+                <PillButton title="Perguntar à Lari" onPress={() => setLariSecurityRequest((current) => current + 1)} />
+                <PillButton title="Política de Privacidade" onPress={openPrivacyPolicy} tone="ghostLight" />
+              </View>
+              <Pressable onPress={() => Linking.openURL(`mailto:${PRIVACY_EMAIL}?subject=${encodeURIComponent('Privacidade e dados pessoais (LGPD)')}`)}>
+                <Text style={styles.privacyChannel}>Canal de privacidade: {PRIVACY_EMAIL}</Text>
+              </Pressable>
+            </View>
+            <View style={styles.faqList}>
+              {PRIVACY_FAQ.map((item, index) => {
+                const isOpen = openFaq === index;
+                return (
+                  <Pressable key={item.question} onPress={() => setOpenFaq(isOpen ? null : index)} style={[styles.faqItem, isOpen && styles.faqItemOpen]} accessibilityRole="button" accessibilityState={{ expanded: isOpen }}>
+                    <View style={styles.faqQuestionRow}>
+                      <Text style={styles.faqQuestion}>{item.question}</Text>
+                      <Text style={styles.faqToggle}>{isOpen ? '−' : '+'}</Text>
+                    </View>
+                    {isOpen ? <Text style={styles.faqAnswer}>{item.answer}</Text> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        </LinearGradient>
 
         {/* 11. PLANOS / ORÇAMENTO — formulário inteligente */}
         <View style={[styles.section, styles.sectionAlt, hPad]} onLayout={registerSection('planos')}>
@@ -722,8 +827,8 @@ export default function Landing({ navigation, route }: any) {
           </View>
         </View>
       </ScrollView>
-      <ChatAssistant onOpenPill={(slug) => navigation.navigate('Pills', { slug })} onRequestProposal={() => scrollToSection('planos')} onOpenLogin={goToLogin} />
-      <CookieConsent onOpenPrivacy={() => navigation.navigate('LegalDocument', { document: 'privacy' })} />
+      <ChatAssistant onOpenPill={(slug) => navigation.navigate('Pills', { slug })} onRequestProposal={() => scrollToSection('planos')} onOpenLogin={goToLogin} onOpenPrivacy={openPrivacyPolicy} securityRequest={lariSecurityRequest} />
+      <CookieConsent onOpenPrivacy={openPrivacyPolicy} />
     </View>
   );
 }
@@ -785,7 +890,23 @@ const styles = StyleSheet.create({
   framePhoneNotch: { alignSelf: 'center', width: 54, height: 16, backgroundColor: C.ink, borderBottomLeftRadius: 10, borderBottomRightRadius: 10, marginTop: -1 },
   framePhoneBody: { padding: 12 },
 
-  hero: { paddingTop: 48, paddingBottom: 52 },
+  hero: { paddingTop: 48, paddingBottom: 60, position: 'relative', overflow: 'hidden' },
+  // Manchas de cor desfocadas atrás do conteúdo (no navegador, o `filter`
+  // vira CSS; no app nativo a landing não existe).
+  aurora: { position: 'absolute', borderRadius: 999, ...({ filter: 'blur(90px)' } as any) },
+  auroraPrimary: { width: 460, height: 460, top: -140, right: '8%', backgroundColor: '#C7CAFF', opacity: 0.55 },
+  auroraViolet: { width: 380, height: 380, top: 120, right: '32%', backgroundColor: '#E5D4FF', opacity: 0.5 },
+  auroraEmerald: { width: 320, height: 320, bottom: -160, left: -60, backgroundColor: '#C9F3E4', opacity: 0.55 },
+  newsPill: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(255,255,255,0.75)', borderWidth: 1, borderColor: '#DCDDFB', borderRadius: 999, paddingLeft: 5, paddingRight: 14, paddingVertical: 5, marginBottom: 22, flexShrink: 1 },
+  newsPillTag: { backgroundColor: C.primary, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
+  newsPillTagText: { color: '#fff', fontSize: 10.5, fontWeight: '900', letterSpacing: 0.6 },
+  newsPillText: { color: C.primaryDark, fontSize: 12.5, fontWeight: '800', flexShrink: 1 },
+  trustChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.7)', borderWidth: 1, borderColor: C.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  trustChipMark: { color: C.emerald, fontWeight: '900', fontSize: 12.5 },
+  glassChip: { position: 'absolute', top: -52, right: 0, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(255,255,255,0.82)', borderWidth: 1, borderColor: 'rgba(228,233,243,0.9)', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, ...shadow, shadowOpacity: 0.12, ...({ backdropFilter: 'blur(10px)' } as any) },
+  glassChipIcon: { fontSize: 20 },
+  glassChipTitle: { color: C.ink, fontWeight: '900', fontSize: 13 },
+  glassChipText: { color: C.muted, fontWeight: '700', fontSize: 11 },
   heroBody: { flexDirection: 'column' },
   heroBodyDesktop: { flexDirection: 'row', alignItems: 'center', gap: 48 },
   heroContent: { maxWidth: 760 },
@@ -796,8 +917,8 @@ const styles = StyleSheet.create({
   heroTitleDesktop: { fontSize: 44, lineHeight: 51 },
   heroSubtitle: { color: C.muted, fontSize: 16.5, lineHeight: 24, marginTop: 18, maxWidth: 540, fontWeight: '500' },
   heroActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 14, marginTop: 30 },
-  trustRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, marginTop: 28 },
-  trustItem: { color: C.muted, fontSize: 13, fontWeight: '700' },
+  trustRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 28 },
+  trustItem: { color: C.ink, fontSize: 12.5, fontWeight: '700' },
 
   heroDevices: { flex: 1, minWidth: 320, alignItems: 'center', justifyContent: 'center', position: 'relative', paddingRight: 40, paddingBottom: 30 },
   heroPhoneOverlay: { position: 'absolute', right: 0, bottom: -6 },
@@ -899,10 +1020,56 @@ const styles = StyleSheet.create({
   testimonialName: { color: C.ink, fontSize: 13.5, fontWeight: '900' },
   testimonialRole: { color: C.muted, fontSize: 12, marginTop: 1, fontWeight: '600' },
 
-  securityItem: { padding: 4 },
-  securityIcon: { fontSize: 22, marginBottom: 10 },
-  securityTitle: { color: C.ink, fontSize: 14.5, fontWeight: '900', marginBottom: 6 },
-  securityDescription: { color: C.muted, fontSize: 12.5, lineHeight: 18, fontWeight: '500' },
+  // Seção de segurança: bloco escuro com cartões "de vidro" (tendência atual
+  // de landing SaaS), contrastando com o resto da página clara.
+  securitySection: { paddingVertical: 76, position: 'relative', overflow: 'hidden' },
+  securityGlowA: { width: 520, height: 520, top: -180, right: -120, backgroundColor: '#4F46E5', opacity: 0.35 },
+  securityGlowB: { width: 420, height: 420, bottom: -160, left: -100, backgroundColor: '#0EA57A', opacity: 0.18 },
+  securityEyebrowPill: { alignSelf: 'flex-start', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, marginBottom: 18 },
+  securityEyebrowText: { color: '#C7CCFF', fontSize: 12, fontWeight: '900', letterSpacing: 0.8 },
+  securityTitle: { color: '#fff', fontSize: 30, lineHeight: 36, fontWeight: '900', letterSpacing: -0.5, maxWidth: 720 },
+  securityTitleDesktop: { fontSize: 40, lineHeight: 46 },
+  securitySubtitle: { color: '#AEB6CF', fontSize: 16.5, lineHeight: 24, marginTop: 14, marginBottom: 34, maxWidth: 680, fontWeight: '500' },
+  securitySubtitleSmall: { color: '#AEB6CF', fontSize: 14.5, lineHeight: 21, marginTop: 8, fontWeight: '500' },
+  securityCard: { backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.11)', borderRadius: 20, padding: 20, minHeight: 188 },
+  securityCardIcon: { width: 42, height: 42, borderRadius: 13, backgroundColor: 'rgba(124,58,237,0.22)', borderWidth: 1, borderColor: 'rgba(199,204,255,0.25)', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  securityCardIconText: { fontSize: 19 },
+  securityCardTitle: { color: '#fff', fontSize: 15.5, fontWeight: '900', marginBottom: 7 },
+  securityCardText: { color: '#AEB6CF', fontSize: 13, lineHeight: 19, fontWeight: '500' },
+  lgpdPanel: { marginTop: 30, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 24, padding: 24 },
+  lgpdPanelEyebrow: { color: '#8EF0CB', fontSize: 11.5, fontWeight: '900', letterSpacing: 1 },
+  lgpdPanelTitle: { color: '#fff', fontSize: 22, fontWeight: '900', marginTop: 6, letterSpacing: -0.2 },
+  lgpdTabs: { flexDirection: 'row', gap: 8, marginTop: 18, marginBottom: 20 },
+  lgpdTab: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', borderRadius: 999, paddingHorizontal: 15, paddingVertical: 9 },
+  lgpdTabOn: { backgroundColor: '#fff', borderColor: '#fff' },
+  lgpdTabText: { color: '#C9CFE2', fontWeight: '800', fontSize: 13 },
+  lgpdTabTextOn: { color: C.ink },
+  lgpdBox: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)', padding: 16 },
+  lgpdBoxTitle: { color: '#fff', fontWeight: '900', fontSize: 14.5, marginBottom: 6 },
+  lgpdBoxText: { color: '#C0C7DB', fontSize: 13.5, lineHeight: 20, fontWeight: '500', flexShrink: 1 },
+  lgpdTable: { gap: 2, borderRadius: 16, overflow: 'hidden' },
+  lgpdTableRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 8, backgroundColor: 'rgba(255,255,255,0.05)', paddingHorizontal: 16, paddingVertical: 14 },
+  lgpdTablePurpose: { color: '#fff', fontWeight: '800', fontSize: 14, flexGrow: 1, flexBasis: 260 },
+  lgpdTableBasis: { color: '#8EF0CB', fontWeight: '700', fontSize: 13, flexGrow: 1, flexBasis: 220 },
+  lgpdNote: { color: '#AEB6CF', fontSize: 13.5, lineHeight: 20, marginTop: 14, fontWeight: '500' },
+  lgpdBullet: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  lgpdBulletMark: { color: '#8EF0CB', fontSize: 10, marginTop: 5 },
+  lgpdRights: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  lgpdRight: { borderRadius: 999, backgroundColor: 'rgba(14,165,122,0.16)', borderWidth: 1, borderColor: 'rgba(142,240,203,0.3)', paddingHorizontal: 13, paddingVertical: 8 },
+  lgpdRightText: { color: '#D8FBEC', fontWeight: '800', fontSize: 13 },
+  faqWrap: { marginTop: 40, gap: 24 },
+  faqWrapDesktop: { flexDirection: 'row', alignItems: 'flex-start' },
+  faqIntro: { gap: 4 },
+  faqIntroDesktop: { flex: 0.8, paddingRight: 12 },
+  securityActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 20 },
+  privacyChannel: { color: '#C7CCFF', fontSize: 13, fontWeight: '800', textDecorationLine: 'underline', marginTop: 14 },
+  faqList: { flex: 1.2, gap: 10 },
+  faqItem: { backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 16, paddingHorizontal: 18, paddingVertical: 15 },
+  faqItemOpen: { backgroundColor: 'rgba(255,255,255,0.09)', borderColor: 'rgba(199,204,255,0.35)' },
+  faqQuestionRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  faqQuestion: { flex: 1, color: '#fff', fontWeight: '800', fontSize: 15 },
+  faqToggle: { color: '#C7CCFF', fontSize: 22, fontWeight: '700', width: 22, textAlign: 'center' },
+  faqAnswer: { color: '#C0C7DB', fontSize: 14, lineHeight: 21, marginTop: 10, fontWeight: '500' },
 
   pillSearchRow: { maxWidth: 720, marginBottom: 26 },
   pillSearchField: { backgroundColor: C.surface },

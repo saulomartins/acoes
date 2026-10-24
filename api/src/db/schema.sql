@@ -1051,8 +1051,10 @@ create unique index if not exists invoices_user_reference_active
 
 -- Armazenamento dos anexos da prestação de contas no Google Drive do próprio
 -- condomínio (pasta compartilhada com a conta operadora), por condomínio.
--- Opcional: sem essa coluna preenchida, os anexos continuam em bytea no
--- Postgres (comportamento anterior, retrocompatível).
+-- Obrigatória desde 24/10/2026 para todo arquivo do condomínio (prestação de
+-- contas, regimento, anexos de ocorrência): sem pasta, o envio é recusado. As
+-- colunas `content` (bytea) só guardam o que ainda não foi migrado — ver
+-- api/src/services/driveMigrationService.ts.
 alter table condominiums add column if not exists google_drive_folder_id text;
 alter table accountability_expense_attachments add column if not exists drive_file_id text;
 alter table accountability_expense_attachments alter column content drop not null;
