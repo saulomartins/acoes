@@ -322,6 +322,25 @@ export default function Condominiums({ navigation }: any) {
     }
   };
 
+  // Leva para o Drive os arquivos da prestação de contas que ainda estão no
+  // banco. Usa a pasta JÁ SALVA do condomínio — salve antes de mover.
+  const migrateToDrive = async () => {
+    if (!userToken || !editingId) return;
+    setDriveTesting(true);
+    setDriveError('');
+    setDriveNotice('');
+    try {
+      const response = await apiRequest<{ moved: number; failed: number; skipped?: string; remainingInDatabase: number }>(`/condominiums/${editingId}/google-drive/migrate`, userToken, { method: 'POST' });
+      if (response.skipped && !response.moved) setDriveError(`${response.skipped} Salve a pasta antes de mover os arquivos.`);
+      else if (response.failed) setDriveError(`${response.moved} arquivo(s) movido(s); ${response.failed} falharam e continuam guardados no sistema (tente de novo).`);
+      else setDriveNotice(response.remainingInDatabase ? `${response.moved} arquivo(s) movido(s); ${response.remainingInDatabase} ainda no sistema.` : `${response.moved} arquivo(s) movido(s). Nenhum arquivo ficou guardado no sistema.`);
+    } catch (e) {
+      setDriveError(e instanceof Error ? e.message : 'Falha ao mover os arquivos para o Google Drive.');
+    } finally {
+      setDriveTesting(false);
+    }
+  };
+
   const saveWhatsappIntegration = async () => {
     if (!userToken || !editingId || !whatsappPhoneNumberId.trim()) return;
     setWhatsappSaving(true);
@@ -418,10 +437,13 @@ export default function Condominiums({ navigation }: any) {
           <View style={styles.cepRow}>
             <TextInput placeholder="https://drive.google.com/drive/folders/..." value={googleDriveFolderUrl} onChangeText={setGoogleDriveFolderUrl} style={[styles.input,styles.cepInput]} autoCapitalize="none" />
             {editingId && googleDriveFolderUrl.trim() ? (
-              <Pressable onPress={testGoogleDrive} disabled={driveTesting} style={[styles.cepButton,driveTesting&&styles.cepButtonDisabled]}><Text style={styles.cepButtonText}>{driveTesting?'Testando...':'Testar pasta'}</Text></Pressable>
+              <>
+                <Pressable onPress={testGoogleDrive} disabled={driveTesting} style={[styles.cepButton,driveTesting&&styles.cepButtonDisabled]}><Text style={styles.cepButtonText}>{driveTesting?'Testando...':'Testar pasta'}</Text></Pressable>
+                <Pressable onPress={migrateToDrive} disabled={driveTesting} style={[styles.cepButton,driveTesting&&styles.cepButtonDisabled]}><Text style={styles.cepButtonText}>Mover arquivos</Text></Pressable>
+              </>
             ) : null}
           </View>
-          <Text style={styles.whatsappHint}>Cole o link da pasta do Drive do condomínio, compartilhada como Editor com laremdia.condominio@gmail.com. Deixe em branco para continuar guardando os anexos no sistema.</Text>
+          <Text style={styles.whatsappHint}>Obrigatória para a prestação de contas: sem pasta, o síndico não consegue anexar notas, comprovantes nem extrato. Cole o link da pasta do Drive do condomínio, compartilhada como Editor com laremdia.condominio@gmail.com. Ao salvar, os arquivos que ainda estiverem no sistema são levados para o Drive automaticamente ("Mover arquivos" faz isso na hora e mostra o resultado).</Text>
           {driveError ? <Text style={styles.error}>{driveError}</Text> : null}
           {driveNotice ? <Text style={styles.success}>{driveNotice}</Text> : null}
         </FormFieldFull>

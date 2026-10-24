@@ -100,8 +100,8 @@ router.get('/', asyncHandler(async (req, res) => {
 
   // Confere no Inter as parcelas em aberto — mesma regra da lista de boletos
   // (syncStaleInterInvoices): só as não conferidas há pouco, poucas por vez.
-  const installmentInvoices = await query<{id:string;condominium_id:string;external_id:string;provider_situation_at:Date|null}>(
-    `select i.id, i.condominium_id, i.external_id, i.provider_situation_at from debt_agreement_installments p
+  const installmentInvoices = await query<{id:string;condominium_id:string;external_id:string;provider_situation:string|null;provider_situation_at:Date|null}>(
+    `select i.id, i.condominium_id, i.external_id, i.provider_situation, i.provider_situation_at from debt_agreement_installments p
      join invoices i on i.id = p.invoice_id
      join debt_agreements a on a.id = p.agreement_id
      where a.condominium_id = $1 and i.external_id is not null

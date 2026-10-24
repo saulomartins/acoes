@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { query } from '../db';
+import { migrateAllCondominiumFilesToDrive } from '../services/driveMigrationService';
 import { notifyDueSoonInvoices, transitionOverdueInvoices } from '../services/invoiceReminderService';
 import { generatePlatformInvoices, notifyPlatformInvoiceReminders, reconcilePlatformInvoices, renewExpiredPlatformInvoicePix } from '../services/platformInvoiceService';
 import { notifyPlatformSuspensionReminders } from '../services/platformSuspensionService';
@@ -42,6 +43,9 @@ const runDailyChecks = async () => {
   } catch (error) {
     console.error('Falha na limpeza do request_log', error);
   }
+  // Rede de segurança da migração para o Drive (a principal roda ao salvar a
+  // pasta do condomínio): leva o que ainda estiver no banco.
+  await migrateAllCondominiumFilesToDrive().catch(error => console.error('Falha na migração diária para o Drive', error));
 };
 
 // Primeiro job agendado do projeto: até aqui tudo era recompute preguiçoso

@@ -84,7 +84,7 @@ export default function GoogleDriveIntegrationGuide() {
       <Panel>
         <Text style={s.sectionTitle}>Integração com o Google Drive</Text>
         <Text style={s.sectionDescription}>
-          Como ativar, para um condomínio específico, o envio de comprovantes e anexos para uma pasta do Google Drive em vez de guardá-los só no banco de dados.
+          Como vincular a pasta do Google Drive de um condomínio. Desde 24/10/2026 ela é obrigatória para a prestação de contas: notas, comprovantes e extratos vão sempre para o Drive do condomínio, nunca para o banco de dados. Sem pasta, o síndico não consegue anexar.
         </Text>
         <View style={s.callout}>
           <Text style={s.calloutTitle}>Importante: é uma conta só para toda a plataforma</Text>
@@ -118,9 +118,9 @@ export default function GoogleDriveIntegrationGuide() {
       </Panel>
 
       <Panel>
-        <Text style={s.sectionTitle}>Para desativar ou trocar de pasta</Text>
+        <Text style={s.sectionTitle}>Arquivos antigos e troca de pasta</Text>
         <Text style={s.paragraph}>
-          Em Condomínios, apague o conteúdo do campo "Pasta do Google Drive (Prestação de Contas)" e salve — novos anexos voltam a ser guardados direto no banco de dados. Para trocar de pasta, é só colar o link da pasta nova e salvar; nada precisa ser movido manualmente.
+          Arquivos enviados antes da pasta existir (guardados no banco) são levados para o Drive automaticamente ao salvar a pasta, e de novo todo dia como garantia; "Mover arquivos" faz isso na hora e mostra quantos faltam. Cada arquivo só sai do banco depois que o Drive confirma o envio. Para trocar de pasta, cole o link da nova e salve: os arquivos novos vão para ela, e os já enviados continuam onde estão. Apagar o campo bloqueia novos anexos — não volta a guardar no banco.
         </Text>
         <Text style={s.disclaimer}>
           Arquivos já enviados para a pasta anterior continuam lá — desativar ou trocar a pasta não apaga nem migra nada automaticamente.

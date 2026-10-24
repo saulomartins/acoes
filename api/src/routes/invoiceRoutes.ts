@@ -103,10 +103,19 @@ export const syncInterInvoice = async (invoice: { id:string; condominium_id:stri
 // aberto, ao mesmo tempo, a cada abertura da tela — um condomínio com 300
 // boletos fazia 300 chamadas ao banco por visita. O webhook e o botão
 // "Atualizar todos os boletos" continuam trazendo mudanças na hora.
+// Só entram aqui boletos em aberto (issued/pending_provider/overdue) — pagos e
+// cancelados nunca são consultados, e continuam aparecendo normalmente na
+// lista (que vem do banco). Expirado no Inter (EXPIRADO) não pode mais ser
+// pago pelo código de barras: muda raramente, então basta conferir 1x por dia.
 const LIST_SYNC_FRESH_MS = 5 * 60_000;
+const EXPIRED_SYNC_FRESH_MS = 24 * 60 * 60_000;
 const LIST_SYNC_CONCURRENCY = 5;
-export const syncStaleInterInvoices = async (invoices: Array<{id:string;condominium_id:string;external_id:string;provider_situation_at?:string|Date|null}>) => {
-  const stale = invoices.filter(invoice => !invoice.provider_situation_at || Date.now() - new Date(invoice.provider_situation_at).getTime() > LIST_SYNC_FRESH_MS);
+export const syncStaleInterInvoices = async (invoices: Array<{id:string;condominium_id:string;external_id:string;provider_situation?:string|null;provider_situation_at?:string|Date|null}>) => {
+  const stale = invoices.filter(invoice => {
+    if (!invoice.provider_situation_at) return true;
+    const freshMs = invoice.provider_situation === 'EXPIRADO' ? EXPIRED_SYNC_FRESH_MS : LIST_SYNC_FRESH_MS;
+    return Date.now() - new Date(invoice.provider_situation_at).getTime() > freshMs;
+  });
   for (let index = 0; index < stale.length; index += LIST_SYNC_CONCURRENCY) {
     await Promise.allSettled(stale.slice(index, index + LIST_SYNC_CONCURRENCY).map(invoice => syncInterInvoice(invoice).catch(() => {})));
   }

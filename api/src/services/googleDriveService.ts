@@ -81,6 +81,15 @@ export const uploadDriveFile = async (folderId: string, fileName: string, mimeTy
   return created.data.id;
 };
 
+// Tamanho (bytes) do arquivo como o Drive gravou — usado para confirmar um
+// envio antes de apagar a cópia do banco (ver driveMigrationService).
+export const getDriveFileSize = async (fileId: string): Promise<number | null> => {
+  const drive = getDriveClient();
+  const response = await drive.files.get({ fileId, fields: 'id, size, trashed', supportsAllDrives: true });
+  if (response.data.trashed) return null;
+  return response.data.size ? Number(response.data.size) : null;
+};
+
 export const downloadDriveFile = async (fileId: string): Promise<Buffer> => {
   const drive = getDriveClient();
   const response = await drive.files.get(

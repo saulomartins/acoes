@@ -10,6 +10,7 @@ import { logAudit } from '../services/auditService';
 import { listInterExtrato, getInterExtratoPdf, getInterSaldo } from '../services/interService';
 import { getInterExtratoIntegration } from './invoiceRoutes';
 import { findOrCreateMonthFolder, uploadDriveFile, downloadDriveFile, deleteDriveFile } from '../services/googleDriveService';
+import { DRIVE_REQUIRED_MESSAGE } from '../services/driveMigrationService';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -197,6 +198,8 @@ router.post('/:id/statement',authorize('sindico','subsindico'),upload.single('fi
   if(!report.rows[0])return res.status(404).json({message:'Prestação de contas não encontrada.'});
   const source=(req.query.source??req.body?.source)==='bank'?'bank':'upload';
   const rootFolderId=report.rows[0].google_drive_folder_id;
+  // Arquivo sempre no Google Drive do condomínio (desde 24/10/2026).
+  if(!rootFolderId)return res.status(400).json({message:DRIVE_REQUIRED_MESSAGE});
   const previous=await query<{drive_file_id:string|null}>(`select drive_file_id from accountability_report_statements where report_id=$1`,[req.params.id]);
   let driveFileId:string|null=null;let content:Buffer|null=req.file.buffer;
   if(rootFolderId){

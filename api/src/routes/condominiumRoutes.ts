@@ -7,6 +7,7 @@ import { query, withTransaction } from '../db';
 import { getInterAccessToken, type InterIntegrationConfig } from '../services/interService';
 import { sendWhatsAppTemplateMessage } from '../services/whatsappService';
 import { extractDriveFolderId, getDriveFolderMeta } from '../services/googleDriveService';
+import { migrateCondominiumFilesToDrive } from '../services/driveMigrationService';
 import { FEATURE_CATALOG, FEATURE_KEYS, NEW_CONDOMINIUM_FEATURE_DEFAULTS, dependentsOf, isFeatureKey, type FeatureKey } from '../services/featureCatalog';
 import { getOpenPlatformInvoice, getPlatformInvoiceReceipt, getRecentPaidPlatformInvoice, listCondominiumPlatformInvoices, reconcilePlatformInvoices } from '../services/platformInvoiceService';
 import { buildPlatformReceiptPdf } from '../services/platformReceiptDocument';
@@ -647,7 +648,28 @@ router.patch('/:id', authorize('admin_geral'), asyncHandler(async (req, res) => 
     return res.status(404).json({ message: 'condominium not found' });
   }
 
+  // Pasta do Drive recém-definida: leva para lá, em segundo plano, os arquivos
+  // da prestação de contas que ainda estão no banco (ver driveMigrationService).
+  if (driveFolderId) {
+    void migrateCondominiumFilesToDrive(req.params.id).catch(error => console.warn('Migração para o Drive falhou', { condominiumId: req.params.id, error: error instanceof Error ? error.message : error }));
+  }
+
   return res.json({ condominium: result.rows[0] });
+}));
+
+// Roda a migração para o Drive na hora e devolve o resultado (admin geral).
+router.post('/:id/google-drive/migrate', authorize('admin_geral'), asyncHandler(async (req, res) => {
+  try {
+    const result = await migrateCondominiumFilesToDrive(req.params.id);
+    const pending = await query<{ count: number }>(
+      `select (select count(*) from accountability_expense_attachments where condominium_id=$1 and content is not null)
+            + (select count(*) from accountability_report_statements where condominium_id=$1 and content is not null) as count`,
+      [req.params.id],
+    );
+    return res.json({ ...result, remainingInDatabase: Number(pending.rows[0]?.count || 0) });
+  } catch (error: any) {
+    return res.status(400).json({ message: error?.message || 'Não foi possível acessar a pasta do Google Drive deste condomínio.' });
+  }
 }));
 
 // Só permite excluir um condomínio se ele estiver "vazio": sem nenhuma
