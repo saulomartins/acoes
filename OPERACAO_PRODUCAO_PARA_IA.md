@@ -1477,6 +1477,15 @@ Commit `389d2ab`. API `c5bf2341-e255-408d-b259-facb9ac97267` SUCCESS; web
   (morador vê mensagem própria). `JWT_REFRESH_EXPIRES_IN` apagada do Railway
   (`JWT_ACCESS_EXPIRES_IN` = 15m, mantida). Pix da fatura da plataforma: pagador
   = condomínio (e-mail, nome, CNPJ); sem e-mail no cadastro, o primeiro gestor.
+- Landing (commits `132a810`, `7f611f4`): seção "Segurança e privacidade · LGPD"
+  com 8 pilares e painel LGPD em abas (sem "Com quem" e sem FAQ na página, a
+  pedido do usuário); Lari com assunto "Segurança e LGPD" e respostas diretas;
+  dados atualizados (Nada consta, Android, gestaolaremdia.com, sem assembleia);
+  Política de Privacidade com operadores nominados, registro de IP/aparelho por
+  6 meses e papéis controlador/operador (no app nativo só na próxima versão).
+  Conteúdo em `mobile/src/content/landingContent.ts`. Web `34f7619a.lar-em-dia.pages.dev`,
+  bundle `AppEntry-a98a2d6b44062d47843a31c67f758fc8.js`. Pendente com o usuário:
+  rodapé diz "Lar em Dia Tecnologia Ltda." (recibo é de pessoa física).
 - Boleto EXPIRADO no Inter: conferido 1x/dia na abertura da lista (os demais
   em aberto, a cada 5 min). Pagos/cancelados nunca são consultados e seguem
   aparecendo na lista normalmente.
