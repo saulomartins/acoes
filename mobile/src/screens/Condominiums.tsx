@@ -313,8 +313,8 @@ export default function Condominiums({ navigation }: any) {
     setDriveError('');
     setDriveNotice('');
     try {
-      const response = await apiRequest<{ ok: boolean; folderName: string }>(`/condominiums/${editingId}/google-drive/test`, userToken, { method: 'POST' });
-      setDriveNotice(`Pasta acessível: "${response.folderName}".`);
+      const response = await apiRequest<{ ok: boolean; folderName: string }>(`/condominiums/${editingId}/google-drive/test`, userToken, { method: 'POST', body: JSON.stringify({ googleDriveFolderUrl }) });
+      setDriveNotice(`Pasta acessível: "${response.folderName}". Salve o condomínio para ativar (os arquivos guardados no sistema vão para ela em seguida).`);
     } catch (e) {
       setDriveError(e instanceof Error ? e.message : 'Falha ao testar a pasta do Google Drive.');
     } finally {

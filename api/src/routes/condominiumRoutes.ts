@@ -816,7 +816,9 @@ router.post('/:id/google-drive/test', authorize('admin_geral'), asyncHandler(asy
     `select google_drive_folder_id from condominiums where id = $1`, [req.params.id],
   );
   if (!result.rows[0]) return res.status(404).json({ message: 'Condomínio não encontrado.' });
-  const folderId = result.rows[0].google_drive_folder_id;
+  // Testa o link que está no campo (antes de salvar); sem ele, a pasta salva.
+  const typedUrl = typeof req.body?.googleDriveFolderUrl === 'string' ? req.body.googleDriveFolderUrl.trim() : '';
+  const folderId = typedUrl ? extractDriveFolderId(typedUrl) : result.rows[0].google_drive_folder_id;
   if (!folderId) return res.status(400).json({ message: 'Nenhuma pasta do Google Drive configurada para este condomínio.' });
 
   try {
