@@ -1419,4 +1419,33 @@ Commits `ec80a96` (código) e `24fe093` (versão 1.7.6).
 - Pendente (decisão do usuário): senha inicial previsível (síndico = 6 primeiros
   dígitos do CPF; morador = unidade + 4 do CPF), em `passwordRuleService.ts`.
   Em 24/10, 4 proprietários ainda estavam com a senha inicial.
+- Android 1.7.6 = versionCode 50, FINISHED (superado pelo 1.7.7 abaixo).
+
+## Publicação de 24/10/2026 (tarde) — desempenho; Android 1.7.7
+
+Commits `bca476f` (código) e `8f13bd8` (versão 1.7.7).
+
+- Diagnóstico (pg_stat_user_tables, leitura): banco 86 MB, cache hit 99,95%,
+  1 conexão. Nada urgente no volume atual; os problemas eram de crescimento:
+  - `GET /invoices` (e `GET /agreements`) consultava no Inter TODOS os boletos
+    em aberto a cada abertura da tela, e cada consulta gravava a resposta
+    inteira em `invoice_events` mesmo sem mudança (11.292 linhas, 5.474 só nos
+    últimos 7 dias). Agora: só boletos não conferidos há 5 min, 5 por vez, e o
+    evento só é gravado quando status/situação mudam.
+  - Índices que faltavam (lista no fim do schema.sql, "Índices de desempenho").
+  - `refresh_tokens` cresce a cada renovação (15 min): o job diário apaga as
+    substituídas há mais de 30 dias.
+  - App/web: Início consultava a cada 30 s os mesmos contadores do menu sem
+    exibi-los (removido); o menu usa `services/attention.ts` (uma consulta
+    compartilhada, endpoint leve `GET /reports/unread-count`) e todo polling
+    pula a rodada com a aba escondida ou o app em segundo plano.
+- Banco: índices criados via `railway ssh` + script (todos < 100 ms).
+- API: deployment `9d03d594-7cfd-4dc2-8034-8d9bc9bcd81b`, `SUCCESS`.
+- Web: deployment `7dc54a95.lar-em-dia.pages.dev`, bundle
+  `AppEntry-a61eba222f54483358612960a0710c07.js` (login testado no Chrome headless).
+- Android: AAB 1.7.7, build EAS `11258703-e5be-4a43-bba1-bfce2b8d46dc`.
+- Para o futuro: anexos da prestação de contas ficam dentro do Postgres quando
+  o condomínio não usa Google Drive (22 arquivos = 52 MB, 60% do banco). As
+  listagens não leem o conteúdo, então não pesa hoje — mas é o que mais vai
+  crescer o banco e os backups.
   Envio à Play Store pelo usuário.
