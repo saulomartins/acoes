@@ -82,6 +82,7 @@ export const syncInterInvoice = async (invoice: { id:string; condominium_id:stri
   if(!integration) throw new Error('Integração Banco Inter não configurada.');
   const inter=await getInterBoleto(invoice.external_id,integration);
   const status=mapInterStatus(inter.cobranca.situacao);
+  const before=await query<{status:string;provider_situation:string|null}>(`select status,provider_situation from invoices where id=$1`,[invoice.id]);
   const paidAt=status==='paid'?(inter.cobranca.dataSituacao||new Date().toISOString()):null;
   const providerDueDate=/^\d{4}-\d{2}-\d{2}$/.test(inter.cobranca.dataVencimento||'')?inter.cobranca.dataVencimento:null;
   const updated=await query(`update invoices set status=$1,digitable_line=$2,pdf_url=$3,barcode=$4,pix_copy_paste=$5,
@@ -89,8 +90,27 @@ export const syncInterInvoice = async (invoice: { id:string; condominium_id:stri
     paid_amount_cents=case when $1::invoice_status='paid'::invoice_status then amount_cents else paid_amount_cents end,
     provider_situation=$9,provider_situation_at=now()
     where id=$8 returning *`,[status,inter.boleto?.linhaDigitavel||null,`/cobranca/v3/cobrancas/${invoice.external_id}/pdf`,inter.boleto?.codigoBarras||null,inter.pix?.pixCopiaECola||null,providerDueDate,paidAt,invoice.id,inter.cobranca.situacao||null]);
-  await query(`insert into invoice_events(id,invoice_id,event_type,provider_status,details) values($1,$2,'provider_sync',$3,$4)`,[randomUUID(),invoice.id,inter.cobranca.situacao,JSON.stringify(inter)]);
+  // Só registra o evento quando o banco mudou alguma coisa: antes cada
+  // consulta (inclusive cada abertura da lista) gravava a resposta inteira do
+  // Inter, e invoice_events crescia ~800 linhas/dia com um único condomínio.
+  const changed=!before.rows[0]||before.rows[0].status!==status||(before.rows[0].provider_situation||null)!==(inter.cobranca.situacao||null);
+  if(changed)await query(`insert into invoice_events(id,invoice_id,event_type,provider_status,details) values($1,$2,'provider_sync',$3,$4)`,[randomUUID(),invoice.id,inter.cobranca.situacao,JSON.stringify(inter)]);
   return {invoice:updated.rows[0],inter};
+};
+
+// Consulta ao Inter na abertura da lista: só os boletos não conferidos nos
+// últimos minutos e no máximo alguns por vez. Antes eram TODOS os boletos em
+// aberto, ao mesmo tempo, a cada abertura da tela — um condomínio com 300
+// boletos fazia 300 chamadas ao banco por visita. O webhook e o botão
+// "Atualizar todos os boletos" continuam trazendo mudanças na hora.
+const LIST_SYNC_FRESH_MS = 5 * 60_000;
+const LIST_SYNC_CONCURRENCY = 5;
+export const syncStaleInterInvoices = async (invoices: Array<{id:string;condominium_id:string;external_id:string;provider_situation_at?:string|Date|null}>) => {
+  const stale = invoices.filter(invoice => !invoice.provider_situation_at || Date.now() - new Date(invoice.provider_situation_at).getTime() > LIST_SYNC_FRESH_MS);
+  for (let index = 0; index < stale.length; index += LIST_SYNC_CONCURRENCY) {
+    await Promise.allSettled(stale.slice(index, index + LIST_SYNC_CONCURRENCY).map(invoice => syncInterInvoice(invoice).catch(() => {})));
+  }
+  return stale.length;
 };
 
 export type UnmatchedCharge = { payerName: string; payerDocument: string; dueDate: string; amountCents: number; externalId: string; situacao: string | null };
@@ -324,7 +344,7 @@ router.get('/', asyncHandler(async (req, res) => {
             invoices.external_id, invoices.digitable_line, invoices.pdf_url, invoices.created_at,
             invoices.barcode, invoices.pix_copy_paste, invoices.paid_at, invoices.paid_amount_cents, invoices.batch_id,
             invoices.reference_month, invoices.invoice_type, invoices.agreement_id, invoices.cancellation_reason,
-            invoices.provider_situation, invoices.debt_excluded_at, invoices.debt_exclusion_reason,
+            invoices.provider_situation, invoices.provider_situation_at, invoices.debt_excluded_at, invoices.debt_exclusion_reason,
             excluder.full_name as debt_excluded_by_name,
             invoices.condo_fee_percent, invoices.condo_fee_cents, invoices.improvement_fee_percent, invoices.improvement_fee_cents, invoices.condo_base_fee_cents,
             coalesce((select json_agg(json_build_object('description', ec.description, 'amount_cents', eci.amount_cents))
@@ -358,17 +378,12 @@ router.get('/', asyncHandler(async (req, res) => {
 
   const result = await query(invoicesQuery, invoicesParams);
 
-  // Sincroniza concorrentemente com o Inter antes de retornar (dados sempre frescos)
+  // Confere no Inter os boletos em aberto que não foram conferidos há pouco
+  // (ver syncStaleInterInvoices) e só re-consulta se algum foi conferido.
   const activeInterInvoices = result.rows.filter(
     (inv: any) => inv.external_id && ['issued', 'pending_provider', 'overdue'].includes(inv.status)
   );
-  if (activeInterInvoices.length > 0) {
-    await Promise.allSettled(
-      activeInterInvoices.map((invoice: any) =>
-        syncInterInvoice(invoice as {id:string;condominium_id:string;external_id:string}).catch(() => {})
-      )
-    );
-    // Re-consulta com status atualizados
+  if (activeInterInvoices.length > 0 && await syncStaleInterInvoices(activeInterInvoices as any) > 0) {
     const fresh = await query(invoicesQuery, invoicesParams);
     return res.json({ invoices: fresh.rows });
   }

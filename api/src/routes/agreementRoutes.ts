@@ -5,7 +5,7 @@ import { requireFeature } from '../middleware/requireFeature';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { query, withTransaction } from '../db';
 import { createInterBoleto } from '../services/interService';
-import { getInterIntegration, syncInterInvoice } from './invoiceRoutes';
+import { getInterIntegration, syncStaleInterInvoices } from './invoiceRoutes';
 import { sendWhatsAppTemplateMessage } from '../services/whatsappService';
 import { sendPushNotification } from '../services/notificationService';
 import { getBillingRules, calculateLateFee } from '../services/lateFeeService';
@@ -98,20 +98,17 @@ router.get('/', asyncHandler(async (req, res) => {
   }
   await query(`update debt_agreements a set status='settled',settled_at=now(),updated_at=now() where a.condominium_id=$1 and a.status='active' and exists(select 1 from debt_agreement_installments p where p.agreement_id=a.id) and not exists(select 1 from debt_agreement_installments p left join invoices i on i.id=p.invoice_id where p.agreement_id=a.id and (p.invoice_id is null or i.status<>'paid'))`, [condominiumId]);
 
-  // Sincroniza parcelas de acordo com Inter antes de retornar (status sempre frescos)
-  const installmentInvoices = await query<{id:string;condominium_id:string;external_id:string}>(
-    `select i.id, i.condominium_id, i.external_id from debt_agreement_installments p
+  // Confere no Inter as parcelas em aberto — mesma regra da lista de boletos
+  // (syncStaleInterInvoices): só as não conferidas há pouco, poucas por vez.
+  const installmentInvoices = await query<{id:string;condominium_id:string;external_id:string;provider_situation_at:Date|null}>(
+    `select i.id, i.condominium_id, i.external_id, i.provider_situation_at from debt_agreement_installments p
      join invoices i on i.id = p.invoice_id
      join debt_agreements a on a.id = p.agreement_id
      where a.condominium_id = $1 and i.external_id is not null
        and i.status not in ('paid','canceled')`,
     [condominiumId]
   );
-  if (installmentInvoices.rows.length > 0) {
-    await Promise.allSettled(
-      installmentInvoices.rows.map(inv => syncInterInvoice(inv).catch(() => {}))
-    );
-  }
+  if (installmentInvoices.rows.length > 0) await syncStaleInterInvoices(installmentInvoices.rows);
 
   const result = await query<any>(`select a.*,coalesce(u.full_name,u.username) debtor_name,${judicialColumns},${legacyColumn},
       coalesce(nullif(concat_ws(' - ',b.name,un.number),''),u.unit,'Sem apartamento') apartment,

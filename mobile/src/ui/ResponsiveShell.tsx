@@ -9,6 +9,7 @@ import { useBreakpoint } from './responsive';
 import { apiRequest, API_BASE_URL } from '../api/client';
 import { syncNotificationBadge } from '../services/pushNotifications';
 import { subscribeNotificationsChanged } from '../services/notificationEvents';
+import { fetchAttention, isAppVisible } from '../services/attention';
 import type { FeatureKey } from '../context/AuthContext';
 import { MANAGEMENT_ROUTES } from '../navigation/routeRoles';
 import { useBiometricSetting } from './BiometricLock';
@@ -176,15 +177,15 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
       .catch(()=>setCondominiumName('Meu condomínio'));
   }, [user?.condominiumName,user?.role,userToken]);
 
-  const refreshAttention = useCallback(async () => {
+  // Contadores compartilhados com a tela Início (services/attention.ts): uma
+  // consulta só, e nenhuma com a aba escondida ou o app em segundo plano.
+  const refreshAttention = useCallback(async (force = false) => {
     if (!userToken || user?.role === 'admin_geral') return;
+    if (!force && !isAppVisible()) return;
     try {
-      const [noticeData, reportData] = await Promise.all([
-        apiRequest<{count:number}>('/notifications/unread-count', userToken),
-        apiRequest<{reports:Array<{unread_count:number}>}>('/reports', userToken),
-      ]);
-      setUnreadNotices(noticeData.count);
-      setUnreadReports(reportData.reports.reduce((sum, report) => sum + Number(report.unread_count || 0), 0));
+      const counts = await fetchAttention(userToken, { force });
+      setUnreadNotices(counts.unreadNotices);
+      setUnreadReports(counts.unreadReports);
     } catch {
       return null;
     }
@@ -196,7 +197,7 @@ export default function ResponsiveShell({ activeRoute, navigation, children }: {
     return () => clearInterval(timer);
   }, [activeRoute, refreshAttention]);
 
-  useEffect(() => subscribeNotificationsChanged(() => { void refreshAttention(); }), [refreshAttention]);
+  useEffect(() => subscribeNotificationsChanged(() => { void refreshAttention(true); }), [refreshAttention]);
 
   useEffect(() => {
     syncNotificationBadge(unreadNotices + unreadReports);

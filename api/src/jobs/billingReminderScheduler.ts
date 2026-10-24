@@ -33,6 +33,12 @@ const runDailyChecks = async () => {
       `update refresh_tokens set ip_address = null, user_agent = null
        where ip_address is not null and coalesce(revoked_at, expires_at) < now() - interval '180 days'`,
     );
+    // Cada renovação (a cada ~15 min de uso) cria uma linha e substitui a
+    // anterior: sem limpeza a tabela cresce sem parar. Linha substituída há
+    // mais de 30 dias não serve mais nem para a detecção de reuso (a sessão
+    // vence em 14 dias sem uso) — e sempre há uma sucessora, então o usuário
+    // nunca fica sem linha ("Logou no sistema" continua certo).
+    await query(`delete from refresh_tokens where replaced_by is not null and revoked_at < now() - interval '30 days'`);
   } catch (error) {
     console.error('Falha na limpeza do request_log', error);
   }

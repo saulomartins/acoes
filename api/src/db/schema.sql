@@ -1672,3 +1672,21 @@ where o.id in (
                   and u.role = 'proprietario' and u.unit_rented_to_tenant)
   order by x.unit_id, x.started_at desc
 );
+
+-- Índices de desempenho (24/10/2026). Levantados em pg_stat_user_tables da
+-- produção: colunas filtradas em quase toda tela que não tinham índice. Com o
+-- volume atual o Postgres ainda prefere varrer tabelas pequenas; estes índices
+-- são para o crescimento (mais condomínios, mais boletos, mais sessões).
+create index if not exists invoices_condominium_due_idx on invoices(condominium_id, due_date desc) where deleted_at is null;
+create index if not exists invoices_user_idx on invoices(user_id) where deleted_at is null;
+create index if not exists invoices_issued_due_idx on invoices(due_date) where status = 'issued' and deleted_at is null;
+create index if not exists users_condominium_idx on users(condominium_id) where deleted_at is null;
+create index if not exists users_unit_idx on users(unit_id) where unit_id is not null;
+create index if not exists unit_occupancies_user_active_idx on unit_occupancies(user_id) where ended_at is null;
+create index if not exists unit_extra_charge_installments_invoice_idx on unit_extra_charge_installments(invoice_id) where invoice_id is not null;
+create index if not exists unit_consumption_charges_invoice_idx on unit_consumption_charges(invoice_id) where invoice_id is not null;
+create index if not exists notifications_condominium_idx on notifications(condominium_id, created_at desc);
+-- "Logou no sistema" (condominiumRoutes) pergunta se existe QUALQUER sessão
+-- do usuário, ativa ou não — o índice parcial de sessões ativas não cobre.
+create index if not exists refresh_tokens_user_idx on refresh_tokens(user_id);
+create index if not exists refresh_tokens_replaced_by_idx on refresh_tokens(replaced_by) where replaced_by is not null;

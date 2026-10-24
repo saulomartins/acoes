@@ -2,6 +2,7 @@ import React, { createContext, ReactNode, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { API_BASE_URL, apiRequest, onPlatformSuspended, onSessionExpired, onSessionRefreshed, refreshSession } from '../api/client';
+import { isAppVisible } from '../services/attention';
 import { registerForPushNotifications, unregisterPushNotifications } from '../services/pushNotifications';
 
 type UserRole = 'admin_geral' | 'sindico' | 'subsindico' | 'proprietario' | 'inquilino';
@@ -362,7 +363,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .catch(() => { if (active) setCondominiumFeatures(current => current ?? ({} as Record<FeatureKey,boolean>)); });
     setCondominiumFeatures(null);
     loadFeatures();
-    const timer=setInterval(loadFeatures,60_000);
+    // Pula a rodada com a aba escondida ou o app em segundo plano.
+    const timer=setInterval(()=>{ if (isAppVisible()) void loadFeatures(); },60_000);
     return () => { active = false; clearInterval(timer); };
   }, [signedIn, user?.id, user?.role]);
 

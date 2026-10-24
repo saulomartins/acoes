@@ -7,7 +7,7 @@ import { colors, layout } from '../ui/theme';
 import { useBreakpoint } from '../ui/responsive';
 import { apiRequest } from '../api/client';
 import { syncNotificationBadge } from '../services/pushNotifications';
-import { subscribeNotificationsChanged } from '../services/notificationEvents';
+import { isAppVisible } from '../services/attention';
 import type { FeatureKey } from '../context/AuthContext';
 import FeatureTour, { type TourStep } from '../ui/FeatureTour';
 import { useSectionTour } from '../ui/useSectionTour';
@@ -153,8 +153,6 @@ export default function Home({ navigation }: any) {
   const { user, userToken, signOut, condominiumFeatures } = useContext(AuthContext);
   const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
   const { width, isDesktop: desktop, isTablet: tablet } = useBreakpoint();
-  const [unreadNotices, setUnreadNotices] = useState(0);
-  const [unreadReports, setUnreadReports] = useState(0);
   const [condominiumName, setCondominiumName] = useState(user?.condominiumName || '');
   const [planUsage, setPlanUsage] = useState<{
     hasPlan: boolean; planName?: string; planType?: string;
@@ -232,7 +230,7 @@ export default function Home({ navigation }: any) {
   useEffect(() => {
     loadPlatformInvoice();
     if (!manager) return;
-    const timer = setInterval(loadPlatformInvoice, 30000);
+    const timer = setInterval(() => { if (isAppVisible()) void loadPlatformInvoice(); }, 30000);
     return () => clearInterval(timer);
   }, [loadPlatformInvoice, manager]);
 
@@ -264,28 +262,9 @@ export default function Home({ navigation }: any) {
     }
   };
 
-  const loadAttention = useCallback(async () => {
-    if (!userToken || admin) return;
-    try {
-      const [noticeData, reportData] = await Promise.all([
-        apiRequest<{ count: number }>('/notifications/unread-count', userToken),
-        apiRequest<{ reports: Array<{ unread_count: number }> }>('/reports', userToken),
-      ]);
-      setUnreadNotices(noticeData.count || 0);
-      setUnreadReports(reportData.reports.reduce((sum, item) => sum + Number(item.unread_count || 0), 0));
-    } catch {
-      setUnreadNotices(0);
-      setUnreadReports(0);
-    }
-  }, [admin, userToken]);
-
-  useEffect(() => {
-    loadAttention();
-    const timer = setInterval(loadAttention, 30000);
-    return () => clearInterval(timer);
-  }, [loadAttention]);
-
-  useEffect(() => subscribeNotificationsChanged(() => { void loadAttention(); }), [loadAttention]);
+  // Os contadores de não lidos (avisos/relatos) ficam no menu (ResponsiveShell,
+  // via services/attention.ts). Esta tela também consultava os mesmos
+  // endpoints a cada 30 s, mas não exibia o resultado — foi removido.
 
   return (
     <><ScrollView ref={scrollRef} contentContainerStyle={[styles.content, (tablet || !desktop) && styles.contentMobile]}>
