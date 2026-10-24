@@ -1468,6 +1468,15 @@ Commit `389d2ab`. API `c5bf2341-e255-408d-b259-facb9ac97267` SUCCESS; web
   autovacuum (para devolver ao disco: `vacuum full accountability_expense_attachments`).
 - Ficaram fora (ainda aceitam guardar no banco): anexos de ocorrência e o PDF
   do regimento (58 kB no Templum).
+- Atualização (mesmo dia, commits `86a2cb0` e `3735380`, API
+  `3b1edf62-6749-4eb9-90c3-a31dfe7ab52a`, web `2e870d87.lar-em-dia.pages.dev`):
+  "Testar pasta" passou a testar o link digitado (antes só a pasta salva). Pasta
+  do Templum salva → 22 anexos + regimento migrados; 0 arquivos no banco.
+  `vacuum full accountability_expense_attachments`: banco de 86 MB → 34 MB.
+  Drive obrigatório estendido ao PDF do regimento e aos anexos de ocorrência
+  (morador vê mensagem própria). `JWT_REFRESH_EXPIRES_IN` apagada do Railway
+  (`JWT_ACCESS_EXPIRES_IN` = 15m, mantida). Pix da fatura da plataforma: pagador
+  = condomínio (e-mail, nome, CNPJ); sem e-mail no cadastro, o primeiro gestor.
 - Boleto EXPIRADO no Inter: conferido 1x/dia na abertura da lista (os demais
   em aberto, a cada 5 min). Pagos/cancelados nunca são consultados e seguem
   aparecendo na lista normalmente.
