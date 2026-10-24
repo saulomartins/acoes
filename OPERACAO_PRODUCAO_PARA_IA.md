@@ -1448,4 +1448,27 @@ Commits `bca476f` (código) e `8f13bd8` (versão 1.7.7).
   o condomínio não usa Google Drive (22 arquivos = 52 MB, 60% do banco). As
   listagens não leem o conteúdo, então não pesa hoje — mas é o que mais vai
   crescer o banco e os backups.
+- Android 1.7.7 = versionCode 51, FINISHED.
+
+## 24/10/2026 (tarde, 2) — Google Drive obrigatório na prestação de contas
+
+Commit `389d2ab`. API `c5bf2341-e255-408d-b259-facb9ac97267` SUCCESS; web
+`57ab3b42.lar-em-dia.pages.dev`. Sem binário novo (telas só da web).
+
+- Decisão do usuário: prestação de contas sempre no Drive do condomínio.
+  Anexo de despesa e extrato sem pasta configurada → 400 (DRIVE_REQUIRED_MESSAGE).
+- `driveMigrationService`: move para o Drive o que está em `content`
+  (accountability_expense_attachments e accountability_report_statements), um
+  por vez, confere o tamanho no Drive e só então zera `content`. Dispara ao
+  salvar a pasta (PATCH /condominiums/:id), no job diário e em
+  POST /condominiums/:id/google-drive/migrate ("Mover arquivos", admin geral).
+- Situação em 24/10: Templum com 22 anexos (50 MB) no banco e SEM pasta; o
+  Progresso também sem pasta. Nada foi apagado — a limpeza acontece quando a
+  pasta do Templum for salva. Depois, o espaço volta a ser reutilizado pelo
+  autovacuum (para devolver ao disco: `vacuum full accountability_expense_attachments`).
+- Ficaram fora (ainda aceitam guardar no banco): anexos de ocorrência e o PDF
+  do regimento (58 kB no Templum).
+- Boleto EXPIRADO no Inter: conferido 1x/dia na abertura da lista (os demais
+  em aberto, a cada 5 min). Pagos/cancelados nunca são consultados e seguem
+  aparecendo na lista normalmente.
   Envio à Play Store pelo usuário.
