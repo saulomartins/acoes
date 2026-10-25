@@ -1486,6 +1486,17 @@ Commit `389d2ab`. API `c5bf2341-e255-408d-b259-facb9ac97267` SUCCESS; web
   Conteúdo em `mobile/src/content/landingContent.ts`. Web `34f7619a.lar-em-dia.pages.dev`,
   bundle `AppEntry-a98a2d6b44062d47843a31c67f758fc8.js`. Pendente com o usuário:
   rodapé diz "Lar em Dia Tecnologia Ltda." (recibo é de pessoa física).
+- Landing, 25/10/2026 (commits `d7389f4`, `59eb3a2`): minijogo "Plantão do
+  Síndico" (`mobile/public/plantao-do-sindico.html`, aberto por
+  `mobile/src/ui/GameLauncher.tsx`). Convite no centro da tela 12s após abrir,
+  uma vez por visita (sessionStorage) e só sem o aviso de cookies; botão fixo
+  "Jogue 60s" e item "Jogue" no menu abrem o modal. Fim do jogo: "Falar com a
+  equipe" fecha o modal e rola até o formulário (postMessage `ldg`/`contact`) ou
+  e-mail. Eventos GA: `game_invite_shown`, `game_open`, `game_contact`. Pages
+  serve o jogo em `/plantao-do-sindico` (308 a partir do `.html`). Corrigido
+  também: a rolagem até as seções mede a posição na hora (as pílulas chegavam
+  depois e o "Solicitar demonstração" parava antes do formulário). Web
+  `2f9320a1.lar-em-dia.pages.dev`, bundle `AppEntry-23f6e84b19b9cf3093e1366442eb1e36.js`.
 - Boleto EXPIRADO no Inter: conferido 1x/dia na abertura da lista (os demais
   em aberto, a cada 5 min). Pagos/cancelados nunca são consultados e seguem
   aparecendo na lista normalmente.
