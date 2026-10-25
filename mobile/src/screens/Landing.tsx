@@ -296,10 +296,19 @@ export default function Landing({ navigation, route }: any) {
   const { isDesktop: desktop, isTablet: tablet } = useBreakpoint();
   const scrollRef = useRef<ScrollView>(null);
   const sectionOffsets = useRef<Record<string, number>>({}).current;
-  const registerSection = (key: string) => (event: any) => { sectionOffsets[key] = event.nativeEvent.layout.y; };
+  const sectionNodes = useRef<Record<string, any>>({}).current;
+  const registerSection = (key: string) => (event: any) => { sectionOffsets[key] = event.nativeEvent.layout.y; if (event.nativeEvent.target) sectionNodes[key] = event.nativeEvent.target; };
+  // No navegador, conteúdo que chega depois (as pílulas vêm da API) empurra as
+  // seções de baixo sem disparar onLayout de novo: mede a posição na hora.
+  const currentOffset = (key: string) => {
+    const node = sectionNodes[key];
+    const scroller = (scrollRef.current as any)?.getScrollableNode?.();
+    if (node?.getBoundingClientRect && scroller?.getBoundingClientRect) return node.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    return sectionOffsets[key];
+  };
   const scrollToSection = (key: string) => {
     if (key === 'inicio') { scrollRef.current?.scrollTo({ y: 0, animated: true }); return; }
-    const y = sectionOffsets[key];
+    const y = currentOffset(key);
     if (y !== undefined) scrollRef.current?.scrollTo({ y: Math.max(y - 84, 0), animated: true });
   };
 
