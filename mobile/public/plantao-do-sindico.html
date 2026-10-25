@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plantão do Síndico</title>
+<style>
+  :root{
+    --ldg-bg:#f3f6f4; --ldg-card:#ffffff; --ldg-ink:#16302b; --ldg-muted:#5c716b;
+    --ldg-brand:#4F46E5; --ldg-brand-2:#372FA6; --ldg-accent:#F0A028;
+    --ldg-wall:#e7ece9; --ldg-win:#cfd9d5; --ldg-lit:#fff3cf; --ldg-bad:#d9463b;
+    --ldg-line:#d5ded9;
+  }
+  body{margin:0;background:transparent;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ldg-ink)}
+
+  /* ===== Bloco do jogo: copie o CSS abaixo, a <section id="ldg"> e o último script para a landing page ===== */
+  #ldg{max-width:560px;margin:24px auto;padding:0 16px;box-sizing:border-box;user-select:none;-webkit-tap-highlight-color:transparent}
+  #ldg *{box-sizing:border-box}
+  .ldg-card{background:var(--ldg-card);border:1px solid var(--ldg-line);border-radius:18px;padding:16px;box-shadow:0 8px 24px rgba(22,48,43,.08);position:relative;overflow:hidden}
+  .ldg-hud{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+  .ldg-stat{background:var(--ldg-bg);border-radius:10px;padding:6px 8px;text-align:center}
+  .ldg-stat small{display:block;font-size:11px;color:var(--ldg-muted);text-transform:uppercase;letter-spacing:.04em}
+  .ldg-stat b{font-size:18px}
+  .ldg-meter{height:6px;background:var(--ldg-line);border-radius:6px;margin-top:4px;overflow:hidden}
+  .ldg-meter i{display:block;height:100%;width:100%;background:var(--ldg-brand);transition:width .25s,background .25s}
+
+  .ldg-building{background:var(--ldg-wall);border-radius:12px 12px 4px 4px;padding:12px;position:relative}
+  .ldg-roof{text-align:center;font-weight:700;font-size:13px;color:var(--ldg-muted);margin-bottom:8px;letter-spacing:.05em;text-transform:uppercase}
+  .ldg-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .ldg-win{aspect-ratio:1/0.85;background:var(--ldg-win);border-radius:8px;border:2px solid transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative;transition:transform .1s,background .2s;padding:4px}
+  .ldg-win.on{background:var(--ldg-lit);border-color:var(--ldg-accent)}
+  .ldg-win.on:active{transform:scale(.96)}
+  .ldg-win .e{font-size:28px;line-height:1}
+  .ldg-win .t{font-size:11px;text-align:center;margin-top:4px;line-height:1.15;font-weight:600}
+  .ldg-win .bar{position:absolute;left:6px;right:6px;bottom:5px;height:4px;border-radius:4px;background:rgba(0,0,0,.08);overflow:hidden}
+  .ldg-win .bar i{display:block;height:100%;background:var(--ldg-accent)}
+  .ldg-win .apt{position:absolute;top:3px;left:6px;font-size:10px;color:var(--ldg-muted)}
+  .ldg-win.ok{animation:ldg-ok .4s}
+  .ldg-win.bad{animation:ldg-shake .3s}
+  @keyframes ldg-ok{0%{background:#c9f2df}100%{background:var(--ldg-win)}}
+  @keyframes ldg-shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+  .ldg-door{width:56px;height:20px;margin:10px auto 0;background:#b9c6c1;border-radius:6px 6px 0 0}
+
+  .ldg-hint{font-size:13px;color:var(--ldg-muted);text-align:center;margin:12px 0 8px;min-height:36px;display:flex;align-items:center;justify-content:center;line-height:1.35}
+  .ldg-hint.tut{background:#fff3cf;color:#5a3d00;border-radius:10px;padding:6px 10px;font-weight:600}
+  .ldg-tools{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .ldg-tool{border:2px solid var(--ldg-line);background:#fff;border-radius:12px;padding:8px 4px;font:inherit;font-size:13px;font-weight:600;color:var(--ldg-ink);cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px}
+  .ldg-tool span{font-size:20px}
+  .ldg-tool.sel{border-color:var(--ldg-brand);background:#e6f5ee;color:var(--ldg-brand-2)}
+  .ldg-tools.pulse .ldg-tool{animation:ldg-pulse .5s}
+  @keyframes ldg-pulse{50%{border-color:var(--ldg-accent)}}
+
+  /* destaque do treino guiado */
+  .ldg-coach{position:relative;z-index:2;animation:ldg-coach 1s ease-in-out infinite}
+  .ldg-coach::after{content:"👆";position:absolute;right:-4px;bottom:-10px;font-size:22px;animation:ldg-tap 1s ease-in-out infinite;pointer-events:none}
+  @keyframes ldg-coach{0%,100%{box-shadow:0 0 0 3px var(--ldg-accent)}50%{box-shadow:0 0 0 7px rgba(255,176,32,.35)}}
+  @keyframes ldg-tap{0%,100%{transform:translate(0,0)}50%{transform:translate(-3px,-5px)}}
+
+  .ldg-pop{position:absolute;pointer-events:none;font-weight:800;font-size:16px;color:var(--ldg-brand);animation:ldg-up .8s forwards;z-index:3}
+  .ldg-pop.neg{color:var(--ldg-bad)}
+  @keyframes ldg-up{to{transform:translateY(-30px);opacity:0}}
+
+  .ldg-overlay{position:absolute;inset:0;background:rgba(255,255,255,.97);display:flex;flex-direction:column;align-items:center;justify-content:center;justify-content:safe center;text-align:center;padding:20px;z-index:5;overflow:auto}
+  .ldg-overlay[hidden]{display:none}
+  .ldg-overlay h2{margin:0 0 6px;font-size:22px}
+  .ldg-overlay p{margin:6px 0;color:var(--ldg-muted);font-size:15px;line-height:1.45;max-width:400px}
+  .ldg-btn{margin-top:14px;border:0;background:var(--ldg-brand);color:#fff;font:inherit;font-weight:700;font-size:16px;padding:12px 22px;border-radius:12px;cursor:pointer;text-decoration:none;display:inline-block}
+  .ldg-btn.ghost{background:transparent;color:var(--ldg-brand);border:2px solid var(--ldg-brand)}
+  .ldg-big{font-size:44px;font-weight:800;color:var(--ldg-brand);margin:4px 0}
+  .ldg-badge{display:inline-block;background:#fff3cf;color:#7a5200;font-weight:700;padding:4px 10px;border-radius:20px;font-size:14px}
+  .ldg-feats{list-style:none;padding:0;margin:12px 0 0;text-align:left;font-size:14px}
+  .ldg-feats li{margin:4px 0}
+  .ldg-overlay p.ldg-ask{margin:14px 0 0;color:var(--ldg-ink);font-weight:700}
+  .ldg-mail{margin-top:12px;font-size:13px;color:var(--ldg-muted);text-decoration:underline}
+  .ldg-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+  .ldg-title{text-align:center;margin:0 0 12px}
+  .ldg-title h3{margin:0;font-size:20px}
+  .ldg-title p{margin:4px 0 0;color:var(--ldg-muted);font-size:14px}
+
+  /* tela "como jogar" */
+  .ldg-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;max-width:440px;margin:10px 0}
+  .ldg-step{background:var(--ldg-bg);border-radius:12px;padding:10px 6px;font-size:13px;line-height:1.3}
+  .ldg-step .n{display:inline-flex;width:20px;height:20px;border-radius:50%;background:var(--ldg-brand);color:#fff;font-size:12px;font-weight:700;align-items:center;justify-content:center}
+  .ldg-step .ic{display:block;font-size:26px;margin:6px 0 4px}
+  .ldg-legend{display:grid;grid-template-columns:repeat(2,1fr);gap:4px 12px;font-size:13px;text-align:left;width:100%;max-width:440px;margin:4px 0 0}
+  .ldg-legend div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ldg-legend-t{font-size:12px;color:var(--ldg-muted);text-transform:uppercase;letter-spacing:.04em;margin-top:8px}
+  .ldg-count{font-size:72px;font-weight:800;color:var(--ldg-brand);animation:ldg-zoom .7s}
+  @keyframes ldg-zoom{from{transform:scale(1.6);opacity:0}to{transform:scale(1);opacity:1}}
+  @media (max-width:420px){.ldg-step{font-size:12px}.ldg-legend{grid-template-columns:1fr}}
+  /* Embutido na landing (iframe de até 440px): legenda em 1 coluna e card alto o bastante para a tela "como jogar" */
+  @media (max-width:480px){.ldg-legend{grid-template-columns:1fr}.ldg-card{min-height:700px}}
+</style>
+</head>
+<body>
+
+<section id="ldg" aria-label="Jogo Plantão do Síndico">
+  <div class="ldg-title">
+    <h3>🏢 Plantão do Síndico</h3>
+    <p>Aguenta 60 segundos cuidando de um condomínio sem sistema?</p>
+  </div>
+  <div class="ldg-card">
+    <div class="ldg-hud">
+      <div class="ldg-stat"><small>Tempo</small><b id="ldg-time">60</b></div>
+      <div class="ldg-stat"><small>Pontos</small><b id="ldg-score">0</b></div>
+      <div class="ldg-stat"><small>Moradores felizes</small><div class="ldg-meter"><i id="ldg-happy"></i></div></div>
+    </div>
+
+    <div class="ldg-building">
+      <div class="ldg-roof">Residencial Lar em Dia</div>
+      <div class="ldg-grid" id="ldg-grid"></div>
+      <div class="ldg-door"></div>
+    </div>
+
+    <div class="ldg-hint" id="ldg-hint">Escolha a ferramenta e toque nos apartamentos com problema</div>
+    <div class="ldg-tools" id="ldg-tools"></div>
+
+    <!-- Tela inicial: como jogar -->
+    <div class="ldg-overlay" id="ldg-start">
+      <h2>Você é o síndico agora 😅</h2>
+      <p>Resolva os problemas dos moradores antes que eles percam a paciência.</p>
+      <div class="ldg-steps">
+        <div class="ldg-step"><span class="n">1</span><span class="ic">💸</span>Um problema aparece num apartamento</div>
+        <div class="ldg-step"><span class="n">2</span><span class="ic">💳</span>Toque na ferramenta certa, lá embaixo</div>
+        <div class="ldg-step"><span class="n">3</span><span class="ic">👆</span>Toque no apartamento pra resolver</div>
+      </div>
+      <div class="ldg-legend-t">Qual ferramenta resolve o quê</div>
+      <div class="ldg-legend" id="ldg-legend"></div>
+      <p style="font-size:13px">⏱️ A barrinha mostra a paciência do morador. Acertos seguidos multiplicam os pontos!</p>
+      <div class="ldg-actions">
+        <button class="ldg-btn" id="ldg-learn">Treinar primeiro</button>
+        <button class="ldg-btn ghost" id="ldg-play">Jogar direto</button>
+      </div>
+    </div>
+
+    <!-- Contagem regressiva -->
+    <div class="ldg-overlay" id="ldg-countbox" hidden>
+      <p id="ldg-countmsg">Treino concluído! 🎉</p>
+      <div class="ldg-count" id="ldg-count">3</div>
+    </div>
+
+    <!-- Tela final -->
+    <div class="ldg-overlay" id="ldg-end" hidden>
+      <div class="ldg-badge" id="ldg-rank"></div>
+      <div class="ldg-big" id="ldg-final">0</div>
+      <p id="ldg-summary"></p>
+      <ul class="ldg-feats" id="ldg-feats"></ul>
+      <p class="ldg-ask">Quer isso funcionando no seu condomínio?</p>
+      <div class="ldg-actions">
+        <a class="ldg-btn" id="ldg-cta" href="#contato" target="_top">Falar com a equipe</a>
+        <button class="ldg-btn ghost" id="ldg-again">Jogar de novo</button>
+      </div>
+      <a class="ldg-mail" href="mailto:laremdia.condominio@gmail.com?subject=Vim%20pelo%20Plant%C3%A3o%20do%20S%C3%ADndico" target="_top">ou mande um e-mail: laremdia.condominio@gmail.com</a>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){
+  /* ====== Configuração ====== */
+  var CTA_URL = '/?section=planos';   // abre a landing já no formulário de proposta
+  var DURATION = 60;          // segundos de partida
+
+  var TYPES = [
+    {id:'cobranca', e:'💸', p:'Boleto atrasado',        tool:'Cobrança',  te:'💳', feat:'Cobrança por Pix e boleto, enviada em massa'},
+    {id:'aviso',    e:'📢', p:'Ninguém leu o aviso',     tool:'Avisos',    te:'📨', feat:'Avisos com confirmação de leitura'},
+    {id:'reserva',  e:'🎉', p:'Briga pelo salão',        tool:'Reservas',  te:'📅', feat:'Reserva de espaços comuns'},
+    {id:'enquete',  e:'🗳️', p:'Cor da fachada?',         tool:'Enquete',   te:'✅', feat:'Enquetes online com os moradores'},
+    {id:'contas',   e:'🧾', p:'Cadê as contas?',         tool:'Prestação', te:'📊', feat:'Prestação de contas mensal automática'},
+    {id:'barulho',  e:'🔊', p:'Som alto às 23h',         tool:'Ocorrência',te:'📖', feat:'Livro de ocorrências e notificação de infração'}
+  ];
+  var BY = {}; TYPES.forEach(function(t){BY[t.id]=t;});
+
+  var $ = function(id){return document.getElementById(id);};
+  var grid=$('ldg-grid'), toolsEl=$('ldg-tools'), hint=$('ldg-hint');
+  $('ldg-cta').href = CTA_URL;
+  // Dentro do modal da landing: avisa a página, que fecha o jogo e abre o formulário.
+  $('ldg-cta').addEventListener('click',function(e){
+    if(window.parent===window) return;
+    e.preventDefault();
+    window.parent.postMessage({source:'ldg',type:'contact',score:st?st.score:0},location.origin);
+  });
+  $('ldg-legend').innerHTML = TYPES.map(function(t){
+    return '<div>'+t.e+' '+t.p+' → '+t.te+' <b>'+t.tool+'</b></div>';
+  }).join('');
+
+  var APTS=['301','302','303','201','202','203','101','102','103'];
+  var slots=[], wins=[];
+  APTS.forEach(function(a,i){
+    var w=document.createElement('div');
+    w.className='ldg-win'; w.setAttribute('role','button');
+    w.innerHTML='<span class="apt">'+a+'</span>';
+    w.addEventListener('click',function(){hitWindow(i);});
+    grid.appendChild(w); wins.push(w); slots.push(null);
+  });
+
+  var toolBtns={};
+  TYPES.forEach(function(t,i){
+    var b=document.createElement('button');
+    b.className='ldg-tool'; b.type='button';
+    b.innerHTML='<span>'+t.te+'</span>'+t.tool;
+    b.title='Atalho: '+(i+1);
+    b.addEventListener('click',function(){selectTool(t.id);});
+    toolsEl.appendChild(b); toolBtns[t.id]=b;
+  });
+
+  var st;
+  function reset(){
+    st={running:false,tut:0,start:0,lastSpawn:0,score:0,happy:100,combo:1,tool:null,
+        solved:{},missed:0,wrong:0};
+    TYPES.forEach(function(t){st.solved[t.id]=0;});
+    for(var i=0;i<slots.length;i++){clear(i);}
+    selectTool(null); coach(null); setHint('Escolha a ferramenta e toque nos apartamentos com problema');
+    updateHud(DURATION);
+  }
+
+  function setHint(txt,tut){hint.textContent=txt; hint.classList.toggle('tut',!!tut);}
+
+  function coach(el){
+    var old=document.querySelectorAll('#ldg .ldg-coach');
+    for(var k=0;k<old.length;k++) old[k].classList.remove('ldg-coach');
+    if(el) el.classList.add('ldg-coach');
+  }
+
+  function selectTool(id){
+    if(!st) return;
+    st.tool=id;
+    Object.keys(toolBtns).forEach(function(k){toolBtns[k].classList.toggle('sel',k===id);});
+    if(!id) return;
+    if(st.tut===1){
+      if(id==='cobranca'){
+        st.tut=2; coach(wins[4]);
+        setHint('Passo 2 de 3: agora toque no apartamento 202 pra enviar a cobrança.',true);
+      }else{
+        setHint('Quase! Boleto atrasado se resolve com 💳 Cobrança.',true);
+      }
+      return;
+    }
+    if(st.tut===3) return;
+    if(st.running) setHint('Ferramenta: '+BY[id].tool+' — toque nos apartamentos '+BY[id].e);
+  }
+
+  function clear(i){
+    slots[i]=null; wins[i].classList.remove('on');
+    wins[i].innerHTML='<span class="apt">'+APTS[i]+'</span>';
+  }
+
+  function place(i,ty,now,ttl){
+    slots[i]={type:ty.id,born:now,ttl:ttl};
+    var w=wins[i]; w.classList.add('on');
+    w.innerHTML='<span class="apt">'+APTS[i]+'</span><span class="e">'+ty.e+'</span><span class="t">'+ty.p+'</span><span class="bar"><i></i></span>';
+  }
+
+  function spawn(now,t){
+    var free=[]; slots.forEach(function(s,i){if(!s)free.push(i);});
+    if(!free.length) return;
+    var i=free[Math.floor(Math.random()*free.length)];
+    var ty=TYPES[Math.floor(Math.random()*TYPES.length)];
+    place(i,ty,now,Math.max(3200,7000-t*60));
+  }
+
+  function pop(i,txt,neg){
+    var w=wins[i], card=w.closest('.ldg-card'), r=w.getBoundingClientRect(), c=card.getBoundingClientRect();
+    var p=document.createElement('div'); p.className='ldg-pop'+(neg?' neg':'');
+    p.textContent=txt; p.style.left=(r.left-c.left+r.width/2-14)+'px'; p.style.top=(r.top-c.top+8)+'px';
+    card.appendChild(p); setTimeout(function(){p.remove();},800);
+  }
+
+  function flash(i,cls){var w=wins[i]; w.classList.remove('ok','bad'); void w.offsetWidth; w.classList.add(cls);}
+
+  function hitWindow(i){
+    if(!st.running && !st.tut) return;
+    var s=slots[i]; if(!s) return;
+    if(!st.tool){
+      toolsEl.classList.remove('pulse'); void toolsEl.offsetWidth; toolsEl.classList.add('pulse');
+      setHint('Primeiro escolha uma ferramenta aqui embaixo 👇',!!st.tut); return;
+    }
+    if(s.type===st.tool){
+      if(st.tut){ clear(i); flash(i,'ok'); pop(i,'✔'); tutorialNext(); return; }
+      var pts=10*st.combo; st.score+=pts; st.solved[s.type]++;
+      st.combo=Math.min(5,st.combo+1); st.happy=Math.min(100,st.happy+2);
+      clear(i); flash(i,'ok'); pop(i,'+'+pts+(st.combo>2?' x'+(st.combo-1):''));
+    }else{
+      flash(i,'bad'); pop(i,'ops!',true);
+      if(st.tut){ setHint('Dica: '+BY[s.type].e+' '+BY[s.type].p+' se resolve com '+BY[s.type].te+' '+BY[s.type].tool+'.',true); return; }
+      st.combo=1; st.wrong++; st.happy-=4;
+      setHint('Ferramenta errada! '+BY[s.type].e+' pede '+BY[s.type].tool);
+    }
+  }
+
+  /* ====== Treino guiado ====== */
+  function startTutorial(){
+    reset(); $('ldg-start').hidden=true; $('ldg-end').hidden=true;
+    st.tut=1;
+    place(4,BY.cobranca,0,Infinity);
+    coach(toolBtns.cobranca);
+    setHint('Passo 1 de 3: um boleto atrasou no 202! Toque em 💳 Cobrança aqui embaixo.',true);
+  }
+
+  function tutorialNext(){
+    if(st.tut===2){
+      st.tut=3; coach(null); selectTool(null);
+      place(0,BY.barulho,0,Infinity);
+      setHint('Passo 3 de 3: som alto no 301! Agora é com você — qual ferramenta resolve 🔊?',true);
+    }else if(st.tut===3){
+      st.tut=0; selectTool(null);
+      countdown('Treino concluído! 🎉 Agora vale pontos:');
+    }
+  }
+
+  function countdown(msg){
+    var box=$('ldg-countbox'), n=$('ldg-count'), seq=['3','2','1','Valendo!'], k=0;
+    $('ldg-countmsg').textContent=msg; box.hidden=false;
+    (function tick(){
+      if(k>=seq.length){box.hidden=true; play(); return;}
+      n.textContent=seq[k++]; n.style.animation='none'; void n.offsetWidth; n.style.animation='';
+      setTimeout(tick,750);
+    })();
+  }
+
+  /* ====== Partida ====== */
+  function updateHud(left){
+    $('ldg-time').textContent=Math.ceil(left);
+    $('ldg-score').textContent=st.score;
+    var h=$('ldg-happy'); h.style.width=Math.max(0,st.happy)+'%';
+    h.style.background=st.happy>60?'var(--ldg-brand)':st.happy>30?'var(--ldg-accent)':'var(--ldg-bad)';
+  }
+
+  function loop(now){
+    if(!st.running) return;
+    var t=(now-st.start)/1000, left=DURATION-t;
+    var every=Math.max(650,1700-t*18);
+    if(now-st.lastSpawn>every){spawn(now,t); st.lastSpawn=now;}
+    slots.forEach(function(s,i){
+      if(!s) return;
+      var frac=1-(now-s.born)/s.ttl;
+      if(frac<=0){
+        st.happy-=12; st.combo=1; st.missed++;
+        clear(i); flash(i,'bad'); pop(i,'😡',true);
+      }else{
+        var bar=wins[i].querySelector('.bar i');
+        if(bar){bar.style.width=(frac*100)+'%'; bar.style.background=frac<.35?'var(--ldg-bad)':'var(--ldg-accent)';}
+      }
+    });
+    updateHud(Math.max(0,left));
+    if(left<=0||st.happy<=0){end(left<=0);return;}
+    requestAnimationFrame(loop);
+  }
+
+  function play(){
+    reset(); $('ldg-start').hidden=true; $('ldg-end').hidden=true;
+    st.running=true; st.start=performance.now(); st.lastSpawn=st.start-1200;
+    requestAnimationFrame(loop);
+  }
+
+  function end(survived){
+    st.running=false;
+    var total=0; TYPES.forEach(function(t){total+=st.solved[t.id];});
+    var rank= st.score>=450?'🏆 Síndico Lenda':st.score>=250?'⭐ Síndico Nota 10':st.score>=120?'👍 Síndico em treinamento':'😵 Síndico sobrecarregado';
+    var best=0; try{best=+localStorage.getItem('ldg-best')||0; if(st.score>best){localStorage.setItem('ldg-best',st.score);}}catch(e){}
+    $('ldg-rank').textContent=rank;
+    $('ldg-final').textContent=st.score+' pts';
+    var msg = survived
+      ? 'Você resolveu '+total+' chamados na mão em '+DURATION+' segundos.'
+      : 'Os moradores perderam a paciência depois de '+total+' chamados resolvidos.';
+    msg += ' No Lar em Dia, boa parte disso roda sozinho:';
+    if(st.score>best && best>0) msg='Novo recorde! '+msg;
+    $('ldg-summary').textContent=msg;
+    var used=TYPES.slice().sort(function(a,b){return st.solved[b.id]-st.solved[a.id];}).slice(0,4);
+    $('ldg-feats').innerHTML=used.map(function(t){return '<li>'+t.te+' '+t.feat+'</li>';}).join('');
+    $('ldg-end').hidden=false;
+  }
+
+  document.addEventListener('keydown',function(e){
+    var n=parseInt(e.key,10);
+    if(st&&(st.running||st.tut)&&n>=1&&n<=TYPES.length) selectTool(TYPES[n-1].id);
+  });
+
+  $('ldg-learn').addEventListener('click',startTutorial);
+  $('ldg-play').addEventListener('click',function(){$('ldg-start').hidden=true; countdown('Prepare-se!');});
+  $('ldg-again').addEventListener('click',function(){$('ldg-end').hidden=true; countdown('Mais uma rodada!');});
+  reset();
+})();
+</script>
+
+</body>
+</html>

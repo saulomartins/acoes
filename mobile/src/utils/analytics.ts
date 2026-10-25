@@ -104,7 +104,7 @@ export const setPrivateArea = (isPrivate: boolean) => {
 // telefone ou o texto que a pessoa digitou. Sem aceite, `gtag` não existe e
 // nada é enviado; logado, o Analytics está desligado (setPrivateArea).
 type EventParams = Record<string, string | number>;
-export const trackEvent = (name: 'generate_lead' | 'lari_open' | 'lari_question' | 'pill_view' | 'pill_search' | 'pill_question_sent', params: EventParams = {}) => {
+export const trackEvent = (name: 'generate_lead' | 'lari_open' | 'lari_question' | 'pill_view' | 'pill_search' | 'pill_question_sent' | 'game_invite_shown' | 'game_open' | 'game_contact', params: EventParams = {}) => {
   if (!isWeb || !GA4_ID) return;
   win().gtag?.('event', name, { ...params, send_to: GA4_ID });
 };

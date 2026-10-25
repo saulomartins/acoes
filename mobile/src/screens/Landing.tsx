@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Image, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../ui/text';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -9,6 +9,7 @@ import { CardGrid } from '../ui/grid';
 import { openCookiePreferences, trackConversion, trackEvent } from '../utils/analytics';
 import ChatAssistant from '../ui/ChatAssistant';
 import CookieConsent from '../ui/CookieConsent';
+import GameLauncher from '../ui/GameLauncher';
 import { BENEFITS, DATA_RIGHTS, DATA_WE_PROCESS, FEATURES, FEATURE_GROUPS, LEGAL_BASES, LGPD_ROLES, PRIVACY_EMAIL, PROFILES, RETENTION, SECURITY_PILLARS, Feature } from '../content/landingContent';
 
 // Sistema visual próprio da landing: paleta sofisticada (índigo/violeta),
@@ -182,6 +183,7 @@ const NAV_ITEMS = [
   { key: 'inicio', label: 'Início' },
   { key: 'solucoes', label: 'Soluções' },
   { key: 'funcionalidades', label: 'Funcionalidades' },
+  { key: 'jogo', label: 'Jogue' },
   { key: 'paraQuemE', label: 'Para quem é' },
   { key: 'planos', label: 'Planos' },
   { key: 'conteudos', label: 'Conteúdos' },
@@ -394,6 +396,10 @@ export default function Landing({ navigation, route }: any) {
   }, []);
   const searchPills = () => navigation.navigate('Pills', pillSearch.trim() ? { q: pillSearch.trim() } : undefined);
 
+  // Minijogo: "Jogue" no menu abre o modal; "Falar com a equipe" no fim do jogo leva ao formulário.
+  const [gameRequest, setGameRequest] = useState(0);
+  const requestProposalFromGame = useCallback(() => scrollToSection('planos'), []);
+
   const goToLogin = () => navigation.navigate('Login');
   const handleFooterLink = (link: string) => {
     const sectionByLabel: Record<string,string> = { 'Início':'inicio', 'Soluções':'solucoes', 'Planos':'planos', 'Conteúdos':'conteudos', 'Segurança e LGPD':'seguranca' };
@@ -419,7 +425,7 @@ export default function Landing({ navigation, route }: any) {
         {desktop ? (
           <View style={styles.navLinks}>
             {NAV_ITEMS.map((item) => (
-              <Pressable key={item.key} onPress={() => scrollToSection(item.key)} style={styles.navLink}>
+              <Pressable key={item.key} onPress={() => item.key === 'jogo' ? setGameRequest((n) => n + 1) : scrollToSection(item.key)} style={styles.navLink}>
                 <Text style={styles.navLinkText}>{item.label}</Text>
               </Pressable>
             ))}
@@ -787,6 +793,7 @@ export default function Landing({ navigation, route }: any) {
         </View>
       </ScrollView>
       <ChatAssistant onOpenPill={(slug) => navigation.navigate('Pills', { slug })} onRequestProposal={() => scrollToSection('planos')} onOpenLogin={goToLogin} onOpenPrivacy={openPrivacyPolicy} />
+      <GameLauncher openRequest={gameRequest} onRequestContact={requestProposalFromGame} />
       <CookieConsent onOpenPrivacy={openPrivacyPolicy} />
     </View>
   );
