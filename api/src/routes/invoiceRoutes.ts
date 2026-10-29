@@ -425,12 +425,16 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), requireFeat
   const referenceMonth = /^\d{4}-\d{2}-01$/.test(rawReferenceMonth) ? rawReferenceMonth : null;
 
   const scopeSql = `and ($2::text is null or to_char(date_trunc('month', coalesce(reference_month, due_date)), 'YYYY-MM-DD') = $2)`;
+  // Débito incluído em acordo aceito/ativo foi negociado: não é inadimplência
+  // nem "em aberto" — só volta a ser se o síndico romper o acordo.
+  const inAgreementSql = (table: string) => `exists(select 1 from debt_agreement_items dai join debt_agreements da on da.id = dai.agreement_id
+     where dai.invoice_id = ${table}.id and da.status in ('accepted','active','at_risk'))`;
 
   const totals = await query<{
     bank_paid_cents: number; bank_paid_count: number; pix_settled_cents: number; pix_settled_count: number;
     open_cents: number; open_count: number; canceled_cents: number; canceled_count: number;
     overdue_cents: number; overdue_count: number; pending_provider_cents: number; pending_provider_count: number;
-    debt_excluded_cents: number; debt_excluded_count: number;
+    debt_excluded_cents: number; debt_excluded_count: number; in_agreement_cents: number; in_agreement_count: number;
   }>(
     // debt_excluded_at (boleto retirado da dívida pelo síndico) sai de "Em
     // aberto" e de "Atrasados" e ganha bucket próprio — do contrário a retirada
@@ -441,12 +445,14 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), requireFeat
        count(*) filter (where paid_at is not null and status <> 'canceled')::int as bank_paid_count,
        coalesce(sum(coalesce(paid_amount_cents, amount_cents)) filter (where paid_at is not null and status = 'canceled'), 0)::int as pix_settled_cents,
        count(*) filter (where paid_at is not null and status = 'canceled')::int as pix_settled_count,
-       coalesce(sum(amount_cents) filter (where status = 'issued' and paid_at is null and debt_excluded_at is null), 0)::int as open_cents,
-       count(*) filter (where status = 'issued' and paid_at is null and debt_excluded_at is null)::int as open_count,
+       coalesce(sum(amount_cents) filter (where status = 'issued' and paid_at is null and debt_excluded_at is null and not ${inAgreementSql('invoices')}), 0)::int as open_cents,
+       count(*) filter (where status = 'issued' and paid_at is null and debt_excluded_at is null and not ${inAgreementSql('invoices')})::int as open_count,
        coalesce(sum(amount_cents) filter (where status = 'canceled' and paid_at is null), 0)::int as canceled_cents,
        count(*) filter (where status = 'canceled' and paid_at is null)::int as canceled_count,
-       coalesce(sum(amount_cents) filter (where status = 'overdue' and debt_excluded_at is null), 0)::int as overdue_cents,
-       count(*) filter (where status = 'overdue' and debt_excluded_at is null)::int as overdue_count,
+       coalesce(sum(amount_cents) filter (where status = 'overdue' and debt_excluded_at is null and not ${inAgreementSql('invoices')}), 0)::int as overdue_cents,
+       count(*) filter (where status = 'overdue' and debt_excluded_at is null and not ${inAgreementSql('invoices')})::int as overdue_count,
+       coalesce(sum(amount_cents) filter (where status in ('issued','overdue') and paid_at is null and debt_excluded_at is null and ${inAgreementSql('invoices')}), 0)::int as in_agreement_cents,
+       count(*) filter (where status in ('issued','overdue') and paid_at is null and debt_excluded_at is null and ${inAgreementSql('invoices')})::int as in_agreement_count,
        coalesce(sum(amount_cents) filter (where status = 'pending_provider' and paid_at is null), 0)::int as pending_provider_cents,
        count(*) filter (where status = 'pending_provider' and paid_at is null)::int as pending_provider_count,
        coalesce(sum(amount_cents) filter (where debt_excluded_at is not null and paid_at is null), 0)::int as debt_excluded_cents,
@@ -494,7 +500,7 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), requireFeat
             to_char(min(i.due_date),'YYYY-MM-DD') as oldest_due_date,
             (current_date - min(i.due_date))::int as days_overdue
      from invoices i join users u on u.id = i.user_id
-     where i.condominium_id = $1 and i.status = 'overdue' and i.deleted_at is null and i.debt_excluded_at is null ${scopeSql}
+     where i.condominium_id = $1 and i.status = 'overdue' and i.deleted_at is null and i.debt_excluded_at is null and not ${inAgreementSql('i')} ${scopeSql}
      group by u.id, u.full_name, u.username, u.unit
      order by overdue_cents desc`,
     [condominiumId, referenceMonth],
@@ -510,6 +516,7 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), requireFeat
     bank_paid_cents: 0, bank_paid_count: 0, pix_settled_cents: 0, pix_settled_count: 0,
     open_cents: 0, open_count: 0, canceled_cents: 0, canceled_count: 0, overdue_cents: 0, overdue_count: 0,
     pending_provider_cents: 0, pending_provider_count: 0, debt_excluded_cents: 0, debt_excluded_count: 0,
+    in_agreement_cents: 0, in_agreement_count: 0,
   };
 
   return res.json({
@@ -534,6 +541,7 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), requireFeat
     },
     open: { totalCents: row.open_cents, count: row.open_count },
     debtExcluded: { totalCents: row.debt_excluded_cents, count: row.debt_excluded_count },
+    inAgreement: { totalCents: row.in_agreement_cents, count: row.in_agreement_count },
     canceled: { totalCents: row.canceled_cents, count: row.canceled_count },
     pendingBank: {
       totalCents: row.pending_provider_cents,

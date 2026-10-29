@@ -173,6 +173,30 @@ router.post('/:id/issue', authorize('sindico', 'subsindico'), asyncHandler(async
   return res.json({ request: updated.rows[0] });
 }));
 
+// Síndico/subsíndico recusa um pedido pendente, com motivo — que o morador
+// vê no pedido. Recusado libera o morador para pedir de novo.
+router.post('/:id/refuse', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
+  const condominiumId = req.user!.condominiumId;
+  const reason = String(req.body?.reason || '').trim();
+  if (!reason) return res.status(400).json({ message: 'Informe o motivo da recusa.' });
+  const updated = await query<any>(
+    `update clearance_certificates set status = 'refused', refusal_reason = $1
+     where id = $2 and condominium_id = $3 and status = 'pending' returning *`,
+    [reason, req.params.id, condominiumId],
+  );
+  const request = updated.rows[0];
+  if (!request) return res.status(409).json({ message: 'Só um pedido aguardando emissão pode ser recusado.' });
+
+  await notifyUsers({
+    condominiumId: condominiumId!, senderId: req.user!.id, recipientIds: [request.requested_by],
+    title: 'Pedido de nada consta recusado',
+    body: `Seu pedido de declaração de quitação foi recusado. Motivo: ${reason}`,
+    screen: 'Clearances',
+  });
+  await logAudit(req, 'pessoas', 'clearance_refused', `Recusou o nada consta de ${request.requester_name}: ${reason}`, { entityId: request.id });
+  return res.json({ request });
+}));
+
 // PDF do documento emitido. Morador baixa o seu; síndico baixa o de todos.
 router.get('/:id/document', asyncHandler(async (req, res) => {
   const isManager = manager(req.user?.role);

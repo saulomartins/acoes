@@ -52,6 +52,7 @@ type DashboardSummary = {
     pixSettledInvoices: PixSettledInvoice[];
   };
   open: { totalCents: number; count: number };
+  inAgreement?: { totalCents: number; count: number };
   canceled: { totalCents: number; count: number };
   pendingBank: { totalCents: number; count: number; invoices: PendingBankInvoice[] };
   overdue: { totalCents: number; count: number; byPerson: OverdueDebtor[] };
@@ -97,7 +98,7 @@ export default function Dashboard() {
     { key: 'summary', title: 'Resumo do período', description: 'Cinco totais lado a lado e sem sobreposição: pagos, em aberto, cancelados, vencidos e "aguardando o banco" (boletos já enviados ao banco, mas sem confirmação de registro ainda). Um boleto aguardando o banco não entra em "em aberto", porque ainda não existe para o morador pagar. Logo abaixo, a divisão de "pagos" entre pagamento via banco e pagamento via Pix conciliado manualmente.' },
     { key: 'pixSettled', title: 'Pagamentos via Pix conciliados manualmente', description: 'Boletos que foram cancelados no banco, mas cujo pagamento foi identificado por fora (Pix direto) e registrado manualmente como pago. Só aparece quando existe pelo menos um caso no período selecionado.' },
     { key: 'pendingBank', title: 'Aguardando o banco', description: 'Boletos já enviados ao banco para registro, mas ainda sem confirmação — não exige nenhuma ação, é só acompanhamento até o banco confirmar o registro. Só aparece quando há boletos nesse estado.' },
-    { key: 'overdue', title: 'Inadimplência', description: 'Lista os moradores com boleto(s) vencido(s) no período, ordenados do maior para o menor valor em atraso, com a quantidade de boletos vencidos e há quantos dias o mais antigo está vencido.' },
+    { key: 'overdue', title: 'Inadimplência', description: 'Lista os moradores com boleto(s) vencido(s) no período, ordenados do maior para o menor valor em atraso, com a quantidade de boletos vencidos e há quantos dias o mais antigo está vencido. Débito negociado em acordo aceito ou ativo não entra aqui; só volta se o acordo for rompido.' },
   ];
 
   return (
@@ -171,6 +172,7 @@ export default function Dashboard() {
           <View style={s.breakdownRow}>
             <Text style={s.breakdownItem}>Via banco: {money(summary.paid.bankCents)} ({summary.paid.bankCount})</Text>
             <Text style={s.breakdownItem}>Via Pix, boleto cancelado: {money(summary.paid.pixSettledCents)} ({summary.paid.pixSettledCount})</Text>
+            {summary.inAgreement?.count ? <Text style={s.breakdownItem}>Negociado em acordo (fora da inadimplência): {money(summary.inAgreement.totalCents)} ({summary.inAgreement.count})</Text> : null}
           </View>
           </View>
 

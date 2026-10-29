@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { Text } from '../ui/text';
 import { apiRequest, downloadAuthenticated } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
@@ -80,6 +80,26 @@ export default function Clearances() {
     finally { setBusy(null); }
   };
 
+  // Recusa: o motivo é digitado no modal e uma segunda confirmação antecede
+  // o envio, porque o morador é avisado na hora.
+  const [refusing, setRefusing] = useState<ClearanceRequest | null>(null);
+  const [refuseReason, setRefuseReason] = useState('');
+  const [refuseConfirm, setRefuseConfirm] = useState(false);
+  const closeRefuse = () => { setRefusing(null); setRefuseReason(''); setRefuseConfirm(false); };
+  const refuse = async () => {
+    if (!refusing || !userToken) return;
+    const item = refusing;
+    const reason = refuseReason.trim();
+    closeRefuse();
+    setBusy(item.id);
+    try {
+      await apiRequest(`/clearances/${item.id}/refuse`, userToken, { method: 'POST', body: JSON.stringify({ reason }) });
+      await load(true);
+      show('Pedido recusado', `${item.requester_name} foi avisado(a) do motivo da recusa.`, 'success');
+    } catch (e) { show('Não foi possível recusar', e instanceof Error ? e.message : 'Tente novamente.', 'error'); }
+    finally { setBusy(null); }
+  };
+
   const downloadDocument = async (item: ClearanceRequest) => {
     if (!userToken) return;
     setBusy(item.id);
@@ -91,6 +111,7 @@ export default function Clearances() {
   const managerTourSteps: TourStep[] = [
     { key: 'list', title: 'Solicitações de nada consta', description: 'Cada pedido mostra quem solicitou, a unidade e o que o sistema encontrou de débito no momento da solicitação. Pedidos com pendência já chegam recusados automaticamente — você não precisa responder um por um.' },
     { key: 'list', title: 'Emitir a declaração', description: 'Ao tocar em "Emitir", o sistema confere os débitos de novo (pode ter surgido algo entre o pedido e agora) e só então gera o documento com o seu nome, CPF e cargo. Se apareceu qualquer valor em aberto no meio do caminho, a emissão é bloqueada na hora.' },
+    { key: 'list', title: 'Recusar um pedido', description: 'Se o pedido não deve ser atendido, toque em "Recusar", informe o motivo e confirme. O morador é avisado, vê o motivo no pedido e pode solicitar de novo depois.' },
     { key: 'list', title: 'Código verificador', description: 'Todo documento emitido sai com um código único e um resumo (hash) do conteúdo. Qualquer pessoa — banco, imobiliária, cartório — confere a autenticidade numa página pública, sem precisar de login, informando esse código.' },
   ];
   const residentTourSteps: TourStep[] = [
@@ -162,6 +183,7 @@ export default function Clearances() {
             ) : null}
 
             <View style={s.cardActions}>
+              {manager && item.status === 'pending' ? <AppButton title="Recusar" variant="danger" disabled={busy === item.id} onPress={() => { setRefusing(item); setRefuseReason(''); setRefuseConfirm(false); }} /> : null}
               {manager && item.status === 'pending' ? <AppButton title="Emitir declaração" loading={busy === item.id} onPress={() => issue(item)} /> : null}
               {item.status === 'issued' ? <AppButton title="Baixar PDF" variant="secondary" loading={busy === item.id} onPress={() => downloadDocument(item)} /> : null}
             </View>
@@ -171,6 +193,20 @@ export default function Clearances() {
     </ScrollView>
     <AppDialog {...dialog} onClose={() => setDialog(d => ({ ...d, visible: false }))} />
     <AppDialog visible={confirmOpen} title="Solicitar nada consta?" message="O síndico e o subsíndico serão avisados para emitir sua declaração de quitação." confirmLabel="Solicitar" cancelLabel="Cancelar" onConfirm={request} onClose={() => setConfirmOpen(false)} />
+    <Modal visible={!!refusing && !refuseConfirm} transparent animationType="fade" onRequestClose={closeRefuse}>
+      <View style={s.modalOverlay}>
+        <View style={s.modalContent}>
+          <Text style={s.panelTitle}>Recusar pedido de nada consta</Text>
+          <Text style={s.cardMeta}>{refusing ? `${refusing.requester_name}${refusing.unit_label ? ` · ${refusing.unit_label}` : ''}. O morador verá o motivo no pedido e poderá solicitar de novo.` : ''}</Text>
+          <TextInput placeholder="Motivo da recusa..." value={refuseReason} onChangeText={setRefuseReason} multiline numberOfLines={4} style={s.reasonInput} />
+          <View style={s.cardActions}>
+            <AppButton title="Cancelar" variant="secondary" onPress={closeRefuse} />
+            <AppButton title="Continuar" variant="danger" disabled={!refuseReason.trim()} onPress={() => setRefuseConfirm(true)} />
+          </View>
+        </View>
+      </View>
+    </Modal>
+    <AppDialog visible={!!refusing && refuseConfirm} title="Tem certeza que deseja recusar este pedido?" message={refusing ? `${refusing.requester_name} será avisado(a). Motivo: ${refuseReason.trim()}` : ''} confirmLabel="Sim, recusar" cancelLabel="Voltar" onConfirm={() => { void refuse(); }} onClose={closeRefuse} />
     <FeatureTour steps={tourSteps} visible={tourOpen} onClose={closeTour} onStepChange={step => scrollToSection(step.key)} />
   </>;
 }
@@ -206,4 +242,7 @@ const s = StyleSheet.create({
   refusal: { color: colors.red, fontSize: 13, lineHeight: 19, marginTop: 10, backgroundColor: '#fff0f0', borderRadius: 8, padding: 10 },
   issued: { color: colors.green, fontSize: 13, fontWeight: '700', marginTop: 10 },
   cardActions: { flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8, marginTop: 14 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', justifyContent: 'center', alignItems: 'center', padding: 16 },
+  modalContent: { width: '100%', maxWidth: 480, backgroundColor: colors.surface, borderRadius: layout.radius, padding: 20, gap: 8 },
+  reasonInput: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 10, minHeight: 90, textAlignVertical: 'top', color: colors.ink, marginTop: 8 },
 });
