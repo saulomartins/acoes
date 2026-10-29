@@ -74,6 +74,18 @@ const judicialColumns = `exists(select 1 ${judicialItems}) judicial,(select max(
 // demais ela é a soma calculada dos débitos incluídos.
 const legacyColumn = `(select case when count(*)=1 and bool_and(lv.invoice_type='legacy') then (array_agg(lv.id))[1] end from debt_agreement_items li join invoices lv on lv.id=li.invoice_id where li.agreement_id=a.id) legacy_invoice_id`;
 
+// Atrasos que antes rompiam o acordo sozinhos e hoje só alertam: taxa
+// condominial nova vencida depois do aceite e parcela do acordo vencida. Pode
+// ser só o banco ainda sem confirmar um pagamento feito no prazo.
+const overdueAlertsColumn = `(case when a.status in ('accepted','active','at_risk') then (select coalesce(jsonb_agg(jsonb_build_object('kind',x.kind,'dueDate',x.due_date,'amountCents',x.amount_cents) order by x.due_date),'[]') from (
+    select 'taxa' kind,ri.due_date,ri.amount_cents from invoices ri where ri.condominium_id=a.condominium_id and ri.invoice_type='regular' and ri.status not in ('paid','canceled') and ri.deleted_at is null
+      and ri.due_date>=(a.accepted_at at time zone 'America/Sao_Paulo')::date and ri.due_date<current_date
+      and (ri.user_id=a.debtor_user_id or ri.user_id in(select user_id from unit_occupancies where unit_id=a.unit_id and ended_at is null))
+      and not exists(select 1 from debt_agreement_items rai where rai.agreement_id=a.id and rai.invoice_id=ri.id)
+    union all
+    select 'parcela',pv.due_date,pv.amount_cents from debt_agreement_installments pp join invoices pv on pv.id=pp.invoice_id where pp.agreement_id=a.id and pv.status not in ('paid','canceled') and pv.due_date<current_date
+  ) x) else '[]'::jsonb end) overdue_alerts`;
+
 const recipientsFor = async (condominiumId: string, debtorUserId: string, unitId?: string | null) => {
   const result = await query<{ id: string }>(`select id from users where condominium_id=$1 and login_enabled=true and (id=$2 or ($3::uuid is not null and unit_id=$3))`, [condominiumId, debtorUserId, unitId || null]);
   return result.rows.map(row => row.id);
@@ -83,19 +95,10 @@ router.get('/', asyncHandler(async (req, res) => {
   const condominiumId = req.user?.condominiumId;
   const manager = ['sindico', 'subsindico'].includes(req.user?.role || '');
   const ownedUnitIds = manager ? [] : await getOwnedUnitIds(req.user!.id);
-  const breached = await query<any>(`update debt_agreements a set status='breached',breached_at=now(),breach_reason='Nova taxa condominial vencida após o aceite do acordo.',updated_at=now()
-    where a.condominium_id=$1 and a.status in ('accepted','active','at_risk') and exists(
-      select 1 from invoices i where i.condominium_id=a.condominium_id and i.invoice_type='regular' and i.status not in ('paid','canceled')
-      and i.due_date>=(a.accepted_at at time zone 'America/Sao_Paulo')::date and i.due_date<current_date
-      and (i.user_id=a.debtor_user_id or i.user_id in(select user_id from unit_occupancies where unit_id=a.unit_id and ended_at is null))
-      and not exists(select 1 from debt_agreement_items ai where ai.agreement_id=a.id and ai.invoice_id=i.id)
-    ) returning a.*`, [condominiumId]);
-  for (const agreement of breached.rows) {
-    const people = await query<{id:string}>(`select id from users where condominium_id=$1 and login_enabled=true and (role in ('sindico','subsindico') or id=$2 or ($3::uuid is not null and unit_id=$3))`, [condominiumId, agreement.debtor_user_id, agreement.unit_id]);
-    const body = `O acordo ${agreement.id.slice(0,8).toUpperCase()} foi rompido porque existe uma nova taxa vencida após o aceite. Os débitos originais voltaram a ser atualizados e uma nova negociação poderá ser criada.`;
-    await notify({ condominiumId: condominiumId as string, senderId: req.user?.id as string, recipients: people.rows.map(row=>row.id), title: 'Acordo de débito rompido', body });
-    for (const person of people.rows) await query(`insert into debt_communications(id,condominium_id,agreement_id,user_id,channel,message,status,created_by) values($1,$2,$3,$4,'app',$5,'sent',$6)`, [randomUUID(), condominiumId, agreement.id, person.id, body, req.user?.id]);
-  }
+  // Acordo nunca é rompido automaticamente: atraso (de taxa nova ou de
+  // parcela) só vira alerta em overdue_alerts, e o rompimento é decisão do
+  // síndico/subsíndico em POST /:id/breach. O rompimento automático antigo
+  // disparava com o banco ainda sem confirmar pagamentos feitos no prazo.
   await query(`update debt_agreements a set status='settled',settled_at=now(),updated_at=now() where a.condominium_id=$1 and a.status='active' and exists(select 1 from debt_agreement_installments p where p.agreement_id=a.id) and not exists(select 1 from debt_agreement_installments p left join invoices i on i.id=p.invoice_id where p.agreement_id=a.id and (p.invoice_id is null or i.status<>'paid'))`, [condominiumId]);
 
   // Confere no Inter as parcelas em aberto — mesma regra da lista de boletos
@@ -110,7 +113,7 @@ router.get('/', asyncHandler(async (req, res) => {
   );
   if (installmentInvoices.rows.length > 0) await syncStaleInterInvoices(installmentInvoices.rows);
 
-  const result = await query<any>(`select a.*,coalesce(u.full_name,u.username) debtor_name,${judicialColumns},${legacyColumn},
+  const result = await query<any>(`select a.*,coalesce(u.full_name,u.username) debtor_name,${judicialColumns},${legacyColumn},${overdueAlertsColumn},
       coalesce(nullif(concat_ws(' - ',b.name,un.number),''),u.unit,'Sem apartamento') apartment,
       coalesce(jsonb_agg(distinct jsonb_build_object('invoiceId',ai.invoice_id,'referenceMonth',coalesce(oi.reference_month,oi.due_date),'dueDate',oi.due_date,'principalCents',ai.principal_cents,'fineCents',ai.fine_cents,'interestCents',ai.interest_cents,'frozenTotalCents',ai.frozen_total_cents,'frozenAt',ai.frozen_at)) filter(where ai.invoice_id is not null),'[]') items,
       coalesce(jsonb_agg(distinct jsonb_build_object('id',p.id,'number',p.installment_number,'amountCents',p.amount_cents,'dueDate',p.due_date,'invoiceId',p.invoice_id,'status',pi.status,'canceledAt',p.canceled_at,'cancellationReason',p.cancellation_reason)) filter(where p.id is not null),'[]') installments
@@ -230,7 +233,7 @@ router.post('/:id/issue', authorize('sindico', 'subsindico'), asyncHandler(async
   if (!agreement.full_name || !agreement.cpf || !agreement.street || !agreement.address_number || !agreement.neighborhood || !agreement.city || !agreement.state || !agreement.postal_code) return res.status(400).json({ message: 'Complete nome, CPF e endereço do responsável antes da emissão.' });
   // Acordo judicial ainda 'sent': o aceite é dispensado e registrado aqui, na
   // primeira emissão, para que as regras que partem de accepted_at (congelamento
-  // dos débitos, rompimento por nova taxa vencida) valham a partir de agora.
+  // dos débitos, alerta de nova taxa vencida) valham a partir de agora.
   if (agreement.status === 'sent') {
     await query(`update debt_agreements set status='accepted',accepted_at=now(),updated_at=now() where id=$1 and status='sent'`, [agreement.id]);
     await logAudit(req, 'historico_acordos', 'updated', `Dispensou o aceite do responsável no acordo ${agreement.id.slice(0, 8).toUpperCase()} por se tratar de acordo judicial${agreement.judicial_process_number ? ` (processo ${agreement.judicial_process_number})` : ''}`, { entityId: agreement.id });
@@ -249,6 +252,25 @@ router.post('/:id/issue', authorize('sindico', 'subsindico'), asyncHandler(async
   await query(`update debt_agreements set status='active',updated_at=now() where id=$1`, [agreement.id]);
   if (issued.length) await logAudit(req, 'historico_acordos', 'issued', `Emitiu ${issued.length} parcela(s) do acordo ${agreement.id.slice(0, 8).toUpperCase()}`, { entityId: agreement.id });
   return res.status(201).json({ issued: issued.length, message: `${issued.length} parcela(s) de acordo gerada(s).` });
+}));
+
+// Rompimento só por decisão do síndico/subsíndico, com motivo (a tela pede
+// confirmação antes). Os débitos incluídos deixam de estar congelados e
+// voltam a receber multa e mora.
+router.post('/:id/breach', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
+  const condominiumId = req.user?.condominiumId as string;
+  const reason = String(req.body?.reason || '').trim();
+  if (!reason) return res.status(400).json({ message: 'Informe o motivo do rompimento do acordo.' });
+  const result = await query<any>(`update debt_agreements set status='breached',breached_at=now(),breach_reason=$3,updated_at=now() where id=$1 and condominium_id=$2 and status in ('accepted','active','at_risk') returning *`, [req.params.id, condominiumId, reason]);
+  const agreement = result.rows[0];
+  if (!agreement) return res.status(409).json({ message: 'Só um acordo aceito ou ativo pode ser rompido.' });
+  const code = agreement.id.slice(0, 8).toUpperCase();
+  const people = await query<{ id: string }>(`select id from users where condominium_id=$1 and login_enabled=true and (role in ('sindico','subsindico') or id=$2 or ($3::uuid is not null and unit_id=$3))`, [condominiumId, agreement.debtor_user_id, agreement.unit_id]);
+  const body = `O acordo ${code} foi rompido pela administração. Motivo: ${reason}. Os débitos originais voltaram a ser atualizados e uma nova negociação poderá ser criada.`;
+  await notify({ condominiumId, senderId: req.user?.id as string, recipients: people.rows.map(row => row.id), title: 'Acordo de débito rompido', body });
+  for (const person of people.rows) await query(`insert into debt_communications(id,condominium_id,agreement_id,user_id,channel,message,status,created_by) values($1,$2,$3,$4,'app',$5,'sent',$6)`, [randomUUID(), condominiumId, agreement.id, person.id, body, req.user?.id]);
+  await logAudit(req, 'historico_acordos', 'updated', `Rompeu o acordo ${code}. Motivo: ${reason}`, { entityId: agreement.id });
+  return res.json({ agreement, message: 'Acordo rompido. O responsável foi avisado.' });
 }));
 
 // Get history of agreements: todos os acordos do condomínio (abertos, ativos, cancelados, quitados, rompidos etc.)
