@@ -1524,3 +1524,21 @@ Commit `9123065`.
   `AppEntry-cb2deffc397f8ce7e8c38225e0efb5ba.js`, servido em `gestaolaremdia.com`.
 - Android: sem versão nova (regra está na API). O alerta de atraso na tela do
   morador entra na próxima versão da loja.
+
+## Publicação de 29/10/2026 (2) — débito em acordo fora da inadimplência; recusar nada consta
+
+Commit `cb64b29`.
+
+- Painel financeiro e Pendências (`GET /invoices/dashboard/summary`): débito
+  incluído em acordo `accepted`/`active`/`at_risk` sai de vencidos, em aberto e
+  da lista de inadimplência; novo bucket `inAgreement` ("Negociado em acordo").
+  Conferido em produção (leitura), 10/2026: vencidos R$ 993,84 (4) e em acordo
+  R$ 4.350,00 (2: Josemar e Paulo).
+- Nada consta: `POST /clearances/:id/refuse` (síndico/subsíndico, motivo
+  obrigatório, só pedido `pending`), aviso ao morador e auditoria; tela com
+  botão "Recusar", modal de motivo e confirmação.
+- API: deployment `1636f86a-b8ea-4003-a956-48b608904cc9`, `SUCCESS`; health 200,
+  `/refuse` sem token 401.
+- Web: deployment `50eb6427.lar-em-dia.pages.dev`, bundle
+  `AppEntry-f87f0d570413b25c510ab4b8162c3e29.js`, servido em `gestaolaremdia.com`.
+- Android: sem versão nova.
