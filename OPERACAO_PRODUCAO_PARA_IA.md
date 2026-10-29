@@ -1542,3 +1542,22 @@ Commit `cb64b29`.
 - Web: deployment `50eb6427.lar-em-dia.pages.dev`, bundle
   `AppEntry-f87f0d570413b25c510ab4b8162c3e29.js`, servido em `gestaolaremdia.com`.
 - Android: sem versão nova.
+
+## Publicação de 29/10/2026 (3 e 4) — painel e Comunicação
+
+- Commit `f832a6b`: "Ver lista" da Cobrança no Início abre o painel em "Todo o
+  histórico" (a pendência conta vencidos de todos os meses) e a Inadimplência
+  mostra os meses de referência vencidos de cada morador (`overdueMonths`).
+  Caso que motivou: boleto 01/2026 da Andreia (APTO-301) não retirado da dívida
+  junto com 02–05/2026 em 19/08. API `8f497c83-…`, web `f18684f8.lar-em-dia.pages.dev`.
+- Commit `9f7e5ce`: Comunicação com abas Comunicados/Automáticos/Recebidos,
+  cards compactos, busca, paginação de 10 e compositor recolhido; exclusão
+  lógica de aviso por síndico/subsíndico (`DELETE /notifications/:id`).
+  Schema (rodado pelo usuário no painel do Railway): `notifications.source`
+  (padrão 'system'; POST /notifications grava 'manual'), `deleted_at`,
+  `deleted_by`; backfill por título: 13 manuais, 292 automáticos.
+  API `052ed2ee-e306-489d-aa36-69fa4e8ff907` SUCCESS (health 200, DELETE sem
+  token 401); web `d65a559e.lar-em-dia.pages.dev`, bundle
+  `AppEntry-250d4837d73fce84ba0f57e9ad38c1c5.js`.
+- Android: sem versão nova. Cards compactos para o morador entram na próxima
+  versão da loja; a exclusão já vale para o 1.7.7 (filtro na API).
