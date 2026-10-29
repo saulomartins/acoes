@@ -934,6 +934,13 @@ create table if not exists notification_recipients (
 alter table notifications add column if not exists audience_type text not null default 'general';
 alter table notifications add column if not exists target_user_id uuid references users(id) on delete set null;
 create index if not exists notification_recipients_user_idx on notification_recipients(user_id,read_at,delivered_at desc);
+-- source: 'manual' = comunicado escrito pelo síndico em Comunicação;
+-- 'system' (padrão) = aviso automático (boleto, acordo, nada consta...).
+-- deleted_at: síndico/subsíndico excluiu o aviso — some do histórico e da
+-- caixa de entrada de todos, mas a linha fica para auditoria.
+alter table notifications add column if not exists source text not null default 'system';
+alter table notifications add column if not exists deleted_at timestamptz;
+alter table notifications add column if not exists deleted_by uuid references users(id) on delete set null;
 
 create table if not exists resident_reports (
   id uuid primary key default gen_random_uuid(),

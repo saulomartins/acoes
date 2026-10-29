@@ -14,7 +14,7 @@ type AuditFeature =
   | 'pessoas' | 'tipologias' | 'blocos_unidades' | 'prestacao_contas'
   | 'gestao_cobrancas' | 'gestao_debitos' | 'historico_acordos'
   | 'config_enviar_cobrancas' | 'cobrancas_adicionais' | 'consumo_individualizado'
-  | 'regimento' | 'ocorrencias' | 'notificacoes_infracao';
+  | 'regimento' | 'ocorrencias' | 'notificacoes_infracao' | 'avisos_comunicacao';
 type AuditEntry = { id: string; actor_name: string; actor_role: string; feature: AuditFeature; action: string; description: string; created_at: string };
 
 const featureLabel: Record<AuditFeature, string> = {
@@ -31,6 +31,7 @@ const featureLabel: Record<AuditFeature, string> = {
   regimento: 'Regimento',
   ocorrencias: 'Ocorrências',
   notificacoes_infracao: 'Notificações de infração',
+  avisos_comunicacao: 'Avisos e comunicação',
 };
 const featureOptions = Object.keys(featureLabel) as AuditFeature[];
 const roleLabel: Record<string, string> = { sindico: 'Síndico', subsindico: 'Subsíndico', proprietario: 'Proprietário', inquilino: 'Inquilino' };

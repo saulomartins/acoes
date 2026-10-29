@@ -18,6 +18,7 @@ export type AuditFeature =
   | 'regimento'
   | 'ocorrencias'
   | 'notificacoes_infracao'
+  | 'avisos_comunicacao'
   | 'suporte_admin';
 
 // Por padrão só audita sindico/subsindico (admin_geral e moradores ficam

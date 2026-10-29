@@ -5,6 +5,7 @@ import {requireFeature} from '../middleware/requireFeature';
 import {asyncHandler} from '../middleware/asyncHandler';
 import {query,withTransaction} from '../db';
 import {sendPushNotification} from '../services/notificationService';
+import {logAudit} from '../services/auditService';
 
 const router=Router();
 router.use(authenticate);
@@ -30,19 +31,19 @@ router.delete('/devices',asyncHandler(async(req,res)=>{
 }));
 
 router.get('/unread-count',asyncHandler(async(req,res)=>{
-  const result=await query<{count:number}>(`select count(*)::int count from notification_recipients where user_id=$1 and read_at is null`,[req.user?.id]);
+  const result=await query<{count:number}>(`select count(*)::int count from notification_recipients nr join notifications n on n.id=nr.notification_id where nr.user_id=$1 and nr.read_at is null and n.deleted_at is null`,[req.user?.id]);
   return res.json({count:result.rows[0]?.count||0});
 }));
 
 router.get('/',asyncHandler(async(req,res)=>{
   const result=await query(`select n.id,n.title,n.body,n.created_at,n.provider_status,n.audience_type,n.target_user_id,n.created_by,u.full_name created_by_name,u.username created_by_username,nr.delivered_at,nr.read_at
     from notification_recipients nr join notifications n on n.id=nr.notification_id left join users u on u.id=n.created_by
-    where nr.user_id=$1 and n.condominium_id=$2 order by n.created_at desc`,[req.user?.id,req.user?.condominiumId]);
+    where nr.user_id=$1 and n.condominium_id=$2 and n.deleted_at is null order by n.created_at desc`,[req.user?.id,req.user?.condominiumId]);
   return res.json({notifications:result.rows});
 }));
 
 router.get('/history/sent',authorize('sindico','subsindico'),requireFeature('avisos_comunicacao'),asyncHandler(async(req,res)=>{
-  const result=await query(`select n.id,n.title,n.body,n.audience_type,n.created_at,n.provider_status,
+  const result=await query(`select n.id,n.title,n.body,n.audience_type,n.source,n.created_at,n.provider_status,
       sender.full_name created_by_name,sender.username created_by_username,
       count(nr.user_id)::int recipient_count,
       count(nr.read_at)::int read_count,
@@ -53,7 +54,7 @@ router.get('/history/sent',authorize('sindico','subsindico'),requireFeature('avi
     left join users sender on sender.id=n.created_by
     left join units on units.id=recipient.unit_id
     left join blocks on blocks.id=units.block_id
-    where n.condominium_id=$1
+    where n.condominium_id=$1 and n.deleted_at is null
     group by n.id,sender.full_name,sender.username
     order by n.created_at desc`,[req.user?.condominiumId]);
   return res.json({history:result.rows});
@@ -91,7 +92,7 @@ router.post('/',authorize('sindico','subsindico'),requireFeature('avisos_comunic
   const tokens=devices.rows.map(row=>row.fcm_token).filter(Boolean);
   let push;try{push=await sendPushNotification({tokens,title,body,data:{screen:'Communications'}});if(push.errors?.length)console.warn('Communication push notification errors',push.errors);if(push.invalidTokens?.length)await query(`delete from device_tokens where fcm_token = any($1::text[])`,[push.invalidTokens]);}catch(error){console.warn('Communication push notification failed',error);push={provider:'expo',status:'provider_error',delivered:0,requested:tokens.length,errors:['Falha ao enviar push notification.'],invalidTokens:[]};}
   const notification=await withTransaction(async client=>{
-    const created=await client.query(`insert into notifications(id,condominium_id,title,body,target_role,created_by,provider_status,audience_type,target_user_id) values($1,$2,$3,$4,null,$5,$6,$7,$8) returning *`,[randomUUID(),condominiumId,title,body,senderId,push.status,targetUserId?'personal':'general',targetUserId]);
+    const created=await client.query(`insert into notifications(id,condominium_id,title,body,target_role,created_by,provider_status,audience_type,target_user_id,source) values($1,$2,$3,$4,null,$5,$6,$7,$8,'manual') returning *`,[randomUUID(),condominiumId,title,body,senderId,push.status,targetUserId?'personal':'general',targetUserId]);
     for(const recipient of recipients.rows)await client.query(`insert into notification_recipients(notification_id,user_id) values($1,$2)`,[created.rows[0].id,recipient.id]);
     return created.rows[0];
   });
@@ -99,6 +100,16 @@ router.post('/',authorize('sindico','subsindico'),requireFeature('avisos_comunic
   const personalMessage=targetUserId===senderId?'Mensagem enviada para você mesmo.':`Mensagem enviada para ${recipientName}.`;
   const generalMessage=`Aviso enviado para ${recipients.rows.length} pessoa(s) do condomínio${senderIsResident?', incluindo você':''}.`;
   return res.status(201).json({notification,recipients:recipients.rows.length,senderIncluded:senderIsResident,push,message:targetUserId?personalMessage:generalMessage});
+}));
+
+// Exclusão lógica pelo síndico/subsíndico (a tela confirma antes): o aviso
+// some do histórico e da caixa de entrada de todos os destinatários, inclusive
+// nas versões do app já instaladas, que só leem GET /notifications.
+router.delete('/:id',authorize('sindico','subsindico'),requireFeature('avisos_comunicacao'),asyncHandler(async(req,res)=>{
+  const result=await query<{title:string}>(`update notifications set deleted_at=now(),deleted_by=$3 where id=$1 and condominium_id=$2 and deleted_at is null returning title`,[req.params.id,req.user?.condominiumId,req.user?.id]);
+  if(!result.rows[0])return res.status(404).json({message:'Aviso não encontrado.'});
+  await logAudit(req,'avisos_comunicacao','deleted',`Excluiu o aviso "${result.rows[0].title}"`,{entityId:String(req.params.id)});
+  return res.json({message:'Aviso excluído.'});
 }));
 
 export default router;
