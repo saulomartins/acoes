@@ -19,7 +19,7 @@ type Summary = {
   overdue: { totalCents: number; count: number; byPerson: Array<{ fullName: string | null; username: string; unit: string | null }> };
   pendingBank: { totalCents: number; count: number };
 };
-type Pending = { key: string; kind: string; tone: 'amber' | 'blue' | 'lilac' | 'red' | 'teal'; title: string; subtitle: string; cta: string; route: string; approveId?: string };
+type Pending = { key: string; kind: string; tone: 'amber' | 'blue' | 'lilac' | 'red' | 'teal'; title: string; subtitle: string; cta: string; route: string; params?: Record<string, string>; approveId?: string };
 
 const money = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const compact = (cents: number) => Math.round(cents / 100).toLocaleString('pt-BR');
@@ -80,7 +80,7 @@ export function ManagerHome({ navigation, registerSection, isActive, desktop }: 
     }
     if (total && total.overdue.count > 0) {
       const names = total.overdue.byPerson.map(person => person.fullName || person.username);
-      list.push({ key: 'overdue', kind: 'Cobrança', tone: 'red', title: `${total.overdue.count} boleto${total.overdue.count === 1 ? '' : 's'} vencido${total.overdue.count === 1 ? '' : 's'} · ${money(total.overdue.totalCents)}`, subtitle: names.length > 3 ? `${names.slice(0, 3).join(', ')} e mais ${names.length - 3}` : names.join(', '), cta: 'Ver lista', route: 'Dashboard' });
+      list.push({ key: 'overdue', kind: 'Cobrança', tone: 'red', title: `${total.overdue.count} boleto${total.overdue.count === 1 ? '' : 's'} vencido${total.overdue.count === 1 ? '' : 's'} · ${money(total.overdue.totalCents)}`, subtitle: names.length > 3 ? `${names.slice(0, 3).join(', ')} e mais ${names.length - 3}` : names.join(', '), cta: 'Ver lista', route: 'Dashboard', params: { referenceMonth: 'all' } });
     }
     setPending(list);
     setLoaded(true);
@@ -148,7 +148,7 @@ export function ManagerHome({ navigation, registerSection, isActive, desktop }: 
               </View>
               <View style={styles.actions}>
                 {item.approveId ? <Pressable accessibilityRole="button" onPress={() => approve(item)} style={({ pressed }) => [styles.approve, pressed && styles.pressed]}><Text style={styles.approveText}>Aprovar</Text></Pressable> : null}
-                <Pressable accessibilityRole="button" onPress={() => navigation.navigate(item.route)} style={({ pressed }) => [styles.action, pressed && styles.pressed]}><Text style={styles.actionText}>{item.cta}</Text></Pressable>
+                <Pressable accessibilityRole="button" onPress={() => navigation.navigate(item.route, item.params)} style={({ pressed }) => [styles.action, pressed && styles.pressed]}><Text style={styles.actionText}>{item.cta}</Text></Pressable>
               </View>
             </View>
           ))}

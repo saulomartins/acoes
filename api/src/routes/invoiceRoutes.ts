@@ -492,10 +492,13 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), requireFeat
 
   const overdueByPerson = await query<{
     user_id: string; full_name: string | null; username: string; unit: string | null;
-    overdue_count: number; overdue_cents: number; oldest_due_date: string; days_overdue: number;
+    overdue_count: number; overdue_cents: number; oldest_due_date: string; days_overdue: number; overdue_months: string[];
   }>(
+    // overdue_months: no "Todo o histórico" o síndico precisa ver de qual
+    // mês é cada boleto vencido (ex.: um janeiro esquecido entre meses pagos).
     `select u.id as user_id, u.full_name, u.username, u.unit,
             count(*)::int as overdue_count,
+            array_agg(distinct to_char(coalesce(i.reference_month, i.due_date), 'YYYY-MM')) as overdue_months,
             sum(i.amount_cents)::int as overdue_cents,
             to_char(min(i.due_date),'YYYY-MM-DD') as oldest_due_date,
             (current_date - min(i.due_date))::int as days_overdue
@@ -568,6 +571,7 @@ router.get('/dashboard/summary', authorize('sindico', 'subsindico'), requireFeat
         overdueCents: item.overdue_cents,
         oldestDueDate: item.oldest_due_date,
         daysOverdue: item.days_overdue,
+        overdueMonths: item.overdue_months || [],
       })),
     },
   });

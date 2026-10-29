@@ -51,7 +51,7 @@ type RootStackParamList = {
   NativeAccessBlocked: undefined;
   PlatformSuspended: undefined;
   Home: undefined;
-  Dashboard: undefined;
+  Dashboard: { referenceMonth?: string } | undefined;
   UserStats: undefined;
   BillingAnalytics: undefined;
   Clearances: undefined;

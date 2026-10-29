@@ -40,6 +40,7 @@ type OverdueDebtor = {
   overdueCents: number;
   oldestDueDate: string;
   daysOverdue: number;
+  overdueMonths?: string[];
 };
 
 type DashboardSummary = {
@@ -61,12 +62,16 @@ type DashboardSummary = {
 const money = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const currentMonth = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`; };
 
-export default function Dashboard() {
+export default function Dashboard({ route }: any) {
   const { isMobile: compact } = useBreakpoint();
   const { userToken } = useContext(AuthContext);
   const { scrollRef, tourOpen, registerSection, scrollToSection, openTour, closeTour, isActive } = useSectionTour();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [referenceFilter, setReferenceFilter] = useState<string>(currentMonth());
+  // "Ver lista" da Cobrança no Início conta vencidos de todos os meses, então
+  // abre o painel em "Todo o histórico" (referenceMonth='all') para bater.
+  const requestedMonth: string | undefined = route?.params?.referenceMonth;
+  const [referenceFilter, setReferenceFilter] = useState<string>(requestedMonth || currentMonth());
+  useEffect(() => { if (requestedMonth) setReferenceFilter(requestedMonth); }, [requestedMonth]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -227,6 +232,7 @@ export default function Dashboard() {
                   </View>
                   <Text style={s.cardMeta}>
                     {debtor.unit ? `${debtor.unit} · ` : ''}{debtor.overdueCount} boleto{debtor.overdueCount === 1 ? '' : 's'} vencido{debtor.overdueCount === 1 ? '' : 's'}
+                    {debtor.overdueMonths?.length ? ` · ref. ${debtor.overdueMonths.map(month => `${month.slice(5, 7)}/${month.slice(0, 4)}`).join(', ')}` : ''}
                   </Text>
                   <Text style={s.overdueAlert}>Vencido há {debtor.daysOverdue} dia{debtor.daysOverdue === 1 ? '' : 's'} (desde {formatBrazilianDate(debtor.oldestDueDate)})</Text>
                 </View>
