@@ -1501,3 +1501,26 @@ Commit `389d2ab`. API `c5bf2341-e255-408d-b259-facb9ac97267` SUCCESS; web
   em aberto, a cada 5 min). Pagos/cancelados nunca são consultados e seguem
   aparecendo na lista normalmente.
   Envio à Play Store pelo usuário.
+
+## Publicação de 29/10/2026 — acordo nunca é rompido automaticamente
+
+Commit `9123065`.
+
+- Motivo: os dois acordos de produção (B17E8DDB, 3F886771) apareceram como
+  rompidos. O `GET /agreements` rompia sozinho o acordo com taxa nova vencida
+  após o aceite; em 21/10 18:39 as taxas de outubro (venc. 20/10) ainda não
+  estavam confirmadas pelo Inter (uma paga em dia, outra com 1 dia de atraso).
+  Restaurados para `active` pelo usuário no painel do Railway.
+- Agora: atraso de taxa/parcela só gera alerta (`overdue_alerts`); rompimento
+  só pelo síndico/subsíndico em `POST /agreements/:id/breach`, com motivo e
+  confirmação na tela, aviso ao responsável e auditoria.
+- Nada consta "fantasma" relatado no mesmo dia: era o pedido pendente de 24/10
+  13:44, vindo do Android nativo, na mesma sessão/IP das ações do próprio
+  usuário. Nenhum pedido novo desde então; nenhuma escrita estranha de morador
+  no `request_log`.
+- API: deployment `e7201747-60ce-4432-b998-7077f03cadbd`, `SUCCESS`; health 200,
+  `/breach` sem token 401.
+- Web: deployment `4e9ad13e.lar-em-dia.pages.dev`, bundle
+  `AppEntry-cb2deffc397f8ce7e8c38225e0efb5ba.js`, servido em `gestaolaremdia.com`.
+- Android: sem versão nova (regra está na API). O alerta de atraso na tela do
+  morador entra na próxima versão da loja.
