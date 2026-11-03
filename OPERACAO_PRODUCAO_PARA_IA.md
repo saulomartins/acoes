@@ -1561,3 +1561,17 @@ Commit `cb64b29`.
   `AppEntry-250d4837d73fce84ba0f57e9ad38c1c5.js`.
 - Android: sem versão nova. Cards compactos para o morador entram na próxima
   versão da loja; a exclusão já vale para o 1.7.7 (filtro na API).
+
+## 2026-11-03 — Gestão de débitos mais rápida; Início recarrega ao voltar
+
+- Commit `d3dd889`: `GET /agreements` espera a conferência das parcelas no
+  Inter por até 1,5 s (31 parcelas em aberto = 7 rodadas de chamadas ao banco
+  travavam a tela); depois responde com `bankSyncPending` e a conferência segue
+  em segundo plano (uma por condomínio). Quitação automática roda depois da
+  conferência. Debts.tsx recarrega sozinho enquanto `bankSyncPending`.
+  ManagerHome recarrega a cada foco e a cada 5 min (card de Pendências mostrava
+  boleto da NEFALIA já pago em 01/11). Consultas SQL da tela: < 10 ms.
+- API `19703e83-8f87-4b61-b2da-ff8fb24eb128` SUCCESS (/agreements sem token
+  401); web `b06d794d.lar-em-dia.pages.dev`.
+- Android: sem versão nova (o 1.7.8 já se beneficia; só não tem a recarga
+  automática após a conferência).
