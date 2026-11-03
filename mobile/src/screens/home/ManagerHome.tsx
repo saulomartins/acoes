@@ -1,5 +1,6 @@
-import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useContext, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Text } from '../../ui/text';
 import { AuthContext } from '../../context/AuthContext';
 import { apiRequest } from '../../api/client';
@@ -86,7 +87,14 @@ export function ManagerHome({ navigation, registerSection, isActive, desktop }: 
     setLoaded(true);
   }, [condominiumFeatures, finance, userToken]);
 
-  useEffect(() => { void load(); }, [load]);
+  // Recarrega a cada foco, não só na montagem: o Início fica montado na pilha e,
+  // sem isso, a fila mostrava um boleto já pago (baixa do banco) ao voltar para ele.
+  // Parado na tela, atualiza a cada 5 min (mesmo intervalo da Gestão de débitos).
+  useFocusEffect(useCallback(() => {
+    void load();
+    const timer = setInterval(() => { void load(); }, 5 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [load]));
 
   const approve = (item: Pending) => setDialog({
     title: 'Aprovar esta reserva?',

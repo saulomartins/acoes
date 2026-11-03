@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../ui/text';
 import * as DocumentPicker from 'expo-document-picker';
@@ -180,30 +180,46 @@ export default function Debts({ navigation }: any) {
   const [installmentCancelReason,setInstallmentCancelReason]=useState('');
   const [installmentCancelSubmitting,setInstallmentCancelSubmitting]=useState(false);
 
+  // bankSyncPending: a API mostrou o que já tinha enquanto ainda confere as
+  // parcelas no Inter; a tela recarrega sozinha (sem o "Atualizando...") até a
+  // conferência acabar, para nenhuma baixa ficar para a próxima abertura.
+  const bankSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fetchAll = useCallback(async () => {
+    const [debts, agreementData, peopleData] = await Promise.all([
+      apiRequest<DebtData>(`/debts?asOf=${todayIso()}`, userToken!),
+      agreementEnabled ? apiRequest<{ agreements: Agreement[]; bankSyncPending?: boolean }>('/agreements', userToken!) : Promise.resolve({agreements:[] as Agreement[], bankSyncPending:false}),
+      manager ? apiRequest<{ users: Person[] }>('/users', userToken!) : Promise.resolve({users:[] as Person[]}),
+    ]);
+    setData(debts);
+    setAgreements(agreementData.agreements);
+    setPeople(peopleData.users);
+    return Boolean(agreementData.bankSyncPending);
+  }, [userToken, manager, agreementEnabled]);
+  const scheduleBankSyncRefresh = useCallback((attempt: number) => {
+    if (bankSyncTimer.current) clearTimeout(bankSyncTimer.current);
+    if (attempt > 5) return;
+    bankSyncTimer.current = setTimeout(() => {
+      fetchAll().then(pending => { if (pending) scheduleBankSyncRefresh(attempt + 1); }).catch(() => {});
+    }, 3000);
+  }, [fetchAll]);
+
   const load = useCallback(async () => {
     if (!userToken) return;
     setLoading(true);
     setError('');
     try {
-      const [debts, agreementData, peopleData] = await Promise.all([
-        apiRequest<DebtData>(`/debts?asOf=${todayIso()}`, userToken),
-        agreementEnabled ? apiRequest<{ agreements: Agreement[] }>('/agreements', userToken) : Promise.resolve({agreements:[]}),
-        manager ? apiRequest<{ users: Person[] }>('/users', userToken) : Promise.resolve({users:[]}),
-      ]);
-      setData(debts);
-      setAgreements(agreementData.agreements);
-      setPeople(peopleData.users);
+      if (await fetchAll()) scheduleBankSyncRefresh(1);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Não foi possível atualizar os débitos.');
     } finally {
       setLoading(false);
     }
-  }, [userToken, manager, agreementEnabled]);
+  }, [userToken, fetchAll, scheduleBankSyncRefresh]);
 
   useEffect(() => {
     load();
     const timer = setInterval(load, 5 * 60 * 1000);
-    return () => clearInterval(timer);
+    return () => { clearInterval(timer); if (bankSyncTimer.current) clearTimeout(bankSyncTimer.current); };
   }, [load]);
 
   const groupByUnit = (rows: DebtRow[], fallbackUnit: string | null | undefined): UnitGroup[] => {

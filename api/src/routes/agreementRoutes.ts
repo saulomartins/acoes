@@ -91,18 +91,23 @@ const recipientsFor = async (condominiumId: string, debtorUserId: string, unitId
   return result.rows.map(row => row.id);
 };
 
+// Conferência das parcelas no Inter em andamento, por condomínio: síndico e
+// subsíndico abrindo a tela juntos (ou a recarga logo após uma ação) aguardam
+// a mesma conferência em vez de disparar outra.
+const installmentSyncRunning = new Map<string, Promise<unknown>>();
+const SYNC_WAIT_MS = 1500;
+
 router.get('/', asyncHandler(async (req, res) => {
   const condominiumId = req.user?.condominiumId;
   const manager = ['sindico', 'subsindico'].includes(req.user?.role || '');
   const ownedUnitIds = manager ? [] : await getOwnedUnitIds(req.user!.id);
-  // Acordo nunca é rompido automaticamente: atraso (de taxa nova ou de
-  // parcela) só vira alerta em overdue_alerts, e o rompimento é decisão do
-  // síndico/subsíndico em POST /:id/breach. O rompimento automático antigo
-  // disparava com o banco ainda sem confirmar pagamentos feitos no prazo.
-  await query(`update debt_agreements a set status='settled',settled_at=now(),updated_at=now() where a.condominium_id=$1 and a.status='active' and exists(select 1 from debt_agreement_installments p where p.agreement_id=a.id) and not exists(select 1 from debt_agreement_installments p left join invoices i on i.id=p.invoice_id where p.agreement_id=a.id and (p.invoice_id is null or i.status<>'paid'))`, [condominiumId]);
 
   // Confere no Inter as parcelas em aberto — mesma regra da lista de boletos
   // (syncStaleInterInvoices): só as não conferidas há pouco, poucas por vez.
+  // Com ~30 parcelas eram 7 rodadas de chamadas ao banco antes de a tela de
+  // débitos mostrar qualquer coisa. Agora espera no máximo SYNC_WAIT_MS; se não
+  // terminou, responde com bankSyncPending=true, a conferência segue em segundo
+  // plano e a tela recarrega sozinha quando ela acabar — nenhuma baixa se perde.
   const installmentInvoices = await query<{id:string;condominium_id:string;external_id:string;provider_situation:string|null;provider_situation_at:Date|null}>(
     `select i.id, i.condominium_id, i.external_id, i.provider_situation, i.provider_situation_at from debt_agreement_installments p
      join invoices i on i.id = p.invoice_id
@@ -111,7 +116,27 @@ router.get('/', asyncHandler(async (req, res) => {
        and i.status not in ('paid','canceled')`,
     [condominiumId]
   );
-  if (installmentInvoices.rows.length > 0) await syncStaleInterInvoices(installmentInvoices.rows);
+  let bankSyncPending = false;
+  if (installmentInvoices.rows.length > 0 && condominiumId) {
+    let running = installmentSyncRunning.get(condominiumId);
+    if (!running) {
+      running = syncStaleInterInvoices(installmentInvoices.rows).catch(() => {}).finally(() => installmentSyncRunning.delete(condominiumId));
+      installmentSyncRunning.set(condominiumId, running);
+    }
+    let timer: NodeJS.Timeout | undefined;
+    bankSyncPending = await Promise.race([
+      running.then(() => false),
+      new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(true), SYNC_WAIT_MS); }),
+    ]);
+    clearTimeout(timer);
+  }
+
+  // Acordo nunca é rompido automaticamente: atraso (de taxa nova ou de
+  // parcela) só vira alerta em overdue_alerts, e o rompimento é decisão do
+  // síndico/subsíndico em POST /:id/breach. O rompimento automático antigo
+  // disparava com o banco ainda sem confirmar pagamentos feitos no prazo.
+  // Depois da conferência, para a última parcela paga já quitar o acordo.
+  await query(`update debt_agreements a set status='settled',settled_at=now(),updated_at=now() where a.condominium_id=$1 and a.status='active' and exists(select 1 from debt_agreement_installments p where p.agreement_id=a.id) and not exists(select 1 from debt_agreement_installments p left join invoices i on i.id=p.invoice_id where p.agreement_id=a.id and (p.invoice_id is null or i.status<>'paid'))`, [condominiumId]);
 
   const result = await query<any>(`select a.*,coalesce(u.full_name,u.username) debtor_name,${judicialColumns},${legacyColumn},${overdueAlertsColumn},
       coalesce(nullif(concat_ws(' - ',b.name,un.number),''),u.unit,'Sem apartamento') apartment,
@@ -121,7 +146,7 @@ router.get('/', asyncHandler(async (req, res) => {
     left join debt_agreement_items ai on ai.agreement_id=a.id left join invoices oi on oi.id=ai.invoice_id left join debt_agreement_installments p on p.agreement_id=a.id left join invoices pi on pi.id=p.invoice_id
     where a.condominium_id=$1 and a.status<>'canceled' and ($2::boolean or a.debtor_user_id=$3 or a.unit_id=(select unit_id from users where id=$3) or a.unit_id=any($4::uuid[]))
     group by a.id,u.full_name,u.username,u.unit,b.name,un.number order by a.created_at desc`, [condominiumId, manager, req.user?.id, ownedUnitIds]);
-  return res.json({ agreements: result.rows });
+  return res.json({ agreements: result.rows, bankSyncPending });
 }));
 
 router.post('/communicate-debt', authorize('sindico', 'subsindico'), asyncHandler(async (req, res) => {
