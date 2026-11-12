@@ -144,6 +144,11 @@ type ViaCepResponse = {
   erro?: boolean | 'true';
 };
 
+// Prazo do novo acesso (link ou senha temporária), em horário de Brasília.
+const formatExpiry = (iso?: string) => iso
+  ? new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  : '72 horas';
+
 export default function Users({ navigation }: any) {
   const { isMobile: mobile } = useBreakpoint();
   const { userToken, user } = useContext(AuthContext);
@@ -196,8 +201,6 @@ export default function Users({ navigation }: any) {
   const [newProfileRole, setNewProfileRole] = useState<UserRole | ''>('');
   const [newProfileUnitId, setNewProfileUnitId] = useState('');
   const [grantingProfile, setGrantingProfile] = useState(false);
-  const isResidentRole = role === 'proprietario' || role === 'inquilino';
-  const isManagerRole = role === 'subsindico' || role === 'sindico';
   const manager = user?.role === 'admin_geral' || user?.role === 'sindico' || user?.role === 'subsindico';
   const canManageItem = (item: UserItem) => user?.role === 'admin_geral'
     ? item.role === 'sindico' || item.role === 'subsindico'
@@ -352,14 +355,14 @@ export default function Users({ navigation }: any) {
     if (!userToken) return;
     if (!role) { setError('Selecione o perfil do usuário.'); return; }
     if (!username.trim()) { setError('Informe o usuário de acesso.'); return; }
-    if (!editingId && !normalizeDocument(cpf)) { setError('Informe o CPF — ele é necessário para gerar a senha inicial.'); return; }
+    if (!editingId && !normalizeDocument(cpf)) { setError('Informe o CPF.'); return; }
     if (user?.role === 'admin_geral' && !condominiumId.trim()) { setError('Selecione o condomínio.'); return; }
     const cpfDigits = normalizeDocument(cpf);
 
     setIsLoading(true);
     setError(null);
     try {
-      const response = await apiRequest<{ user: any; initialPassword?: string; emailSent?: boolean }>(editingId ? `/users/${editingId}` : '/users', userToken, {
+      const response = await apiRequest<{ user: any; initialPassword?: string | null; emailSent?: boolean; delivery?: 'email_link' | 'temporary_password'; credentialExpiresAt?: string }>(editingId ? `/users/${editingId}` : '/users', userToken, {
         method: editingId ? 'PATCH' : 'POST',
         body: JSON.stringify({
           username: username.trim(),
@@ -398,15 +401,21 @@ export default function Users({ navigation }: any) {
       setCondominiumId('');
       setRole('');
       setEditingId(null);
-      if (response.initialPassword) {
-        const emailNote = response.emailSent
-          ? `E-mail enviado para ${createdEmail}.`
-          : createdEmail
-            ? 'Não foi possível enviar o e-mail — informe a senha manualmente.'
-            : 'Sem e-mail cadastrado — informe a senha manualmente.';
+      if (!editingId && response.delivery === 'email_link') {
         setDialog({
-          title: 'Senha inicial gerada',
-          message: `${createdName}\nUsuário: ${createdUsername}\nSenha inicial: ${response.initialPassword}\n\n${emailNote}\n\nAnote e informe ao morador — essa senha não será exibida novamente.`,
+          title: 'Cadastro realizado',
+          message: `${createdName}\nUsuário: ${createdUsername}\n\nEnviamos para ${createdEmail} um link para a pessoa criar a própria senha. O link vale por 72 horas — se ela não usar, gere um novo acesso em "Resetar senha".`,
+          tone: 'success',
+          confirmLabel: 'Entendi',
+          onConfirm: () => setDialog(null),
+        });
+      } else if (!editingId && response.initialPassword) {
+        const emailNote = createdEmail
+          ? 'Não foi possível enviar o e-mail — repasse a senha temporária pessoalmente ou pelo WhatsApp.'
+          : 'Sem e-mail cadastrado — repasse a senha temporária pessoalmente ou pelo WhatsApp.';
+        setDialog({
+          title: 'Senha temporária gerada',
+          message: `${createdName}\nUsuário: ${createdUsername}\nSenha temporária: ${response.initialPassword}\nVale até: ${formatExpiry(response.credentialExpiresAt)}\n\n${emailNote}\n\nEla precisa ser trocada no primeiro acesso e não será exibida novamente.`,
           tone: 'success',
           confirmLabel: 'Entendi',
           onConfirm: () => setDialog(null),
@@ -546,10 +555,17 @@ export default function Users({ navigation }: any) {
     return next;
   });
 
-  const formatResetMessage = (results: Array<{ fullName: string | null; username: string; newPassword: string; emailSent: boolean }>, skipped: Array<{ fullName: string | null; reason: string }>) => {
-    const lines = results.map((r) => `${r.fullName || r.username} (${r.username}): ${r.newPassword}${r.emailSent ? ' · e-mail enviado' : ''}`);
-    const skipLines = skipped.map((s) => `${s.fullName || 'Pessoa'}: não foi possível gerar — ${s.reason}`);
-    return [...lines, ...skipLines].join('\n') || 'Nenhuma senha foi alterada.';
+  const formatResetMessage = (results: Array<{ fullName: string | null; username: string; newPassword: string | null; emailSent: boolean; expiresAt?: string }>, skipped: Array<{ fullName: string | null; reason: string }>) => {
+    const byEmail = results.filter((r) => !r.newPassword);
+    const byPassword = results.filter((r) => r.newPassword);
+    const lines = [
+      ...(byEmail.length ? [`Link enviado por e-mail (${byEmail.length}):`, ...byEmail.map((r) => `• ${r.fullName || r.username} (${r.username})`), ''] : []),
+      ...(byPassword.length ? [`Senha temporária para repassar (${byPassword.length}):`, ...byPassword.map((r) => `• ${r.fullName || r.username} (${r.username}): ${r.newPassword}`), ''] : []),
+      ...skipped.map((s) => `${s.fullName || 'Pessoa'}: não foi possível gerar — ${s.reason}`),
+    ];
+    if (!results.length && !skipped.length) return 'Nenhuma senha foi alterada.';
+    const expiry = results[0]?.expiresAt ? `\nTodos os acessos acima valem até ${formatExpiry(results[0].expiresAt)}. A senha anterior já não funciona.` : '';
+    return `${lines.join('\n').trim()}${expiry}`;
   };
 
   const performReset = async (payload: ({ role: 'proprietario' | 'inquilino' | 'sindico' | 'subsindico' | 'all' } | { ids: string[] }) & { condominiumId?: string }) => {
@@ -558,13 +574,13 @@ export default function Users({ navigation }: any) {
     setError(null);
     setSuccess(null);
     try {
-      const response = await apiRequest<{ results: Array<{ id: string; fullName: string | null; username: string; newPassword: string; emailSent: boolean }>; skipped: Array<{ id: string; fullName: string | null; reason: string }> }>('/users/reset-password', userToken, {
+      const response = await apiRequest<{ results: Array<{ id: string; fullName: string | null; username: string; newPassword: string | null; emailSent: boolean; expiresAt?: string }>; skipped: Array<{ id: string; fullName: string | null; reason: string }> }>('/users/reset-password', userToken, {
         method: 'POST',
         body: JSON.stringify(payload),
       });
       setSelectedForReset(new Set());
       setDialog({
-        title: 'Senhas atualizadas',
+        title: 'Novos acessos gerados',
         message: formatResetMessage(response.results, response.skipped),
         tone: 'success',
         confirmLabel: 'Entendi',
@@ -582,7 +598,7 @@ export default function Users({ navigation }: any) {
     const count = items.filter((item) => item.role === 'proprietario' || item.role === 'inquilino').length;
     setDialog({
       title: 'Confirmar reset em massa',
-      message: `Isso vai gerar uma nova senha inicial para todos os proprietários e inquilinos deste condomínio (${count}). Continuar?`,
+      message: `Isso vai gerar um novo acesso para todos os proprietários e inquilinos deste condomínio (${count}). A senha atual de cada um deixa de funcionar na hora. Quem tem e-mail recebe um link para criar a senha; para os demais, você recebe uma senha temporária para repassar. Continuar?`,
       tone: 'error',
       confirmLabel: 'Sim, resetar',
       cancelLabel: 'Cancelar',
@@ -598,7 +614,7 @@ export default function Users({ navigation }: any) {
     const count = items.filter((item) => item.condominium_id === filterCondominiumId && (item.role === 'sindico' || item.role === 'subsindico')).length;
     setDialog({
       title: 'Confirmar reset em massa',
-      message: `Isso vai gerar uma nova senha inicial para todos os síndicos e subsíndicos de "${condominiumName(filterCondominiumId)}" (${count}). Continuar?`,
+      message: `Isso vai gerar um novo acesso para todos os síndicos e subsíndicos de "${condominiumName(filterCondominiumId)}" (${count}). A senha atual de cada um deixa de funcionar na hora. Continuar?`,
       tone: 'error',
       confirmLabel: 'Sim, resetar',
       cancelLabel: 'Cancelar',
@@ -615,7 +631,7 @@ export default function Users({ navigation }: any) {
     }
     setDialog({
       title: 'Confirmar reset de senha',
-      message: `Isso vai gerar uma nova senha inicial para ${ids.length} pessoa(s) selecionada(s). Continuar?`,
+      message: `Isso vai gerar um novo acesso para ${ids.length} pessoa(s) selecionada(s). A senha atual deixa de funcionar na hora. Continuar?`,
       tone: 'error',
       confirmLabel: 'Sim, resetar',
       cancelLabel: 'Cancelar',
@@ -626,7 +642,7 @@ export default function Users({ navigation }: any) {
   const confirmResetOne = (item: UserItem) => {
     setDialog({
       title: 'Confirmar reset de senha',
-      message: `Gerar uma nova senha inicial para ${item.full_name || item.username}?`,
+      message: `Gerar um novo acesso para ${item.full_name || item.username}? A senha atual deixa de funcionar na hora.`,
       tone: 'error',
       confirmLabel: 'Sim, resetar',
       cancelLabel: 'Cancelar',
@@ -689,16 +705,16 @@ export default function Users({ navigation }: any) {
 
   const isAdmin = user?.role === 'admin_geral';
   const adminTourSteps: TourStep[] = [
-    { key: 'form', title: 'Cadastrar síndico ou subsíndico', description: 'Usuário de acesso é único no sistema (usado no login). CPF ou CNPJ é obrigatório num cadastro novo (o campo aceita também o CNPJ novo com letras, ex.: 12.ABC.345/01DE-35) — os 6 primeiros caracteres viram a senha inicial, gerada e mostrada uma única vez depois de salvar (ou enviada por e-mail, se informado). Selecione o condomínio que esse gestor vai administrar e o perfil (Síndico ou Subsíndico). Ao editar alguém, aparece o painel "Perfis desta pessoa" — um mesmo login pode acumular mais de um perfil (ex.: síndico que também é proprietário em outra unidade); conceda ou remova perfis extras ali.' },
+    { key: 'form', title: 'Cadastrar síndico ou subsíndico', description: 'Usuário de acesso é único no sistema (usado no login). CPF ou CNPJ é obrigatório num cadastro novo (o campo aceita também o CNPJ novo com letras, ex.: 12.ABC.345/01DE-35). Com e-mail, a pessoa recebe um link para criar a própria senha; sem e-mail, o sistema gera uma senha temporária aleatória, mostrada uma única vez depois de salvar. Os dois valem por 72 horas. Selecione o condomínio que esse gestor vai administrar e o perfil (Síndico ou Subsíndico). Ao editar alguém, aparece o painel "Perfis desta pessoa" — um mesmo login pode acumular mais de um perfil (ex.: síndico que também é proprietário em outra unidade); conceda ou remova perfis extras ali.' },
     { key: 'filters', title: 'Filtrar cadastros', description: 'Combine condomínio (inclusive "Sem condomínio"), nome e CPF pra localizar um síndico ou subsíndico específico entre todos os condomínios.' },
-    { key: 'reset', title: 'Reset de senha em massa', description: 'Selecione um condomínio no filtro acima pra habilitar "Resetar todos deste condomínio" — gera uma nova senha inicial (regra padrão: 6 primeiros caracteres do CPF/CNPJ) pra todos os síndicos/subsíndicos daquele condomínio de uma vez. Ou marque pessoas específicas nos cards da lista e use "Resetar selecionados".' },
+    { key: 'reset', title: 'Reset de senha em massa', description: 'Selecione um condomínio no filtro acima pra habilitar "Resetar todos deste condomínio" — gera um novo acesso (link por e-mail ou senha temporária aleatória, válidos por 72 horas) pra todos os síndicos/subsíndicos daquele condomínio de uma vez. Ou marque pessoas específicas nos cards da lista e use "Resetar selecionados".' },
     { key: 'list', title: 'Ativos e excluídos', description: 'As abas "Ativos"/"Excluídos" alternam a lista. Em cada card dá pra editar, resetar a senha individualmente, excluir logicamente (bloqueia o login mas mantém o cadastro — reversível na aba "Excluídos" com "Reativar") ou excluir fisicamente (apaga o cadastro pra sempre, sem volta). Aqui você só gerencia cadastros de síndico e subsíndico.' },
   ];
   const managerTourSteps: TourStep[] = [
     { key: 'planUsage', title: 'Uso do plano', description: 'Mostra quantos usuários ativos o condomínio já tem contra o plano de cobrança contratado com a plataforma — critério "cadastrado" ou "login habilitado", conforme o plano. Em plano de faixa fechada com teto definido, passar do limite mostra aviso vermelho "excedeu" — fale com a administração da plataforma nesse caso. Em plano "base + incluídos + excedente" (ex.: Essencial/Intermediário/Completo), passar da quantidade incluída não é erro: aparece em âmbar, com quantos usuários excedentes e quanto isso soma no mês, cobrado automaticamente — nada trava. Plano "por usuário ativo" não tem teto nem incluído, então não mostra esse aviso. Nada disso bloqueia novos cadastros.' },
-    { key: 'form', title: 'Cadastrar morador ou subsíndico', description: 'Escolha o perfil (Subsíndico, Proprietário ou Inquilino), a unidade/apartamento (obrigatória para moradores) e marque se a pessoa é representante da unidade. Se não for isenta de boleto, defina o dia preferido de vencimento (10 ou 20). Preencha o endereço de cobrança do boleto — o CEP autocompleta rua, bairro, cidade e UF. No campo "CPF ou CNPJ" vale também o CNPJ novo com letras (ex.: 12.ABC.345/01DE-35), para proprietário pessoa jurídica. A senha inicial é gerada automaticamente (apartamento + 4 primeiros caracteres do CPF/CNPJ) e mostrada uma única vez depois de salvar. Ao editar alguém, o painel "Perfis desta pessoa" permite conceder ou remover perfis adicionais (ex.: um subsíndico que também é proprietário).' },
+    { key: 'form', title: 'Cadastrar morador ou subsíndico', description: 'Escolha o perfil (Subsíndico, Proprietário ou Inquilino), a unidade/apartamento (obrigatória para moradores) e marque se a pessoa é representante da unidade. Se não for isenta de boleto, defina o dia preferido de vencimento (10 ou 20). Preencha o endereço de cobrança do boleto — o CEP autocompleta rua, bairro, cidade e UF. No campo "CPF ou CNPJ" vale também o CNPJ novo com letras (ex.: 12.ABC.345/01DE-35), para proprietário pessoa jurídica. Com e-mail, a pessoa recebe um link para criar a própria senha; sem e-mail, o sistema gera uma senha temporária aleatória, mostrada uma única vez depois de salvar. Os dois valem por 72 horas. Ao editar alguém, o painel "Perfis desta pessoa" permite conceder ou remover perfis adicionais (ex.: um subsíndico que também é proprietário).' },
     { key: 'filters', title: 'Filtrar moradores', description: 'Filtre por nome, CPF ou tipologia do apartamento — inclusive "Sem tipologia", útil pra achar quem ainda não tem uma taxa condominial configurada.' },
-    { key: 'reset', title: 'Reset de senha em massa', description: 'Gera uma nova senha inicial pela regra padrão (apartamento + 4 primeiros caracteres do CPF/CNPJ). "Resetar todos os moradores" afeta todo mundo do condomínio de uma vez; ou marque pessoas específicas nos cards da lista e use "Resetar selecionados".' },
+    { key: 'reset', title: 'Reset de senha em massa', description: 'Gera um novo acesso: link por e-mail para quem tem e-mail, senha temporária aleatória para os demais (72 horas). A senha atual deixa de funcionar na hora. "Resetar todos os moradores" afeta todo mundo do condomínio de uma vez; ou marque pessoas específicas nos cards da lista e use "Resetar selecionados".' },
     { key: 'list', title: 'Ativos e excluídos', description: 'As abas "Ativos"/"Excluídos" alternam a lista. Em cada card de morador dá pra editar, resetar a senha, excluir logicamente (bloqueia o login mas mantém o cadastro — reversível na aba "Excluídos") ou excluir fisicamente (apaga o cadastro pra sempre, junto com débitos, acordos e avisos dessa pessoa). Você pode cadastrar outro subsíndico por aqui, mas as ações de editar/resetar/excluir do card só ficam disponíveis pra moradores — outro subsíndico não é gerenciável por você.' },
   ];
   const tourSteps = isAdmin ? adminTourSteps : managerTourSteps;
@@ -855,14 +871,10 @@ export default function Users({ navigation }: any) {
             autoCorrect={false}
             maxLength={18}
           />
-          <Field label="Senha inicial" hint={editingId
+          <Field label="Acesso" hint={editingId
             ? 'A senha não é alterada aqui — use "Resetar senha" no card da pessoa.'
-            : isManagerRole
-              ? 'Gerada automaticamente (6 primeiros números do CPF) e exibida após salvar.'
-              : isResidentRole
-                ? 'Gerada automaticamente (número do apartamento + 4 primeiros números do CPF) e exibida após salvar.'
-                : 'Gerada automaticamente com base no CPF e exibida após salvar.'}>
-            <View style={styles.readOnlyBox}><Text style={styles.readOnlyText}>Definida pelo sistema</Text></View>
+            : 'Com e-mail: a pessoa recebe um link para criar a própria senha. Sem e-mail: o sistema gera uma senha temporária aleatória, exibida uma única vez para você repassar. Os dois valem por 72 horas.'}>
+            <View style={styles.readOnlyBox}><Text style={styles.readOnlyText}>{email.trim() ? 'Link por e-mail' : 'Senha temporária'}</Text></View>
           </Field>
         </FormGrid>
         {user?.role === 'admin_geral' ? (
@@ -1000,7 +1012,7 @@ export default function Users({ navigation }: any) {
           </FormFieldFull>
         ) : null}
         <FormGrid columns={{ mobile: 1, tablet: 2, desktop: 2 }}>
-          <TextField label="E-mail" placeholder="nome@email.com" hint="Se informado, a senha inicial é enviada por e-mail." value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+          <TextField label="E-mail" placeholder="nome@email.com" hint="Se informado, a pessoa recebe por e-mail um link para criar a própria senha." value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
           <TextField
             label="Telefone"
             placeholder="(00) 00000-0000"
@@ -1076,7 +1088,7 @@ export default function Users({ navigation }: any) {
       {user?.role === 'admin_geral' ? (
         <View style={styles.resetPanel}>
           <Text style={styles.filterTitle}>Reset de senha em massa</Text>
-          <Text style={styles.filterSubtitle}>Gera uma nova senha inicial pela regra padrão (6 primeiros números do CPF). Selecione um condomínio no filtro acima para habilitar o reset de todos.</Text>
+          <Text style={styles.filterSubtitle}>Gera um novo acesso (link por e-mail ou senha temporária aleatória, 72 horas). Selecione um condomínio no filtro acima para habilitar o reset de todos.</Text>
           <View style={styles.resetActions}>
             <AppButton title="Resetar todos deste condomínio" onPress={confirmResetAllManagers} variant="secondary" disabled={!filterCondominiumId || filterCondominiumId === '__unlinked__'} />
             <AppButton title={`Resetar selecionados (${selectedForReset.size})`} onPress={confirmResetSelected} disabled={selectedForReset.size === 0} />
@@ -1085,7 +1097,7 @@ export default function Users({ navigation }: any) {
       ) : user?.role === 'sindico' || user?.role === 'subsindico' ? (
         <View style={styles.resetPanel}>
           <Text style={styles.filterTitle}>Reset de senha em massa</Text>
-          <Text style={styles.filterSubtitle}>Gera uma nova senha inicial pela regra padrão (número do apartamento + 4 primeiros números do CPF).</Text>
+          <Text style={styles.filterSubtitle}>Gera um novo acesso: link por e-mail para quem tem e-mail, senha temporária aleatória para os demais (72 horas).</Text>
           <View style={styles.resetActions}>
             <AppButton title="Resetar todos os moradores" onPress={confirmResetAllResidents} variant="secondary" />
             <AppButton title={`Resetar selecionados (${selectedForReset.size})`} onPress={confirmResetSelected} disabled={selectedForReset.size === 0} />

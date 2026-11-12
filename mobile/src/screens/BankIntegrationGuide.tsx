@@ -337,7 +337,7 @@ const rolloutSteps: RolloutStep[] = [
   },
   {
     title: '5. Cadastrar o síndico (ou subsíndico)',
-    detail: 'CPF é obrigatório — a senha inicial é gerada a partir dele, e a pessoa é obrigada a trocá-la no primeiro acesso. Cadastrar o e-mail já dispara o aviso de boas-vindas automaticamente.',
+    detail: 'CPF é obrigatório. Com e-mail cadastrado, a pessoa recebe automaticamente um link para criar a própria senha; sem e-mail, o sistema gera uma senha temporária aleatória, mostrada uma única vez para quem cadastrou. Os dois valem por 72 horas.',
     where: 'Pessoas → Cadastrar usuário',
   },
   {

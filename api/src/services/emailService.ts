@@ -51,11 +51,14 @@ export const sendEmail = async ({ to, subject, html, attachments }: EmailInput) 
   return { status: 'sent' as const, data };
 };
 
-export const sendPasswordResetEmail = (to: string, name: string, resetToken: string) => {
+const resetLink = (resetToken: string, extra = '') => {
   const baseUrl = config.webUrl.trim();
-  const resetUrl = baseUrl.endsWith('://')
-    ? `${baseUrl}redefinir-senha?token=${encodeURIComponent(resetToken)}`
-    : `${baseUrl.replace(/\/$/, '')}/redefinir-senha?token=${encodeURIComponent(resetToken)}`;
+  const path = `redefinir-senha?token=${encodeURIComponent(resetToken)}${extra}`;
+  return baseUrl.endsWith('://') ? `${baseUrl}${path}` : `${baseUrl.replace(/\/$/, '')}/${path}`;
+};
+
+export const sendPasswordResetEmail = (to: string, name: string, resetToken: string) => {
+  const resetUrl = resetLink(resetToken);
   return sendEmail({
     to,
     subject: 'Redefinição de senha — Lar em Dia',
@@ -71,39 +74,40 @@ export const sendPasswordResetEmail = (to: string, name: string, resetToken: str
   });
 };
 
-export const sendWelcomeEmail = (to: string, name: string, username: string, password: string, condominiumName: string) => sendEmail({
-  to,
-  subject: `Cadastro realizado — ${condominiumName || 'Lar em Dia'}`,
-  html: `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#17283e;line-height:1.5">
+// Cadastro novo e reset pela administração (credentialService): nunca leva
+// senha por escrito — só um link de uso único para a pessoa criar a dela.
+export const sendAccessLinkEmail = (input: { to: string; name: string; username: string; condominiumName: string; token: string; kind: 'welcome' | 'reset'; expiresAt: Date }) => {
+  const welcome = input.kind === 'welcome';
+  const link = resetLink(input.token, welcome ? '&primeiro-acesso=1' : '');
+  const expires = input.expiresAt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return sendEmail({
+    to: input.to,
+    subject: welcome ? `Crie sua senha — ${input.condominiumName || 'Lar em Dia'}` : 'Crie uma nova senha — Lar em Dia',
+    html: `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#17283e;line-height:1.5">
     <div style="max-width:560px;margin:auto;padding:28px;border:1px solid #e4e9ee;border-radius:12px">
-      <h2 style="margin-top:0">Bem-vindo(a) ao Lar em Dia</h2>
-      <p>Olá, ${escapeHtml(name)}.</p>
-      <p>Seu cadastro foi realizado com sucesso no condomínio <strong>${escapeHtml(condominiumName || '')}</strong>.</p>
-      <p>Seus dados de acesso:</p>
-      <p style="background:#f5f7fb;border-radius:8px;padding:14px 16px">
-        Usuário: <strong>${escapeHtml(username)}</strong><br/>
-        Senha inicial: <strong>${escapeHtml(password)}</strong>
-      </p>
-      <p>No primeiro acesso, você precisará criar uma nova senha antes de usar o aplicativo.</p>
-      <p style="color:#6f7e8d;font-size:13px">Guarde este e-mail em local seguro e não compartilhe sua senha com outras pessoas.</p>
+      <h2 style="margin-top:0">${welcome ? 'Bem-vindo(a) ao Lar em Dia' : 'Crie uma nova senha'}</h2>
+      <p>Olá, ${escapeHtml(input.name)}.</p>
+      <p>${welcome
+        ? `Seu cadastro foi realizado no condomínio <strong>${escapeHtml(input.condominiumName || '')}</strong>. Para entrar, crie a sua senha pelo botão abaixo.`
+        : `A administração do condomínio <strong>${escapeHtml(input.condominiumName || '')}</strong> pediu um novo acesso para você. A senha anterior não vale mais — crie uma nova pelo botão abaixo.`}</p>
+      <p style="background:#f5f7fb;border-radius:8px;padding:14px 16px">Seu usuário de acesso: <strong>${escapeHtml(input.username)}</strong><br/><span style="color:#6f7e8d;font-size:13px">Você também pode entrar com o seu CPF ou e-mail.</span></p>
+      <p><a href="${link}" style="display:inline-block;background:#255eab;color:white;text-decoration:none;padding:13px 20px;border-radius:8px;font-weight:bold">Criar minha senha</a></p>
+      <p>O link vale até <strong>${escapeHtml(expires)}</strong> e só pode ser usado uma vez. Depois disso, peça um novo acesso à administração do condomínio.</p>
+      <p style="color:#6f7e8d;font-size:13px">Ninguém do condomínio ou do Lar em Dia vai pedir a sua senha. Se você não esperava este e-mail, procure a administração.</p>
     </div></body></html>`,
-});
+  });
+};
 
-export const sendPasswordResetByAdminEmail = (to: string, name: string, username: string, password: string, condominiumName: string) => sendEmail({
+export const sendPasswordChangedEmail = (to: string, name: string) => sendEmail({
   to,
-  subject: 'Sua senha foi redefinida — Lar em Dia',
+  subject: 'Sua senha foi alterada — Lar em Dia',
   html: `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#17283e;line-height:1.5">
     <div style="max-width:560px;margin:auto;padding:28px;border:1px solid #e4e9ee;border-radius:12px">
-      <h2 style="margin-top:0">Sua senha foi redefinida</h2>
+      <h2 style="margin-top:0">Sua senha foi alterada</h2>
       <p>Olá, ${escapeHtml(name)}.</p>
-      <p>A administração do condomínio <strong>${escapeHtml(condominiumName || '')}</strong> redefiniu sua senha de acesso.</p>
-      <p>Seus novos dados de acesso:</p>
-      <p style="background:#f5f7fb;border-radius:8px;padding:14px 16px">
-        Usuário: <strong>${escapeHtml(username)}</strong><br/>
-        Nova senha: <strong>${escapeHtml(password)}</strong>
-      </p>
-      <p>No próximo acesso, você precisará criar uma nova senha antes de continuar usando o aplicativo.</p>
-      <p style="color:#6f7e8d;font-size:13px">Se você não esperava esta alteração, procure a administração do seu condomínio.</p>
+      <p>A senha da sua conta no Lar em Dia acabou de ser criada ou alterada.</p>
+      <p>Se foi você, não precisa fazer nada.</p>
+      <p><strong>Se não foi você</strong>, use "Esqueci minha senha" na tela de entrada para criar outra agora mesmo e avise a administração do condomínio.</p>
     </div></body></html>`,
 });
 

@@ -1719,3 +1719,23 @@ create table if not exists view_as_sessions (
 );
 create index if not exists view_as_sessions_admin_idx on view_as_sessions(admin_user_id, started_at desc);
 create index if not exists view_as_sessions_target_idx on view_as_sessions(target_user_id, started_at desc);
+
+-- Acesso emitido pela administração (12/11/2026, credentialService.ts): link
+-- de uso único por e-mail ou senha temporária ALEATÓRIA, as duas com prazo.
+-- Antes a senha inicial era calculada do CPF/unidade e não vencia nunca.
+-- O login recusa senha temporária vencida (must_change_password + prazo).
+alter table users add column if not exists temporary_password_expires_at timestamptz;
+-- Contas que ainda estão na senha calculada antiga (nunca trocaram): 7 dias
+-- de carência a partir da primeira migração. Só pega quem está sem prazo, então
+-- rodar o schema de novo não estende nem encurta nada.
+update users set temporary_password_expires_at = now() + interval '7 days'
+ where must_change_password and temporary_password_expires_at is null and deleted_at is null;
+
+-- Bloqueio por conta no login (loginLockoutService.ts). Antes ficava em
+-- memória e zerava a cada deploy.
+create table if not exists login_failures (
+  identifier text primary key,
+  failures integer not null default 0,
+  window_reset_at timestamptz not null,
+  locked_until timestamptz
+);

@@ -32,7 +32,7 @@ export default function ForcePasswordChange() {
 
   return <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled"><View style={styles.card}>
     <Text style={styles.eyebrow}>PRIMEIRO ACESSO</Text><Text style={styles.title}>Crie uma nova senha</Text>
-    <Text style={styles.subtitle}>Por segurança, você precisa trocar a senha inicial antes de continuar. Use pelo menos 8 caracteres.</Text>
+    <Text style={styles.subtitle}>Por segurança, você precisa trocar a senha temporária antes de continuar. Use pelo menos 8 caracteres e não use números do seu CPF, o número do apartamento ou o seu usuário.</Text>
     <Text style={styles.label}>Nova senha</Text><PasswordInput value={password} onChangeText={setPassword} />
     <Text style={styles.label}>Confirmar nova senha</Text><PasswordInput value={confirmation} onChangeText={setConfirmation} />
     {confirmation && confirmation !== password ? <Text style={styles.mismatch}>As senhas não são iguais.</Text> : null}

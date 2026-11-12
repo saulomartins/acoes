@@ -1,12 +1,9 @@
-import bcrypt from 'bcrypt';
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
 import { requireFeature } from '../middleware/requireFeature';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { query } from '../db';
-import { buildInitialPassword, buildManagerInitialPassword } from '../services/passwordRuleService';
-import { normalizeDocument } from '../services/documentService';
-import { sendWelcomeEmail, sendPasswordResetByAdminEmail } from '../services/emailService';
+import { issueAccessCredential } from '../services/credentialService';
 import { CURRENT_TERMS_VERSION } from './authRoutes';
 import { randomUUID } from 'crypto';
 import { signViewAsToken, VIEW_AS_DURATION_MS } from '../services/authService';
@@ -135,44 +132,31 @@ router.post('/users/:id/unlock-login', asyncHandler(async (req, res) => {
   return res.json({ message: 'Login destravado.' });
 }));
 
-// Compartilhada por resetar-senha e reenviar-boas-vindas: mesma geração de
-// senha do reset em massa (routes/userRoutes.ts POST /reset-password), só
-// muda o template de e-mail enviado ao final.
-const rotatePasswordAndNotify = async (req: any, res: any, emailSender: typeof sendWelcomeEmail | typeof sendPasswordResetByAdminEmail, action: string, actionLabel: string) => {
+// Compartilhada por resetar-senha e reenviar-boas-vindas: mesmo novo acesso
+// do reset em massa (credentialService) — link por e-mail ou senha temporária
+// aleatória. `mode: 'temporary_password'` força a senha temporária (pessoa
+// que não acessa o e-mail e vai receber pelo WhatsApp/pessoalmente).
+const rotatePasswordAndNotify = async (req: any, res: any, kind: 'welcome' | 'reset', action: string, actionLabel: string) => {
   const target = await loadAuthorizedTarget(req, res);
   if (!target) return;
   if (target.role === 'admin_geral') return res.status(400).json({ message: 'Não é possível redefinir a senha de outro admin_geral por aqui.' });
-  const cpfDigits = normalizeDocument(target.cpf);
-  if (!cpfDigits) return res.status(400).json({ message: 'Cadastro sem CPF — não é possível gerar a senha.' });
-  const isResident = target.role === 'proprietario' || target.role === 'inquilino';
-  if (isResident && !target.unit_number) return res.status(400).json({ message: 'Cadastro sem unidade — não é possível gerar a senha.' });
-  const newPassword = isResident ? buildInitialPassword(target.unit_number as string, cpfDigits) : buildManagerInitialPassword(cpfDigits);
-  const passwordHash = await bcrypt.hash(newPassword, 10);
-  await query(
-    `update users set password_hash=$1, must_change_password=true,
-       login_enabled=case when deleted_at is null then true else login_enabled end
-     where id=$2`,
-    [passwordHash, target.id],
-  );
-  await query(`update refresh_tokens set revoked_at=now() where user_id=$1 and revoked_at is null`, [target.id]);
-  let emailSent = false;
-  if (target.email) {
-    try {
-      const emailResult = await emailSender(target.email, target.full_name || target.username, target.username, newPassword, target.condominium_name || '');
-      emailSent = emailResult.status === 'sent';
-    } catch (error) {
-      console.error(`Failed to send ${action} email`, error);
-    }
-  }
-  await logSupportAction(req, target, action, `${actionLabel} de ${target.full_name || target.username}`);
-  return res.json({ newPassword, emailSent, message: emailSent ? 'Senha redefinida e e-mail enviado.' : 'Senha redefinida, mas o e-mail não foi enviado (confira o cadastro).' });
+  const forceTemporaryPassword = req.body?.mode === 'temporary_password';
+  const credential = await issueAccessCredential(target, { kind, condominiumName: target.condominium_name || '', forceTemporaryPassword });
+  const how = credential.delivery === 'email_link' ? 'link enviado por e-mail' : 'senha temporária exibida ao gestor';
+  await logSupportAction(req, target, action, `${actionLabel} de ${target.full_name || target.username} (${how})`);
+  const message = credential.delivery === 'email_link'
+    ? `Link para criar a senha enviado para ${target.email}. Vale por 72 horas. A senha anterior já não funciona.`
+    : target.email && !forceTemporaryPassword
+      ? 'O e-mail não pôde ser enviado. Repasse a senha temporária abaixo à pessoa (vale por 72 horas).'
+      : 'Repasse a senha temporária abaixo à pessoa. Ela vale por 72 horas e precisa ser trocada no primeiro acesso.';
+  return res.json({ newPassword: credential.temporaryPassword, emailSent: credential.emailSent, delivery: credential.delivery, expiresAt: credential.expiresAt, message });
 };
 
 router.post('/users/:id/reset-password', asyncHandler((req, res) =>
-  rotatePasswordAndNotify(req, res, sendPasswordResetByAdminEmail, 'reset_password', 'Redefiniu a senha')));
+  rotatePasswordAndNotify(req, res, 'reset', 'reset_password', 'Redefiniu o acesso')));
 
 router.post('/users/:id/resend-welcome-email', asyncHandler((req, res) =>
-  rotatePasswordAndNotify(req, res, sendWelcomeEmail, 'resend_welcome_email', 'Reenviou o e-mail de acesso (com nova senha)')));
+  rotatePasswordAndNotify(req, res, 'welcome', 'resend_welcome_email', 'Reenviou o acesso')));
 
 // "Ver como este usuário": só admin_geral, só sobre moradores, com motivo
 // obrigatório (o admin vai ver dados pessoais e financeiros da pessoa). Gera

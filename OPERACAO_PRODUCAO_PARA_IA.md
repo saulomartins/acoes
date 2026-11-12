@@ -1575,3 +1575,27 @@ Commit `cb64b29`.
   401); web `b06d794d.lar-em-dia.pages.dev`.
 - Android: sem versão nova (o 1.7.8 já se beneficia; só não tem a recarga
   automática após a conferência).
+
+## Publicação de 12/11/2026 — "Ver como este usuário" e aviso de boletos do morador
+
+- Commit `9bcb446`. Origem: inquilina Patrícia (APTO-408, Templum) marcada
+  como responsável financeira em 12/11 não via boletos. Diagnóstico (leitura):
+  os 11 boletos da unidade estão no nome do proprietário (pagador na emissão);
+  o boleto fica com quem foi o pagador na geração. Proprietário vê todos os da
+  unidade (unit_ownerships); representante que mora também.
+- Aviso na tela Boletos (`residentNotice` em `GET /invoices`): explica ao
+  morador os boletos da unidade emitidos em nome de outra pessoa.
+- Suporte > "Ver como este usuário" (só admin_geral, só web, só moradores,
+  motivo obrigatório, 30 min, sem refresh). Token marcado com `viewAs`: o
+  middleware recusa toda escrita (`VIEW_AS_READ_ONLY`), exceto
+  `POST /auth/view-as/end`. Não grava request_log em nome da pessoa; rastro em
+  `view_as_sessions` + audit_log (`view_as_start`/`view_as_end`).
+- API `ad886861-ecce-4e4d-a11a-d78787a3e305` SUCCESS. Passo 3 executado
+  (`Schema applied successfully`; `view_as_sessions` com 10 colunas).
+- Web `db845bd4.lar-em-dia.pages.dev`; domínio servindo
+  `AppEntry-c11c85f1cede1acb312e645138d1a43e.js` (contém a URL de produção,
+  zero `localhost:3000`, textos novos presentes).
+- Smoke: /health 200; login inexistente 401 com CORS do domínio; rotas novas
+  sem token 401.
+- Android: sem versão nova. O aviso de boletos só aparece no app nativo na
+  próxima versão; pela web já aparece.

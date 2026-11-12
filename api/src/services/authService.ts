@@ -237,8 +237,8 @@ export const login = async (identifier: string, password: string, meta: RequestM
   const identifierDigits = normalizedIdentifier.replace(/\D/g, '');
   const cpfDigits = identifierDigits.length === 11 ? identifierDigits : '';
 
-  const result = await query<DbUser & { login_enabled: boolean }>(
-    `select u.id, u.username, u.password_hash, u.role, u.condominium_id, u.full_name, u.must_change_password, u.terms_accepted_version, u.terms_accepted_at, u.tour_completed_version, u.tour_completed_at, u.login_enabled, c.name condominium_name
+  const result = await query<DbUser & { login_enabled: boolean; temporary_password_expires_at: Date | null }>(
+    `select u.id, u.username, u.password_hash, u.role, u.condominium_id, u.full_name, u.must_change_password, u.terms_accepted_version, u.terms_accepted_at, u.tour_completed_version, u.tour_completed_at, u.login_enabled, u.temporary_password_expires_at, c.name condominium_name
      from users u left join condominiums c on c.id=u.condominium_id
      where unaccent(lower(u.username)) = unaccent($1)
         or (u.email is not null and lower(trim(u.email)) = $1)
@@ -247,7 +247,7 @@ export const login = async (identifier: string, password: string, meta: RequestM
   );
 
   const candidates = result.rows.filter(row => row.login_enabled);
-  const matches: Array<DbUser & { login_enabled: boolean }> = [];
+  const matches: Array<DbUser & { login_enabled: boolean; temporary_password_expires_at: Date | null }> = [];
   for (const candidate of candidates) {
     if (await bcrypt.compare(password, candidate.password_hash)) matches.push(candidate);
   }
@@ -274,8 +274,17 @@ export const login = async (identifier: string, password: string, meta: RequestM
   }
   if (!user) return null;
 
+  // Senha temporária (gerada pela administração, ver credentialService) só
+  // vale até o prazo. Conferido DEPOIS da senha, para não revelar a quem não
+  // sabe a senha que a conta existe e está com acesso pendente.
+  if (user.must_change_password && user.temporary_password_expires_at && user.temporary_password_expires_at.getTime() <= Date.now()) {
+    return TEMPORARY_PASSWORD_EXPIRED;
+  }
+
   return createSession(publicUser(user), user.role, meta);
 };
+
+export const TEMPORARY_PASSWORD_EXPIRED = 'temporary_password_expired' as const;
 
 export const refresh = async (refreshToken: string, meta: RequestMeta = NO_META) => {
   const session = await validateRefreshSession(refreshToken);
@@ -390,7 +399,7 @@ export const revokeRefreshToken = async (refreshToken: string) => {
   );
 };
 
-const hashResetToken = (token: string) => createHash('sha256').update(token).digest('hex');
+export const hashResetToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
 // Credencial de "Entrar com biometria" do app nativo. A biometria em si é
 // conferida pelo aparelho; aqui o servidor só troca este token aleatório
@@ -465,6 +474,16 @@ export const requestPasswordReset = async (email: string) => {
   }
 };
 
+// Dono de um link de redefinição ainda válido — a rota usa para aplicar as
+// regras de senha (passwordPolicyService) antes de gravar.
+export const findResetTokenUserId = async (token: string) => {
+  const result = await query<{ user_id: string }>(
+    `select user_id from password_reset_tokens where token_hash=$1 and used_at is null and expires_at>now()`,
+    [hashResetToken(token)],
+  );
+  return result.rows[0]?.user_id ?? null;
+};
+
 export const resetPassword = async (token: string, password: string) => {
   const passwordHash = await bcrypt.hash(password, 10);
   return withTransaction(async client => {
@@ -476,7 +495,7 @@ export const resetPassword = async (token: string, password: string) => {
     const reset = result.rows[0];
     if (!reset) return false;
 
-    await client.query(`update users set password_hash=$1, must_change_password=false where id=$2`, [passwordHash, reset.user_id]);
+    await client.query(`update users set password_hash=$1, must_change_password=false, temporary_password_expires_at=null where id=$2`, [passwordHash, reset.user_id]);
     await client.query(`update password_reset_tokens set used_at=now() where id=$1`, [reset.id]);
     await client.query(`update password_reset_tokens set used_at=coalesce(used_at,now()) where user_id=$1`, [reset.user_id]);
     await client.query(`update refresh_tokens set revoked_at=now() where user_id=$1 and revoked_at is null`, [reset.user_id]);
@@ -490,7 +509,7 @@ export const resetPassword = async (token: string, password: string) => {
 export const changePassword = async (userId: string, password: string, currentSessionId: string | null = null) => {
   const passwordHash = await bcrypt.hash(password, 10);
   const result = await query<DbUser>(
-    `update users set password_hash=$1, must_change_password=false where id=$2
+    `update users set password_hash=$1, must_change_password=false, temporary_password_expires_at=null where id=$2
      returning id, username, password_hash, role, condominium_id, full_name, must_change_password, terms_accepted_version, terms_accepted_at, tour_completed_version, tour_completed_at`,
     [passwordHash, userId],
   );

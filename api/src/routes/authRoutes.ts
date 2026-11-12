@@ -1,7 +1,10 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { authenticate, forgetPlatformRestriction } from '../middleware/auth';
 import { isPlatformRestricted, RESIDENT_SUSPENDED_MESSAGE } from '../services/platformSuspensionService';
-import { AMBIGUOUS_LOGIN, changePassword, createBiometricToken, listProfiles, listSessions, login, loginWithBiometricToken, refresh, register, requestPasswordReset, resetPassword, revokeBiometricToken, revokeOtherSessions, revokeRefreshToken, revokeSession, switchProfile } from '../services/authService';
+import { passwordPolicyError, loadPasswordContext } from '../services/passwordPolicyService';
+import { clearLoginFailures, isLoginLocked, registerLoginFailure } from '../services/loginLockoutService';
+import { sendPasswordChangedEmail } from '../services/emailService';
+import { AMBIGUOUS_LOGIN, TEMPORARY_PASSWORD_EXPIRED, findResetTokenUserId, changePassword, createBiometricToken, listProfiles, listSessions, login, loginWithBiometricToken, refresh, register, requestPasswordReset, resetPassword, revokeBiometricToken, revokeOtherSessions, revokeRefreshToken, revokeSession, switchProfile } from '../services/authService';
 import { requestMeta } from '../services/requestMeta';
 import { query } from '../db';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -38,32 +41,9 @@ const pruneExpired = <T>(map: Map<string, T>, now: number, expiresAt: (item: T) 
   for (const [key, item] of map) if (expiresAt(item) <= now) map.delete(key);
 };
 
-// Bloqueio por conta (além do limite por IP acima): a senha inicial de
-// moradores é derivada de CPF/unidade (ver passwordRuleService), então um
-// limite só por IP não impede tentativas distribuídas contra a mesma conta.
-const LOGIN_MAX_FAILURES = 5;
-const LOGIN_FAILURE_WINDOW_MS = 15 * 60_000;
-const LOGIN_LOCKOUT_MS = 15 * 60_000;
-const loginFailuresByUsername = new Map<string, { count: number; windowResetAt: number; lockedUntil: number }>();
-
-const isLoginLocked = (username: string) => {
-  const entry = loginFailuresByUsername.get(username);
-  return !!entry && entry.lockedUntil > Date.now();
-};
-
-const registerLoginFailure = (username: string) => {
-  const now = Date.now();
-  const current = loginFailuresByUsername.get(username);
-  const entry = !current || current.windowResetAt <= now
-    ? { count: 0, windowResetAt: now + LOGIN_FAILURE_WINDOW_MS, lockedUntil: 0 }
-    : current;
-  entry.count += 1;
-  if (entry.count >= LOGIN_MAX_FAILURES) entry.lockedUntil = now + LOGIN_LOCKOUT_MS;
-  loginFailuresByUsername.set(username, entry);
-  pruneExpired(loginFailuresByUsername, now, item => Math.max(item.windowResetAt, item.lockedUntil));
-};
-
-const clearLoginFailures = (username: string) => loginFailuresByUsername.delete(username);
+// Bloqueio por conta (além do limite por IP acima): um limite só por IP não
+// impede tentativas distribuídas contra a mesma conta. Fica no banco
+// (loginLockoutService) para não zerar a cada deploy.
 
 router.post('/register', async (req, res) => {
   try {
@@ -108,7 +88,7 @@ router.post('/login', limit(20, 15 * 60_000), async (req, res) => {
     }
 
     const normalizedUsername = username.trim().toLowerCase();
-    if (isLoginLocked(normalizedUsername)) {
+    if (await isLoginLocked(normalizedUsername)) {
       return res.status(429).json({ message: 'Muitas tentativas para este usuário. Aguarde alguns minutos e tente novamente.' });
     }
 
@@ -116,15 +96,19 @@ router.post('/login', limit(20, 15 * 60_000), async (req, res) => {
     // Senha correta, mas o CPF/e-mail informado serve a mais de uma conta —
     // não conta como tentativa falha, já que a credencial está certa.
     if (response === AMBIGUOUS_LOGIN) {
-      clearLoginFailures(normalizedUsername);
+      await clearLoginFailures(normalizedUsername);
       return res.status(409).json({ message: 'Este CPF/e-mail está vinculado a mais de uma conta. Entre com o seu usuário de acesso.' });
     }
+    if (response === TEMPORARY_PASSWORD_EXPIRED) {
+      await clearLoginFailures(normalizedUsername);
+      return res.status(401).json({ code: 'TEMPORARY_PASSWORD_EXPIRED', message: 'Sua senha temporária venceu. Peça um novo acesso à administração do condomínio ou use "Esqueci minha senha".' });
+    }
     if (!response) {
-      registerLoginFailure(normalizedUsername);
+      await registerLoginFailure(normalizedUsername);
       return res.status(401).json({ message: 'invalid credentials' });
     }
 
-    clearLoginFailures(normalizedUsername);
+    await clearLoginFailures(normalizedUsername);
     return res.json(response);
   } catch (error) {
     console.error('Error on /auth/login', error);
@@ -147,11 +131,27 @@ router.post('/reset-password', limit(10, 15 * 60_000), asyncHandler(async (req, 
   const token = String(req.body?.token || '');
   const password = String(req.body?.password || '');
   if (token.length < 32) return res.status(400).json({ message: 'Link de recuperação inválido.' });
-  if (password.length < 8) return res.status(400).json({ message: 'A nova senha deve ter pelo menos 8 caracteres.' });
+  const userId = await findResetTokenUserId(token);
+  if (!userId) return res.status(400).json({ message: 'Este link é inválido, expirou ou já foi utilizado.' });
+  const weak = passwordPolicyError(password, await loadPasswordContext(userId));
+  if (weak) return res.status(400).json({ message: weak });
   const changed = await resetPassword(token, password);
   if (!changed) return res.status(400).json({ message: 'Este link é inválido, expirou ou já foi utilizado.' });
-  return res.json({ message: 'Senha alterada. Entre novamente com a nova senha.' });
+  void notifyPasswordChanged(userId);
+  return res.json({ message: 'Senha criada. Entre com o seu usuário, CPF ou e-mail e a nova senha.' });
 }));
+
+// Aviso por e-mail a cada senha criada/alterada pela própria pessoa — se não
+// foi ela, fica sabendo na hora. Best-effort: falha de e-mail não desfaz nada.
+const notifyPasswordChanged = async (userId: string) => {
+  try {
+    const result = await query<{ email: string | null; name: string }>(`select email, coalesce(full_name, username) as name from users where id=$1`, [userId]);
+    const row = result.rows[0];
+    if (row?.email?.trim()) await sendPasswordChangedEmail(row.email.trim(), row.name);
+  } catch (error) {
+    console.error('Falha ao enviar aviso de senha alterada', { userId, error });
+  }
+};
 
 router.post('/refresh', async (req, res) => {
   try {
@@ -238,9 +238,11 @@ router.post('/switch-profile', asyncHandler(async (req, res) => {
 
 router.post('/change-password', authenticate, asyncHandler(async (req, res) => {
   const password = String(req.body?.password || '');
-  if (password.length < 8) return res.status(400).json({ message: 'A nova senha deve ter pelo menos 8 caracteres.' });
+  const weak = passwordPolicyError(password, await loadPasswordContext(req.user!.id));
+  if (weak) return res.status(400).json({ message: weak });
   const user = await changePassword(req.user!.id, password, req.user!.sessionId ?? null);
   if (!user) return res.status(404).json({ message: 'Usuário não encontrado.' });
+  void notifyPasswordChanged(req.user!.id);
   return res.json({ user });
 }));
 

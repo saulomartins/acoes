@@ -1,15 +1,14 @@
 import bcrypt from 'bcrypt';
 import ExcelJS from 'exceljs';
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
 import { requireFeature } from '../middleware/requireFeature';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { query, withTransaction } from '../db';
 import type { UserRole } from '../types';
-import { buildInitialPassword, buildManagerInitialPassword } from '../services/passwordRuleService';
+import { issueAccessCredential } from '../services/credentialService';
 import { isAcceptedDocumentFormat, maskDocument, normalizeDocument } from '../services/documentService';
-import { sendWelcomeEmail, sendPasswordResetByAdminEmail } from '../services/emailService';
 import { logAudit } from '../services/auditService';
 import { listProfiles } from '../services/authService';
 import { endOwnershipAsResident, isFinancialResponsibleSql, isRepresentativeSql, promoteRepresentativeIfMissing, setOwnerAsMonitoring } from '../services/unitOwnershipService';
@@ -101,8 +100,6 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
   const { username, password, role, condominiumId, fullName, cpf, email, phone, unitId, billingExempt, preferredDueDay,
     unitRentedToTenant, street, addressNumber, addressComplement, neighborhood, city, state, postalCode } = req.body ?? {};
 
-  const isResident = role === 'proprietario' || role === 'inquilino';
-
   if (!username || !role || typeof username !== 'string') {
     return res.status(400).json({ message: 'username and role are required' });
   }
@@ -138,7 +135,7 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
     return res.status(400).json({ message: 'CPF deve ter 11 dígitos ou CNPJ deve ter 14 caracteres' });
   }
   if (!cpfDigits) {
-    return res.status(400).json({ message: 'Informe o CPF — ele é necessário para gerar a senha inicial.' });
+    return res.status(400).json({ message: 'Informe o CPF.' });
   }
 
   // unaccent(): "joao" e "joão" devem ser tratados como o mesmo usuário de
@@ -158,18 +155,15 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
 
   // Unidade é opcional para morador — cobre quem só acompanha um imóvel
   // alugado sem vínculo formal com uma unidade deste condomínio (ex.:
-  // fiador/responsável monitorando à distância). Sem unidade, a senha
-  // inicial cai na mesma regra dos gestores (baseada só no CPF).
+  // fiador/responsável monitorando à distância).
   const selectedUnit = unitId ? await query<{id:string;number:string;unit_type_id:string|null}>(`select id,number,unit_type_id from units where id=$1 and condominium_id=$2 and active=true`,[unitId,targetCondominiumId]) : null;
   if (unitId && !selectedUnit?.rows[0]) return res.status(400).json({ message:'Unidade inválida para o condomínio.' });
 
   const condominium = await query<{ name: string }>(`select name from condominiums where id=$1`, [targetCondominiumId]);
   const condominiumName = condominium.rows[0]?.name || '';
-  const plainPassword = isResident && selectedUnit?.rows[0]
-    ? buildInitialPassword(selectedUnit.rows[0].number, cpfDigits!)
-    : buildManagerInitialPassword(cpfDigits!);
-  const initialPassword = plainPassword;
-  const passwordHash = await bcrypt.hash(plainPassword, 10);
+  // Placeholder aleatório: a senha de verdade (link por e-mail ou senha
+  // temporária) é emitida logo abaixo por issueAccessCredential.
+  const passwordHash = await bcrypt.hash(randomBytes(32).toString('hex'), 10);
   const result = await query(
     `insert into users (id, username, password_hash, role, condominium_id, full_name, cpf, email, phone, unit, unit_id, billing_exempt, preferred_due_day, unit_rented_to_tenant,
        street, address_number, address_complement, neighborhood, city, state, postal_code, must_change_password)
@@ -208,18 +202,14 @@ router.post('/', authorize('admin_geral', 'sindico', 'subsindico'), requireFeatu
     await promoteRepresentativeIfMissing(unitId);
   }
 
-  let emailSent = false;
-  if (email) {
-    try {
-      const emailResult = await sendWelcomeEmail(email, fullName || normalizedUsername, normalizedUsername, plainPassword, condominiumName);
-      emailSent = emailResult.status === 'sent';
-    } catch (error) {
-      console.error('Failed to send welcome email', error);
-    }
-  }
+  const created = result.rows[0] as any;
+  const credential = await issueAccessCredential(
+    { id: created.id, email: email || null, full_name: fullName || null, username: normalizedUsername },
+    { kind: 'welcome', condominiumName },
+  );
 
-  await logAudit(req, 'pessoas', 'created', `Cadastrou ${fullName || normalizedUsername} (${role})`, { entityId: String((result.rows[0] as any).id) });
-  return res.status(201).json({ user: result.rows[0], initialPassword, emailSent });
+  await logAudit(req, 'pessoas', 'created', `Cadastrou ${fullName || normalizedUsername} (${role})`, { entityId: String(created.id) });
+  return res.status(201).json({ user: created, initialPassword: credential.temporaryPassword, emailSent: credential.emailSent, delivery: credential.delivery, credentialExpiresAt: credential.expiresAt });
 }));
 
 router.patch('/:id', authorize('admin_geral', 'sindico', 'subsindico'), requireFeature('pessoas'), asyncHandler(async (req, res) => {
@@ -338,49 +328,14 @@ router.post('/reset-password', authorize('admin_geral', 'sindico', 'subsindico')
   const condominium = await query<{ name: string }>(`select name from condominiums where id=$1`, [condominiumId]);
   const condoName = condominium.rows[0]?.name || '';
 
-  const unitIds = [...new Set(targets.rows.map((person) => person.unit_id).filter(Boolean))] as string[];
-  const units = unitIds.length ? await query<{ id: string; number: string }>(`select id, number from units where id = any($1::uuid[])`, [unitIds]) : { rows: [] as Array<{ id: string; number: string }> };
-  const unitNumberById = new Map(units.rows.map((unit) => [unit.id, unit.number]));
-
-  const results: Array<{ id: string; fullName: string | null; username: string; newPassword: string; emailSent: boolean }> = [];
+  // newPassword só vem preenchida para quem não recebeu o link por e-mail
+  // (sem e-mail cadastrado ou envio falhou) — ver credentialService.
+  const results: Array<{ id: string; fullName: string | null; username: string; newPassword: string | null; emailSent: boolean; delivery: string; expiresAt: string }> = [];
   const skipped: Array<{ id: string; fullName: string | null; reason: string }> = [];
 
   for (const person of targets.rows) {
-    const cpfDigits = normalizeDocument(person.cpf);
-    const isPersonResident = person.role === 'proprietario' || person.role === 'inquilino';
-    if (!cpfDigits) {
-      skipped.push({ id: person.id, fullName: person.full_name, reason: 'Cadastro sem CPF — não é possível gerar a senha.' });
-      continue;
-    }
-    let newPassword: string;
-    if (isPersonResident) {
-      const unitNumber = person.unit_id ? unitNumberById.get(person.unit_id) : null;
-      if (!unitNumber) {
-        skipped.push({ id: person.id, fullName: person.full_name, reason: 'Cadastro sem unidade — não é possível gerar a senha.' });
-        continue;
-      }
-      newPassword = buildInitialPassword(unitNumber, cpfDigits);
-    } else {
-      newPassword = buildManagerInitialPassword(cpfDigits);
-    }
-    const passwordHash = await bcrypt.hash(newPassword, 10);
-    await query(
-      `update users set password_hash=$1, must_change_password=true,
-         login_enabled=case when deleted_at is null then true else login_enabled end
-       where id=$2`,
-      [passwordHash, person.id],
-    );
-    await query(`update refresh_tokens set revoked_at=now() where user_id=$1 and revoked_at is null`, [person.id]);
-    let emailSent = false;
-    if (person.email) {
-      try {
-        const emailResult = await sendPasswordResetByAdminEmail(person.email, person.full_name || person.username, person.username, newPassword, condoName);
-        emailSent = emailResult.status === 'sent';
-      } catch (error) {
-        console.error('Failed to send password reset notification email', error);
-      }
-    }
-    results.push({ id: person.id, fullName: person.full_name, username: person.username, newPassword, emailSent });
+    const credential = await issueAccessCredential(person, { kind: 'reset', condominiumName: condoName });
+    results.push({ id: person.id, fullName: person.full_name, username: person.username, newPassword: credential.temporaryPassword, emailSent: credential.emailSent, delivery: credential.delivery, expiresAt: credential.expiresAt });
   }
 
   if (results.length) await logAudit(req, 'pessoas', 'reset_password', `Resetou a senha de ${results.length} pessoa(s)`, { details: { ids: results.map((r) => r.id) } });

@@ -1,6 +1,7 @@
 import React, { useCallback, useContext, useState } from 'react';
 import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../ui/text';
+import * as Clipboard from 'expo-clipboard';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
 import { AppDialog, EmptyState, Panel } from '../ui/components';
@@ -44,7 +45,16 @@ export default function Support() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [dialog, setDialog] = useState<Dialog | null>(null);
-  const [lastPassword, setLastPassword] = useState<{ label: string; value: string } | null>(null);
+  const [lastPassword, setLastPassword] = useState<{ label: string; value: string; expiresAt: string | null; username: string; name: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const expiryLabel = (iso: string | null) => iso ? new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'em 72 horas';
+  // Mensagem pronta para o gestor colar no WhatsApp da pessoa.
+  const copyAccessMessage = async () => {
+    if (!lastPassword) return;
+    const text = `Olá, ${lastPassword.name}! Seu acesso ao Lar em Dia:\nUsuário: ${lastPassword.username} (ou seu CPF)\nSenha temporária: ${lastPassword.value}\nVale até ${expiryLabel(lastPassword.expiresAt)}. No primeiro acesso, você vai criar a sua própria senha.\nEntre em https://gestaolaremdia.com ou pelo aplicativo Lar em Dia.`;
+    await Clipboard.setStringAsync(text);
+    setCopied(true); setTimeout(() => setCopied(false), 2500);
+  };
 
   const loadPeople = useCallback(async (forCondominiumId: string) => {
     if (!userToken) return;
@@ -82,13 +92,13 @@ export default function Support() {
 
   const pickPerson = (id: string) => { setSelectedPersonId(id); loadStatus(id); };
 
-  const runAction = async (path: string, successPrefix?: string) => {
+  const runAction = async (path: string, successPrefix?: string, extraBody?: Record<string, string>) => {
     if (!userToken || !selectedPersonId) return;
-    setLoading(true); setError(''); setNotice(''); setDialog(null);
+    setLoading(true); setError(''); setNotice(''); setDialog(null); setLastPassword(null);
     try {
-      const result = await apiRequest<{ message: string; newPassword?: string }>(`/support/users/${selectedPersonId}/${path}`, userToken, { method: 'POST', body: JSON.stringify({ condominiumId }) });
+      const result = await apiRequest<{ message: string; newPassword?: string | null; expiresAt?: string }>(`/support/users/${selectedPersonId}/${path}`, userToken, { method: 'POST', body: JSON.stringify({ condominiumId, ...extraBody }) });
       setNotice(result.message);
-      if (result.newPassword) setLastPassword({ label: successPrefix || 'Nova senha', value: result.newPassword });
+      if (result.newPassword) setLastPassword({ label: successPrefix || 'Senha temporária', value: result.newPassword, expiresAt: result.expiresAt || null, username: status?.username || '', name: status?.full_name || status?.username || '' });
       await loadStatus(selectedPersonId);
     } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível concluir a ação.'); }
     finally { setLoading(false); }
@@ -126,20 +136,26 @@ export default function Support() {
         {isAdmin ? <>
           <Text style={s.heading}>1. Condomínio</Text>
           <TextInput placeholder="Buscar condomínio por nome" value={condominiumSearch} onChangeText={setCondominiumSearch} style={s.input} />
-          <View style={s.options}>{filteredCondominiums.slice(0, 12).map(c => <Pressable key={c.id} onPress={() => pickCondominium(c.id)} style={[s.option, condominiumId === c.id && s.optionOn]}><Text style={[s.optionText, condominiumId === c.id && s.optionTextOn]}>{c.name}</Text></Pressable>)}</View>
+          <Text style={s.countText}>{filteredCondominiums.length} condomínio(s){condominiumSearch.trim().length >= 2 ? ' encontrados' : ''}</Text>
+          <View style={s.options}>{filteredCondominiums.map(c => <Pressable key={c.id} onPress={() => pickCondominium(c.id)} style={[s.option, condominiumId === c.id && s.optionOn]}><Text style={[s.optionText, condominiumId === c.id && s.optionTextOn]}>{c.name}</Text></Pressable>)}</View>
         </> : null}
 
         {!isAdmin || condominiumId ? <>
           <Text style={s.heading}>{isAdmin ? `2. Pessoa em ${selectedCondominium?.name}` : 'Pessoa'}</Text>
           <TextInput placeholder="Buscar por nome, usuário ou CPF" value={personSearch} onChangeText={setPersonSearch} style={s.input} />
-          {!filteredPeople.length ? <EmptyState title="Nenhuma pessoa encontrada" description="Ajuste a busca ou confira o cadastro deste condomínio." /> : <View style={s.list}>{filteredPeople.slice(0, 20).map(p => <Pressable key={p.id} onPress={() => pickPerson(p.id)} style={[s.person, selectedPersonId === p.id && s.personOn]}><Text style={s.personName}>{p.full_name || p.username}</Text><Text style={s.meta}>{roleLabel[p.role] || p.role} · {p.unit || 'Sem unidade'} · {p.cpf || 'CPF não informado'}</Text></Pressable>)}</View>}
+          {!filteredPeople.length ? <EmptyState title="Nenhuma pessoa encontrada" description="Ajuste a busca ou confira o cadastro deste condomínio." /> : <View style={s.list}><Text style={s.countText}>{filteredPeople.length} pessoa(s){personSearch.trim().length >= 2 ? ' encontradas' : ''}</Text>{filteredPeople.map(p => <Pressable key={p.id} onPress={() => pickPerson(p.id)} style={[s.person, selectedPersonId === p.id && s.personOn]}><Text style={s.personName}>{p.full_name || p.username}</Text><Text style={s.meta}>{roleLabel[p.role] || p.role} · {p.unit || 'Sem unidade'} · {p.cpf || 'CPF não informado'}</Text></Pressable>)}</View>}
         </> : null}
       </Panel>
     </View>
 
     {error ? <Text style={s.error}>{error}</Text> : null}
     {notice ? <Text style={s.notice}>{notice}</Text> : null}
-    {lastPassword ? <View style={s.passwordBox}><Text style={s.passwordLabel}>{lastPassword.label}</Text><Text style={s.passwordValue}>{lastPassword.value}</Text></View> : null}
+    {lastPassword ? <View style={s.passwordBox}>
+      <Text style={s.passwordLabel}>{lastPassword.label} de {lastPassword.name} — exibida só agora</Text>
+      <Text selectable style={s.passwordValue}>{lastPassword.value}</Text>
+      <Text style={s.meta}>Vale até {expiryLabel(lastPassword.expiresAt)}. A pessoa cria a própria senha no primeiro acesso.</Text>
+      <Pressable onPress={copyAccessMessage} style={[s.actionButton, s.copyButton]}><Text style={s.actionText}>{copied ? 'Mensagem copiada' : 'Copiar mensagem para WhatsApp'}</Text></Pressable>
+    </View> : null}
 
     {status ? <View ref={registerSection('actions')} style={[isActive('actions') && s.tourHighlight]}>
       <Panel>
@@ -153,8 +169,9 @@ export default function Support() {
         <View style={s.actions}>
           <Pressable disabled={loading} onPress={() => confirmAction('Forçar logout', `Revogar todas as sessões de ${status.full_name || status.username}? A pessoa precisará logar de novo no próximo acesso.`, 'force-logout')} style={s.actionButton}><Text style={s.actionText}>Forçar logout</Text></Pressable>
           <Pressable disabled={loading || Boolean(status.deleted_at) || status.login_enabled} onPress={() => confirmAction('Destravar login', `Reativar o login de ${status.full_name || status.username}?`, 'unlock-login')} style={[s.actionButton, (status.deleted_at || status.login_enabled) && s.actionButtonDisabled]}><Text style={s.actionText}>Destravar login</Text></Pressable>
-          <Pressable disabled={loading} onPress={() => confirmAction('Resetar senha', `Gerar uma nova senha temporária para ${status.full_name || status.username} e enviar por e-mail?`, 'reset-password', 'Senha redefinida')} style={s.actionButton}><Text style={s.actionText}>Resetar senha</Text></Pressable>
-          <Pressable disabled={loading} onPress={() => confirmAction('Reenviar e-mail de acesso', `Gerar uma nova senha e reenviar o e-mail de boas-vindas/acesso para ${status.full_name || status.username}?`, 'resend-welcome-email', 'Novo acesso')} style={s.actionButton}><Text style={s.actionText}>Reenviar e-mail de acesso</Text></Pressable>
+          <Pressable disabled={loading} onPress={() => confirmAction('Resetar senha', status.email ? `Enviar para ${status.email} um link para ${status.full_name || status.username} criar uma nova senha? A senha atual deixa de funcionar na hora.` : `${status.full_name || status.username} não tem e-mail: será gerada uma senha temporária para você repassar. A senha atual deixa de funcionar na hora. Continuar?`, 'reset-password')} style={s.actionButton}><Text style={s.actionText}>Resetar senha</Text></Pressable>
+          <Pressable disabled={loading || !status.email} onPress={() => confirmAction('Reenviar e-mail de acesso', `Enviar de novo para ${status.email} o link de primeiro acesso? A senha atual deixa de funcionar na hora.`, 'resend-welcome-email')} style={[s.actionButton, !status.email && s.actionButtonDisabled]}><Text style={s.actionText}>Reenviar e-mail de acesso</Text></Pressable>
+          <Pressable disabled={loading} onPress={() => setDialog({ title: 'Gerar senha temporária', message: `Gerar uma senha temporária aleatória para ${status.full_name || status.username}, exibida só para você repassar (WhatsApp ou pessoalmente)? Vale por 72 horas e a senha atual deixa de funcionar na hora.`, tone: 'info', confirmLabel: 'Gerar', cancelLabel: 'Cancelar', onConfirm: () => runAction('reset-password', 'Senha temporária', { mode: 'temporary_password' }) })} style={s.actionButton}><Text style={s.actionText}>Gerar senha temporária</Text></Pressable>
           <Pressable disabled={loading || !status.terms_accepted_version} onPress={() => confirmAction('Limpar aceite dos Termos', `Limpar o aceite dos Termos de Uso de ${status.full_name || status.username}? A pessoa verá a tela de Termos novamente.`, 'clear-terms-acceptance')} style={[s.actionButton, !status.terms_accepted_version && s.actionButtonDisabled]}><Text style={s.actionText}>Limpar aceite dos Termos</Text></Pressable>
         </View>
 
@@ -208,6 +225,8 @@ const s = StyleSheet.create({
   actionButton: { borderWidth: 1, borderColor: '#bfd1ea', backgroundColor: colors.softBlue, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10 },
   actionButtonDisabled: { opacity: 0.5 },
   actionText: { color: colors.primary, fontWeight: '900', fontSize: 13 },
+  copyButton: { alignSelf: 'flex-start', marginTop: 10 },
+  countText: { color: colors.muted, fontSize: 13, fontWeight: '700', marginBottom: 6 },
   viewAsBox: { marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border, gap: 8 },
   viewAsTitle: { color: colors.ink, fontSize: 16, fontWeight: '900' },
   viewAsInput: { minHeight: 64, paddingTop: 10, textAlignVertical: 'top' },

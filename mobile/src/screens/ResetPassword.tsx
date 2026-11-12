@@ -7,6 +7,8 @@ import { colors, layout, shadow } from '../ui/theme';
 
 export default function ResetPassword({ navigation, route }: any) {
   const token = String(route.params?.token || '');
+  // Link do e-mail de boas-vindas (credentialService): mesma tela, outro texto.
+  const firstAccess = String(route.params?.['primeiro-acesso'] || '') === '1';
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [loading, setLoading] = useState(false);
@@ -28,15 +30,15 @@ export default function ResetPassword({ navigation, route }: any) {
   };
 
   return <KeyboardAvoidingView style={styles.root} behavior={Platform.OS==='ios'?'padding':'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}><ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled"><View style={styles.card}>
-    <Text style={styles.eyebrow}>NOVO ACESSO</Text><Text style={styles.title}>Crie uma nova senha</Text>
-    <Text style={styles.subtitle}>Use pelo menos 8 caracteres. Todos os acessos anteriores serão encerrados.</Text>
+    <Text style={styles.eyebrow}>{firstAccess ? 'PRIMEIRO ACESSO' : 'NOVO ACESSO'}</Text><Text style={styles.title}>{firstAccess ? 'Crie a sua senha' : 'Crie uma nova senha'}</Text>
+    <Text style={styles.subtitle}>{firstAccess ? 'Bem-vindo(a) ao Lar em Dia. Escolha uma senha que só você saiba.' : 'Todos os acessos anteriores serão encerrados.'} Use pelo menos 8 caracteres e não use números do seu CPF, o número do apartamento ou o seu usuário.</Text>
     {!token ? <View style={styles.error}><Text style={styles.errorText}>O link de recuperação não possui um token válido.</Text></View> : null}
     <Text style={styles.label}>Nova senha</Text><PasswordInput value={password} onChangeText={setPassword} />
     <Text style={styles.label}>Confirmar nova senha</Text><PasswordInput value={confirmation} onChangeText={setConfirmation} />
     {confirmation && confirmation !== password ? <Text style={styles.mismatch}>As senhas não são iguais.</Text> : null}
     {message ? <View style={styles.success}><Text style={styles.successText}>{message}</Text></View> : null}
     {error ? <View style={styles.error}><Text style={styles.errorText}>{error}</Text></View> : null}
-    <AppButton title={loading?'Alterando...':'Alterar senha'} onPress={submit} disabled={loading||!valid}/>
+    <AppButton title={loading?'Salvando...':firstAccess?'Criar minha senha':'Alterar senha'} onPress={submit} disabled={loading||!valid}/>
     <Pressable onPress={()=>navigation.navigate('Login')} style={styles.back}><Text style={styles.backText}>Ir para o login</Text></Pressable>
   </View></ScrollView></KeyboardAvoidingView>;
 }
