@@ -1599,3 +1599,29 @@ Commit `cb64b29`.
   sem token 401.
 - Android: sem versão nova. O aviso de boletos só aparece no app nativo na
   próxima versão; pela web já aparece.
+
+## Publicação de 12/11/2026 (tarde) — fim da senha inicial calculada
+
+- Commit `caf7e56`. Senha inicial/reset deixam de ser calculadas do CPF
+  (apto + 4 dígitos; síndico = 6 dígitos). `credentialService`: com e-mail,
+  link de uso único (`password_reset_tokens`, 72 h); sem e-mail ou envio
+  falho, senha temporária aleatória `XXX-XXX-XXX` exibida uma vez ao gestor.
+  Login recusa temporária vencida (`TEMPORARY_PASSWORD_EXPIRED`). Regras da
+  senha nova em `passwordPolicyService`. Bloqueio por conta em
+  `login_failures` (antes em memória). E-mail "Sua senha foi alterada".
+- **Ordem do deploy importa:** o login novo lê
+  `users.temporary_password_expires_at`. Os comandos aditivos (coluna,
+  carência, tabela) foram aplicados ANTES do `railway up`; depois, o passo 3
+  completo. Fazer o contrário derruba o login de todos até a migração.
+- Carência: 4 contas (proprietários sem e-mail, nunca entraram) ficaram com
+  prazo de 7 dias; depois disso o síndico gera senha temporária no Suporte.
+- API `add34201-526c-42b2-b499-8fb5a528d7b5` SUCCESS; passo 3
+  `Schema applied successfully`. Web `8eb62277.lar-em-dia.pages.dev`, bundle
+  `AppEntry-dccda66be5e399afd5f7342438f0d9eb.js` (URL de produção, zero
+  `localhost:3000`, textos novos, nenhum texto da regra antiga).
+- Smoke: /health 200; login inexistente 401 com CORS e registrado em
+  `login_failures`; reset com token falso 400.
+- Testado antes em API local (3001, banco fictício): 30 checagens E2E do
+  fluxo + bloqueio 5×401/429. Envio real de e-mail com link não testado.
+- Android: sem versão nova; a regra vale pela API, só os textos das telas de
+  senha mudam na próxima versão.
