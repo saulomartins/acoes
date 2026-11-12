@@ -450,26 +450,37 @@ export const revokeBiometricToken = async (token: string) => {
 
 export const requestPasswordReset = async (email: string) => {
   const normalizedEmail = email.trim().toLowerCase();
-  const users = await query<{ id: string; username: string; full_name: string | null; email: string }>(
-    `select id,username,full_name,email from users
-     where lower(email)= $1 and login_enabled=true limit 2`,
+  // O mesmo e-mail pode ter mais de uma conta (ex.: a conta admin_geral e a
+  // de morador da mesma pessoa). Até 12/11/2026 esse caso não recebia nada —
+  // a tela dizia "enviaremos" e o e-mail nunca saía. Agora vai UM e-mail com
+  // um link separado por conta: cada link só redefine a sua, e quem recebe
+  // já é o dono do e-mail. A resposta da rota continua genérica.
+  const users = await query<{ id: string; username: string; full_name: string | null; email: string; role: UserRole }>(
+    `select id,username,full_name,email,role from users
+     where lower(trim(email))= $1 and login_enabled=true and deleted_at is null
+     order by case when role='admin_geral' then 1 else 0 end, created_at
+     limit 5`,
     [normalizedEmail],
   );
-  // E-mails duplicados não podem identificar com segurança qual conta deve ser alterada.
-  if (users.rows.length !== 1) return;
+  if (!users.rows.length) return;
 
-  const user = users.rows[0];
-  const token = randomBytes(32).toString('hex');
-  const id = randomUUID();
-  await query(
-    `insert into password_reset_tokens(id,user_id,token_hash,expires_at)
-     values($1,$2,$3,now() + interval '30 minutes')`,
-    [id, user.id, hashResetToken(token)],
-  );
+  const accounts = users.rows.map(user => ({ user, token: randomBytes(32).toString('hex'), id: randomUUID() }));
+  for (const account of accounts) {
+    await query(
+      `insert into password_reset_tokens(id,user_id,token_hash,expires_at)
+       values($1,$2,$3,now() + interval '30 minutes')`,
+      [account.id, account.user.id, hashResetToken(account.token)],
+    );
+  }
+  const first = users.rows[0];
   try {
-    await sendPasswordResetEmail(user.email, user.full_name || user.username, token);
+    await sendPasswordResetEmail(
+      first.email.trim(),
+      first.full_name || first.username,
+      accounts.map(account => ({ token: account.token, username: account.user.username, role: account.user.role })),
+    );
   } catch (error) {
-    await query(`delete from password_reset_tokens where id=$1`, [id]).catch(() => null);
+    await query(`delete from password_reset_tokens where id = any($1::uuid[])`, [accounts.map(account => account.id)]).catch(() => null);
     throw error;
   }
 };

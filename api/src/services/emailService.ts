@@ -57,8 +57,19 @@ const resetLink = (resetToken: string, extra = '') => {
   return baseUrl.endsWith('://') ? `${baseUrl}${path}` : `${baseUrl.replace(/\/$/, '')}/${path}`;
 };
 
-export const sendPasswordResetEmail = (to: string, name: string, resetToken: string) => {
-  const resetUrl = resetLink(resetToken);
+const ROLE_LABEL: Record<string, string> = { admin_geral: 'Administrador geral', sindico: 'Síndico', subsindico: 'Subsíndico', proprietario: 'Proprietário', inquilino: 'Inquilino' };
+const buttonStyle = 'display:inline-block;background:#255eab;color:white;text-decoration:none;padding:13px 20px;border-radius:8px;font-weight:bold';
+
+// "Esqueci minha senha". Um e-mail pode ter mais de uma conta: aí vai um
+// link por conta, cada um identificado pelo perfil e usuário de acesso.
+export const sendPasswordResetEmail = (to: string, name: string, accounts: Array<{ token: string; username: string; role: string }>) => {
+  const several = accounts.length > 1;
+  const links = several
+    ? `<p>Este e-mail está ligado a ${accounts.length} contas. Escolha qual senha você quer redefinir — cada botão altera só aquela conta:</p>
+       ${accounts.map(account => `<div style="border:1px solid #e4e9ee;border-radius:8px;padding:12px 14px;margin:10px 0">
+         <div style="margin-bottom:8px"><strong>${escapeHtml(ROLE_LABEL[account.role] || account.role)}</strong> — usuário <strong>${escapeHtml(account.username)}</strong></div>
+         <a href="${resetLink(account.token)}" style="${buttonStyle}">Criar nova senha desta conta</a></div>`).join('')}`
+    : `<p><a href="${resetLink(accounts[0].token)}" style="${buttonStyle}">Criar nova senha</a></p>`;
   return sendEmail({
     to,
     subject: 'Redefinição de senha — Lar em Dia',
@@ -67,8 +78,8 @@ export const sendPasswordResetEmail = (to: string, name: string, resetToken: str
         <h2 style="margin-top:0">Redefinição de senha</h2>
         <p>Olá, ${escapeHtml(name)}.</p>
         <p>Recebemos uma solicitação para redefinir sua senha no Lar em Dia.</p>
-        <p><a href="${resetUrl}" style="display:inline-block;background:#255eab;color:white;text-decoration:none;padding:13px 20px;border-radius:8px;font-weight:bold">Criar nova senha</a></p>
-        <p>Este link expira em 30 minutos e só pode ser utilizado uma vez.</p>
+        ${links}
+        <p>${several ? 'Os links expiram' : 'Este link expira'} em 30 minutos e só ${several ? 'podem' : 'pode'} ser utilizado${several ? 's' : ''} uma vez.</p>
         <p style="color:#6f7e8d;font-size:13px">Se você não fez esta solicitação, ignore este e-mail. Sua senha continuará a mesma.</p>
       </div></body></html>`,
   });
