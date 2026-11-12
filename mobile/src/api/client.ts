@@ -30,6 +30,20 @@ const authStorage = {
   },
 };
 
+// "Ver como este usuário" (Suporte, admin_geral, só web): enquanto houver
+// visualização, toda chamada usa o token da pessoa visualizada — guardado só
+// em memória, de propósito: recarregar a página devolve o admin à própria
+// conta (que continua intacta no storage). A API recusa qualquer escrita com
+// esse token (middleware/auth.ts, VIEW_AS_READ_ONLY).
+let viewAsToken: string | null = null;
+export const setViewAsToken = (token: string | null) => { viewAsToken = token; };
+const viewAsEndedListeners = new Set<() => void>();
+export const onViewAsEnded = (listener: () => void) => {
+  viewAsEndedListeners.add(listener);
+  return () => { viewAsEndedListeners.delete(listener); };
+};
+const currentAccessToken = async (fallback: string) => viewAsToken || (await authStorage.get('userToken')) || fallback;
+
 // Várias telas fazem polling em paralelo (notificações, tour, features...) e
 // o AuthProvider também renova a sessão ao montar o app; se o access token já
 // expirou, todos esses pontos podem tentar renovar ao mesmo tempo com o mesmo
@@ -111,7 +125,8 @@ export const apiRequest = async <T>(
   token: string,
   options: RequestInit = {},
 ): Promise<T> => {
-  const storedToken = await authStorage.get('userToken');
+  const viewing = Boolean(viewAsToken);
+  const storedToken = await currentAccessToken(token);
   const request = (accessToken: string) =>
     fetch(`${API_BASE_URL}${path}`, {
       ...options,
@@ -128,6 +143,12 @@ export const apiRequest = async <T>(
     response = await request(storedToken || token);
   } catch {
     throw new Error('Sem conexão com o servidor. Verifique sua internet e tente novamente.');
+  }
+  if (response.status === 401 && viewing) {
+    // Visualização vencida/encerrada: nunca renova — a renovação usaria a
+    // sessão do admin e repetiria a chamada como ele. Volta para a conta dele.
+    viewAsEndedListeners.forEach(listener => listener());
+    throw new Error('A visualização como usuário terminou.');
   }
   if (response.status === 401) {
     const renewedToken = await refreshAccessToken();
@@ -153,7 +174,7 @@ export const apiUpload = async <T>(path:string, token:string, file:File | {uri:s
   const form=new FormData();
   if ('uri' in file) form.append('file',{uri:file.uri,name:file.name,type:file.mimeType||'application/pdf'} as any);
   else form.append('file',file);
-  const accessToken=await authStorage.get('userToken') || token;
+  const accessToken=await currentAccessToken(token);
   const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),45000);
   let response:Response;
   try { response=await fetch(`${API_BASE_URL}${path}`,{method:'POST',headers:{Authorization:`Bearer ${accessToken}`},body:form,signal:controller.signal}); }
@@ -176,7 +197,7 @@ export const apiFormUpload = async <T>(
     if ('uri' in file) form.append('file', { uri: file.uri, name: file.name, type: file.mimeType || 'application/vnd.android.package-archive' } as any);
     else form.append('file', file);
   }
-  const accessToken = await authStorage.get('userToken') || token;
+  const accessToken = await currentAccessToken(token);
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -188,7 +209,7 @@ export const apiFormUpload = async <T>(
 };
 
 export const downloadAuthenticated = async (path:string,token:string,filename:string,options?:{awaitCompletion?:boolean}) => {
-  const accessToken=await authStorage.get('userToken') || token;
+  const accessToken=await currentAccessToken(token);
   if (Platform.OS !== 'web') {
     if (!FileSystem.cacheDirectory) throw new Error('Armazenamento temporário indisponível.');
     const localUri = `${FileSystem.cacheDirectory}${Date.now()}-${filename.replace(/[^a-zA-Z0-9._-]/g,'-')}`;
@@ -233,7 +254,7 @@ export const downloadAuthenticated = async (path:string,token:string,filename:st
 };
 
 export const openAuthenticatedPdf = async (path:string,token:string) => {
-  const accessToken=await authStorage.get('userToken') || token;
+  const accessToken=await currentAccessToken(token);
   if (Platform.OS !== 'web') {
     if (!FileSystem.cacheDirectory) throw new Error('Não foi possível acessar o armazenamento temporário do aparelho.');
     const localUri = `${FileSystem.cacheDirectory}boleto-${Date.now()}.pdf`;
@@ -268,7 +289,7 @@ export const openAuthenticatedPdf = async (path:string,token:string) => {
 // no app nativo.
 export const fetchAuthenticatedFile = async(path:string,token:string,fileName:string):Promise<File> => {
  if(Platform.OS!=='web')throw new Error('Disponível apenas na versão web.');
- const accessToken=await authStorage.get('userToken')||token;
+ const accessToken=await currentAccessToken(token);
  const response=await fetch(`${API_BASE_URL}${path}`,{headers:{Authorization:`Bearer ${accessToken}`}});
  if(!response.ok){const data=await response.json().catch(()=>null);throw new Error(data?.message||'Falha ao baixar arquivo')}
  const blob=await response.blob();
@@ -276,7 +297,7 @@ export const fetchAuthenticatedFile = async(path:string,token:string,fileName:st
 };
 
 export const openAuthenticatedFile = async(path:string,token:string,fileName:string,mimeType:string) => {
- const accessToken=await authStorage.get('userToken')||token;
+ const accessToken=await currentAccessToken(token);
  if(Platform.OS==='web'){const response=await fetch(`${API_BASE_URL}${path}`,{headers:{Authorization:`Bearer ${accessToken}`}});if(!response.ok)throw new Error('Falha ao abrir anexo');const url=URL.createObjectURL(await response.blob());const popup=window.open(url,'_blank','noopener,noreferrer');if(!popup)throw new Error('Permita pop-ups para visualizar o anexo.');setTimeout(()=>URL.revokeObjectURL(url),60000);return;}
  if(!FileSystem.cacheDirectory)throw new Error('Armazenamento temporário indisponível.');const extension=fileName.split('.').pop()||'bin';const local=`${FileSystem.cacheDirectory}prestacao-${Date.now()}.${extension}`;const result=await FileSystem.downloadAsync(`${API_BASE_URL}${path}`,local,{headers:{Authorization:`Bearer ${accessToken}`}});if(result.status<200||result.status>=300)throw new Error('Falha ao baixar anexo');try{await Sharing.shareAsync(local,{mimeType,dialogTitle:'Visualizar comprovante'});}finally{await FileSystem.deleteAsync(local,{idempotent:true}).catch(()=>null)}
 };

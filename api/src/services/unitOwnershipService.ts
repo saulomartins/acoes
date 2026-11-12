@@ -164,3 +164,44 @@ export const getViewableUnitIds = async (userId: string): Promise<string[]> => {
   const [represented, owned] = await Promise.all([getRepresentedUnitIds(userId), getOwnedUnitIds(userId)]);
   return [...new Set([...represented, ...owned])];
 };
+
+// Aviso da tela Boletos do morador. O boleto pertence a quem foi escolhido
+// como pagador na emissão (invoices.user_id) e continua com essa pessoa —
+// marcar outro responsável financeiro só muda as PRÓXIMAS cobranças. Quem
+// entra na unidade depois (ex.: inquilino novo) não vê os boletos anteriores
+// e achava que o app estava com defeito. Aqui contamos os boletos da unidade
+// que existem mas não estão na lista desta pessoa, para a tela explicar.
+// Caso real: Patrícia (APTO-408, Templum), 12/11/2026.
+export type ResidentInvoiceNotice = {
+  unitLabel: string;
+  linkedSince: string | null;
+  isFinancialResponsible: boolean;
+  hiddenUnitInvoices: number;
+};
+
+export const getResidentInvoiceNotice = async (userId: string, visibleInvoiceIds: string[]): Promise<ResidentInvoiceNotice | null> => {
+  const result = await query<{ unit_label: string; linked_since: string | null; is_fr: boolean; hidden_count: number }>(
+    `with me as (
+       select u.id, u.unit_id, u.condominium_id,
+              coalesce(nullif(concat_ws(' - ',nullif(b.name,''),nullif(un.number,'')),''),un.number,u.unit) unit_label,
+              (select to_char(min(o.started_at),'YYYY-MM-DD') from unit_occupancies o where o.user_id=u.id and o.unit_id=u.unit_id and o.ended_at is null) linked_since,
+              ${isFinancialResponsibleSql('u.id', 'u.unit_id')} is_fr
+       from users u
+       left join units un on un.id=u.unit_id
+       left join blocks b on b.id=un.block_id
+       where u.id=$1
+     )
+     select me.unit_label, me.linked_since, me.is_fr,
+            (select count(*)::int from invoices i join users p on p.id=i.user_id
+             where i.condominium_id=me.condominium_id and i.deleted_at is null and i.invoice_type<>'legacy' and i.status<>'canceled'
+               and i.user_id<>me.id and not (i.id = any($2::uuid[]))
+               and (p.unit_id=me.unit_id
+                    or exists(select 1 from unit_occupancies o where o.unit_id=me.unit_id and o.user_id=p.id)
+                    or exists(select 1 from unit_ownerships w where w.unit_id=me.unit_id and w.owner_user_id=p.id))) hidden_count
+     from me where me.unit_id is not null`,
+    [userId, visibleInvoiceIds],
+  );
+  const row = result.rows[0];
+  if (!row || !row.hidden_count) return null;
+  return { unitLabel: row.unit_label, linkedSince: row.linked_since, isFinancialResponsible: Boolean(row.is_fr), hiddenUnitInvoices: row.hidden_count };
+};

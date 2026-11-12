@@ -3,7 +3,7 @@ import jwt, { SignOptions } from 'jsonwebtoken';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { config } from '../config';
 import { query, withTransaction } from '../db';
-import type { AccessTokenPayload, AuthenticatedUser, UserRole } from '../types';
+import type { AccessTokenPayload, AuthenticatedUser, UserRole, ViewAsInfo } from '../types';
 import { sendPasswordResetEmail } from './emailService';
 import type { RequestMeta } from './requestMeta';
 
@@ -516,5 +516,38 @@ export const verifyAccessToken = (token: string): AuthenticatedUser => {
     condominiumName: payload.condominiumName,
     mustChangePassword: payload.mustChangePassword,
     activeProfileId: payload.activeProfileId ?? null,
+    viewAs: payload.va ? { sessionId: payload.va.sid, adminId: payload.va.by, adminName: payload.va.byName, expiresAt: payload.va.exp } : null,
   };
+};
+
+// "Ver como este usuário" (Suporte, só admin_geral). Token curto, sem refresh
+// token e sem `sid` de refresh_tokens: a sessão do admin não se mistura com as
+// da pessoa (não aparece em "Dispositivos conectados" dela, não cai com
+// "Forçar logout" dela). A validade real é a linha em view_as_sessions,
+// conferida a cada requisição pelo middleware authenticate.
+export const VIEW_AS_DURATION_MS = 30 * 60_000;
+
+export const signViewAsToken = (target: AuthenticatedUser, viewAs: ViewAsInfo) =>
+  jwt.sign(
+    {
+      sub: target.id,
+      id: target.id,
+      username: target.username,
+      role: target.role,
+      condominiumId: target.condominiumId,
+      condominiumName: target.condominiumName,
+      mustChangePassword: false,
+      activeProfileId: null,
+      va: { sid: viewAs.sessionId, by: viewAs.adminId, byName: viewAs.adminName, exp: viewAs.expiresAt },
+    },
+    config.accessTokenSecret,
+    { expiresIn: Math.floor(VIEW_AS_DURATION_MS / 1000) } as SignOptions,
+  );
+
+export const isViewAsSessionActive = async (sessionId: string) => {
+  const result = await query<{ active: boolean }>(
+    `select ended_at is null and expires_at > now() as active from view_as_sessions where id = $1`,
+    [sessionId],
+  );
+  return result.rows[0]?.active ?? false;
 };

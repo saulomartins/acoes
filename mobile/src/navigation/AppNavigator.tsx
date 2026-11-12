@@ -169,7 +169,21 @@ const resolveNotificationScreen = (payload: unknown): 'Communications' | 'Report
 };
 
 export default function AppNavigator() {
-  const { userToken, user, isLoading, condominiumFeatures, updateUser, needsProfileSelection, nativeAccessBlocked, platformSuspendedMessage } = useContext(AuthContext);
+  const { userToken, user, isLoading, condominiumFeatures, updateUser, needsProfileSelection, nativeAccessBlocked, platformSuspendedMessage, viewAs, stopViewAs } = useContext(AuthContext);
+  // "Ver como este usuário": ao entrar, abre o Início da pessoa; ao sair (botão,
+  // vencimento ou fim pela API), volta para Suporte, de onde o admin partiu.
+  const viewAsSessionRef = useRef<string | null>(null);
+  const [leavingViewAs, setLeavingViewAs] = useState(false);
+  useEffect(() => {
+    const current = viewAs?.sessionId ?? null;
+    if (current === viewAsSessionRef.current) return;
+    const route = current ? 'Home' : 'Support';
+    const wasViewing = Boolean(viewAsSessionRef.current);
+    viewAsSessionRef.current = current;
+    if (!current && !wasViewing) return;
+    setTimeout(() => { if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: route as any }] }); }, 0);
+  }, [viewAs?.sessionId]);
+  const exitViewAs = async () => { setLeavingViewAs(true); try { await stopViewAs(); } finally { setLeavingViewAs(false); } };
   const [inAppNotification, setInAppNotification] = useState<InAppNotification | null>(null);
   const [tourActive,setTourActive]=useState(false);const [tourIndex,setTourIndex]=useState(0);const autoTourStarted=useRef(false);
   // Guarda "tour já visto" também neste aparelho (fora do objeto `user`), pois
@@ -216,7 +230,7 @@ export default function AppNavigator() {
   // deviceTourVersion complementa user.tourCompletedVersion: mesmo que a
   // confirmação do servidor tenha falhado numa sessão anterior, este aparelho
   // já registrou localmente que o tour foi concluído/pulado e não deve repetir.
-  useEffect(()=>{if(!userToken||!user||user.mustChangePassword||needsProfileSelection||nativeAccessBlocked||user.termsAcceptedVersion!==CURRENT_TERMS_VERSION||user.tourCompletedVersion===CURRENT_TOUR_VERSION||deviceTourVersion===CURRENT_TOUR_VERSION||autoTourStarted.current)return;if(!['admin_geral','sindico','subsindico','proprietario','inquilino'].includes(user.role))return;autoTourStarted.current=true;const timer=setTimeout(startTour,500);return()=>clearTimeout(timer);},[startTour,user,userToken,needsProfileSelection,nativeAccessBlocked,deviceTourVersion]);
+  useEffect(()=>{if(!userToken||!user||user.viewAs||user.mustChangePassword||needsProfileSelection||nativeAccessBlocked||user.termsAcceptedVersion!==CURRENT_TERMS_VERSION||user.tourCompletedVersion===CURRENT_TOUR_VERSION||deviceTourVersion===CURRENT_TOUR_VERSION||autoTourStarted.current)return;if(!['admin_geral','sindico','subsindico','proprietario','inquilino'].includes(user.role))return;autoTourStarted.current=true;const timer=setTimeout(startTour,500);return()=>clearTimeout(timer);},[startTour,user,userToken,needsProfileSelection,nativeAccessBlocked,deviceTourVersion]);
 
   useEffect(() => {
     const receivedSubscription = Notifications.addNotificationReceivedListener((event) => {
@@ -257,6 +271,17 @@ export default function AppNavigator() {
 
   return (
     <View style={styles.container}>
+      {viewAs && user ? (
+        <View style={styles.viewAsBar} accessibilityRole="alert">
+          <Text style={styles.viewAsText}>
+            <Text style={styles.viewAsStrong}>Visualizando como {user.fullName || user.username}</Text>
+            {` · ${user.role === 'proprietario' ? 'Proprietário' : 'Inquilino'}${user.condominiumName ? ` · ${user.condominiumName}` : ''} · somente leitura, nenhuma ação é gravada`}
+          </Text>
+          <Pressable onPress={exitViewAs} disabled={leavingViewAs} accessibilityRole="button" style={styles.viewAsExit}>
+            <Text style={styles.viewAsExitText}>{leavingViewAs ? 'Saindo…' : 'Sair da visualização'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <NavigationContainer ref={navigationRef} linking={{ prefixes: ['laremdia://', 'appcond://'], config: { screens: isWeb ? { Landing: '', Login: 'login', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?', LegalDocument: 'legal/:document', Pills: 'pilulas/:slug?' } : { Login: '', ForgotPassword: 'esqueci-senha', ResetPassword: 'redefinir-senha', ClearanceVerify: 'verificar/:code?' } } }}>
         <Stack.Navigator screenOptions={{ animation: 'fade', contentStyle: { backgroundColor: '#f5f7fb' } }}>
           {userToken && user?.mustChangePassword ? (
@@ -327,6 +352,11 @@ export default function AppNavigator() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  viewAsBar: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#7a2e0e', zIndex: 50 },
+  viewAsText: { flex: 1, minWidth: 220, color: '#fff3e8', fontSize: 14 },
+  viewAsStrong: { color: '#fff', fontWeight: '900' },
+  viewAsExit: { backgroundColor: '#fff', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  viewAsExitText: { color: '#7a2e0e', fontWeight: '900', fontSize: 13 },
   inAppBanner: {
     position: 'absolute',
     top: 18,

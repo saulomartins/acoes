@@ -8,11 +8,11 @@ vi.mock('../services/platformSuspensionService', async (importOriginal) => {
 
 vi.mock('../services/authService', async (importOriginal) => {
   const original = await importOriginal<typeof import('../services/authService')>();
-  return { ...original, isSessionRevoked: vi.fn(async () => false) };
+  return { ...original, isSessionRevoked: vi.fn(async () => false), isViewAsSessionActive: vi.fn(async () => true) };
 });
 
 import { config } from '../config';
-import { isSessionRevoked } from '../services/authService';
+import { isSessionRevoked, isViewAsSessionActive, signViewAsToken, verifyAccessToken } from '../services/authService';
 import { isPlatformRestricted, isWriteAllowedWhileRestricted } from '../services/platformSuspensionService';
 import { authenticate, forgetPlatformRestriction } from './auth';
 
@@ -164,6 +164,55 @@ describe('authenticate — morador de condomínio suspenso (bloqueio total)', ()
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect(await run('GET', '/invoices', tokenFor('proprietario'))).toEqual({ next: true });
     expect((await run('GET', '/invoices', tokenFor('proprietario'))).status).toBe(403);
+    warn.mockRestore();
+  });
+});
+
+describe('authenticate — "Ver como este usuário" (somente leitura)', () => {
+  const viewAsMock = vi.mocked(isViewAsSessionActive);
+  const viewAs = { sessionId: 'va-1', adminId: 'admin-1', adminName: 'Admin', expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  const viewToken = () => signViewAsToken({ id: 'u-9', username: 'patricia', role: 'inquilino', condominiumId: 'condo-1', condominiumName: 'X', mustChangePassword: false }, viewAs);
+
+  beforeEach(() => {
+    restrictedMock.mockResolvedValue(false);
+    viewAsMock.mockReset();
+    viewAsMock.mockResolvedValue(true);
+  });
+
+  it('o token carrega a pessoa visualizada e quem está visualizando', () => {
+    const user = verifyAccessToken(viewToken());
+    expect(user).toMatchObject({ id: 'u-9', role: 'inquilino', condominiumId: 'condo-1', sessionId: null, viewAs: { sessionId: 'va-1', adminId: 'admin-1' } });
+  });
+
+  it('lê tudo que a pessoa lê', async () => {
+    for (const url of ['/invoices', '/debts?asOf=2026-11-12', '/auth/me', '/notifications']) {
+      expect(await run('GET', url, viewToken())).toEqual({ next: true });
+    }
+    expect(viewAsMock).toHaveBeenCalledWith('va-1');
+    expect(revokedMock).not.toHaveBeenCalled();
+  });
+
+  it('recusa QUALQUER escrita, inclusive as liberadas em outras regras (termos, push, leitura de aviso, logout)', async () => {
+    for (const [method, url] of [['POST', '/space-reservations'], ['PATCH', '/notifications/abc/read'], ['POST', '/auth/terms/accept'], ['POST', '/notifications/devices'], ['POST', '/auth/logout'], ['POST', '/invoices/sync-all'], ['DELETE', '/reports/1'], ['PUT', '/users/1']]) {
+      const result = await run(method, url, viewToken());
+      expect(result).toMatchObject({ next: false, status: 403, body: { code: 'VIEW_AS_READ_ONLY' } });
+    }
+  });
+
+  it('a única escrita aceita é encerrar a própria visualização', async () => {
+    expect(await run('POST', '/auth/view-as/end', viewToken())).toEqual({ next: true });
+    expect((await run('POST', '/auth/view-as/end-x', viewToken())).status).toBe(403);
+  });
+
+  it('visualização encerrada ou vencida: 401 com código próprio', async () => {
+    viewAsMock.mockResolvedValue(false);
+    expect(await run('GET', '/invoices', viewToken())).toMatchObject({ next: false, status: 401, body: { code: 'VIEW_AS_ENDED' } });
+  });
+
+  it('falha ao conferir a visualização BLOQUEIA (na dúvida, não age em nome de outra pessoa)', async () => {
+    viewAsMock.mockRejectedValue(new Error('db fora'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect((await run('GET', '/invoices', viewToken())).status).toBe(401);
     warn.mockRestore();
   });
 });

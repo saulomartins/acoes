@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { query } from '../db';
-import { isSessionRevoked, verifyAccessToken } from '../services/authService';
+import { isSessionRevoked, isViewAsSessionActive, verifyAccessToken } from '../services/authService';
 import { requestMeta } from '../services/requestMeta';
 import {
   isPlatformRestricted,
@@ -30,6 +30,8 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
     return res.status(401).json({ message: 'invalid or expired token' });
   }
 
+  if (req.user.viewAs) return authenticateViewAs(req, res, next);
+
   // Sessão encerrada de verdade (logout, "sair dos outros aparelhos", troca
   // de senha): o access token ainda valeria até 15 min — corta na hora.
   // Tokens antigos, sem `sid`, só passam até expirarem (15 min do deploy).
@@ -45,10 +47,40 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
       : continueAuthenticated(req, res, next)));
 };
 
+// "Ver como este usuário" (Suporte, admin_geral): o admin navega com um token
+// da pessoa marcado com `viewAs`. Regra central, para valer em toda rota
+// (inclusive as que ainda vão existir): só leitura. A única escrita aceita é
+// encerrar a própria visualização. Falha ao conferir a sessão BLOQUEIA (ao
+// contrário da checagem de sessão comum): aqui o risco é agir em nome de outra
+// pessoa, então na dúvida nega.
+export const VIEW_AS_READ_ONLY_MESSAGE = 'Modo visualização: você está vendo o app como este usuário e nenhuma ação pode ser feita. Saia da visualização para voltar à sua conta.';
+const VIEW_AS_WRITE_ALLOWLIST = new Set(['/auth/view-as/end']);
+
+const authenticateViewAs = (req: Request, res: Response, next: NextFunction) => {
+  const viewAs = req.user!.viewAs!;
+  const path = req.originalUrl.split('?')[0];
+  void isViewAsSessionActive(viewAs.sessionId)
+    .catch((error) => {
+      console.warn('view-as session check failed — denying request', error);
+      return false;
+    })
+    .then((active) => {
+      if (!active) return res.status(401).json({ message: 'A visualização como usuário terminou.', code: 'VIEW_AS_ENDED' });
+      if (WRITE_METHODS.includes(req.method.toUpperCase()) && !VIEW_AS_WRITE_ALLOWLIST.has(path)) {
+        return res.status(403).json({ message: VIEW_AS_READ_ONLY_MESSAGE, code: 'VIEW_AS_READ_ONLY' });
+      }
+      return continueAuthenticated(req, res, next);
+    });
+};
+
 // Toda escrita autenticada fica em request_log com sessão, IP e aparelho —
 // gravado quando a resposta termina (com o status), sem atrasar a requisição.
+// Fora a visualização como usuário: lá a linha sairia no nome da pessoa
+// visualizada (e o request_log é a primeira fonte de "eu não fiz isso"); o
+// rastro dela fica em view_as_sessions + audit_log.
 const WRITE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
 const logWriteRequest = (req: Request, res: Response) => {
+  if (req.user?.viewAs) return;
   if (!WRITE_METHODS.includes(req.method.toUpperCase()) || typeof res.on !== 'function') return;
   const user = req.user;
   const meta = requestMeta(req);

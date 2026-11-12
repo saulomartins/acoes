@@ -1699,3 +1699,23 @@ create index if not exists notifications_condominium_idx on notifications(condom
 -- do usuário, ativa ou não — o índice parcial de sessões ativas não cobre.
 create index if not exists refresh_tokens_user_idx on refresh_tokens(user_id);
 create index if not exists refresh_tokens_replaced_by_idx on refresh_tokens(replaced_by) where replaced_by is not null;
+
+-- "Ver como este usuário" (Suporte, só admin_geral, 12/11/2026): o admin vê o
+-- app exatamente como um morador, SOMENTE LEITURA (middleware/auth.ts recusa
+-- qualquer escrita). Cada linha é uma visualização: quem, sobre quem, por quê
+-- e quando terminou. O token não tem refresh; vale até expires_at ou até
+-- ended_at ser preenchido ("Sair da visualização").
+create table if not exists view_as_sessions (
+  id uuid primary key,
+  admin_user_id uuid not null references users(id) on delete cascade,
+  target_user_id uuid not null references users(id) on delete cascade,
+  condominium_id uuid references condominiums(id) on delete cascade,
+  reason text not null,
+  started_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  ended_at timestamptz,
+  ip_address text,
+  user_agent text
+);
+create index if not exists view_as_sessions_admin_idx on view_as_sessions(admin_user_id, started_at desc);
+create index if not exists view_as_sessions_target_idx on view_as_sessions(target_user_id, started_at desc);

@@ -331,4 +331,20 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
   return res.json({ user: { ...req.user, mustChangePassword:result.rows[0]?.must_change_password ?? req.user?.mustChangePassword, condominiumName:result.rows[0]?.condominium_name || null,termsAcceptedVersion:result.rows[0]?.terms_accepted_version||null,termsAcceptedAt:result.rows[0]?.terms_accepted_at?.toISOString()||null,tourCompletedVersion:result.rows[0]?.tour_completed_version||null,tourCompletedAt:result.rows[0]?.tour_completed_at?.toISOString()||null }, condominiumFeatures });
 }));
 
+// Encerra a visualização como usuário (Suporte > "Ver como este usuário").
+// É a única escrita que o middleware aceita de um token de visualização.
+router.post('/view-as/end', authenticate, asyncHandler(async (req, res) => {
+  const viewAs = req.user?.viewAs;
+  if (!viewAs) return res.status(400).json({ message: 'Não há visualização em andamento.' });
+  const ended = await query(`update view_as_sessions set ended_at=now() where id=$1 and ended_at is null`, [viewAs.sessionId]);
+  if (ended.rowCount && req.user?.condominiumId) {
+    await query(
+      `insert into audit_log(condominium_id,actor_id,actor_role,actor_name,feature,action,entity_id,description)
+       values($1,$2,'admin_geral',$3,'suporte_admin','view_as_end',$4,$5)`,
+      [req.user.condominiumId, viewAs.adminId, viewAs.adminName || 'suporte', req.user.id, `Encerrou a visualização como ${req.user.username}`],
+    ).catch(error => console.error('Falha ao gravar audit_log de view_as_end', error));
+  }
+  return res.json({ message: 'Visualização encerrada.' });
+}));
+
 export default router;

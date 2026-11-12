@@ -11,7 +11,7 @@ import { createInterBoleto, getInterBoleto, getInterBoletoPdf, listInterBoletosB
 import { sendPushNotification } from '../services/notificationService';
 import { notifyNewInvoice, transitionOverdueInvoices } from '../services/invoiceReminderService';
 import { logAudit } from '../services/auditService';
-import { getViewableUnitIds } from '../services/unitOwnershipService';
+import { getResidentInvoiceNotice, getViewableUnitIds } from '../services/unitOwnershipService';
 import { getBillingRules } from '../services/lateFeeService';
 
 const router = Router();
@@ -392,12 +392,17 @@ router.get('/', asyncHandler(async (req, res) => {
   const activeInterInvoices = result.rows.filter(
     (inv: any) => inv.external_id && ['issued', 'pending_provider', 'overdue'].includes(inv.status)
   );
+  // Morador: explica os boletos da unidade que existem mas não estão no nome
+  // dele (ex.: inquilino cadastrado depois da emissão — o boleto fica com quem
+  // era o pagador na época). Ver getResidentInvoiceNotice.
+  const residentNotice = isResident ? await getResidentInvoiceNotice(req.user!.id, result.rows.map((row: any) => row.id)) : null;
+
   if (activeInterInvoices.length > 0 && await syncStaleInterInvoices(activeInterInvoices as any) > 0) {
     const fresh = await query(invoicesQuery, invoicesParams);
-    return res.json({ invoices: fresh.rows });
+    return res.json({ invoices: fresh.rows, residentNotice });
   }
 
-  return res.json({ invoices: result.rows });
+  return res.json({ invoices: result.rows, residentNotice });
 }));
 
 // Painel financeiro do síndico/subsíndico. Filtro por mês de referência

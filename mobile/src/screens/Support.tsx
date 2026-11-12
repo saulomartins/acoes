@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../ui/text';
 import { apiRequest } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
@@ -26,7 +26,8 @@ const tourSteps: TourStep[] = [
 ];
 
 export default function Support() {
-  const { userToken, user } = useContext(AuthContext);
+  const { userToken, user, startViewAs } = useContext(AuthContext);
+  const [viewAsReason, setViewAsReason] = useState('');
   // admin_geral escolhe o condomínio (age em qualquer um); síndico/subsíndico
   // não têm esse passo — o backend já restringe automaticamente ao próprio
   // condomínio e só a moradores (proprietário/inquilino).
@@ -93,6 +94,19 @@ export default function Support() {
     finally { setLoading(false); }
   };
 
+  // "Ver como este usuário": só admin_geral, só na web (o app nativo é só de
+  // moradores) e só sobre moradores. A API repete todas essas checagens.
+  const canViewAs = isAdmin && Platform.OS === 'web' && Boolean(status) && ['proprietario', 'inquilino'].includes(status?.role || '') && !status?.deleted_at;
+  const openViewAs = async () => {
+    if (!selectedPersonId || !condominiumId) return;
+    setLoading(true); setError(''); setNotice('');
+    try {
+      await startViewAs(selectedPersonId, condominiumId, viewAsReason.trim());
+      setViewAsReason('');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível abrir a visualização.'); }
+    finally { setLoading(false); }
+  };
+
   const confirmAction = (title: string, message: string, path: string, successPrefix?: string) =>
     setDialog({ title, message, tone: 'info', confirmLabel: 'Confirmar', cancelLabel: 'Cancelar', onConfirm: () => runAction(path, successPrefix) });
 
@@ -143,6 +157,13 @@ export default function Support() {
           <Pressable disabled={loading} onPress={() => confirmAction('Reenviar e-mail de acesso', `Gerar uma nova senha e reenviar o e-mail de boas-vindas/acesso para ${status.full_name || status.username}?`, 'resend-welcome-email', 'Novo acesso')} style={s.actionButton}><Text style={s.actionText}>Reenviar e-mail de acesso</Text></Pressable>
           <Pressable disabled={loading || !status.terms_accepted_version} onPress={() => confirmAction('Limpar aceite dos Termos', `Limpar o aceite dos Termos de Uso de ${status.full_name || status.username}? A pessoa verá a tela de Termos novamente.`, 'clear-terms-acceptance')} style={[s.actionButton, !status.terms_accepted_version && s.actionButtonDisabled]}><Text style={s.actionText}>Limpar aceite dos Termos</Text></Pressable>
         </View>
+
+        {canViewAs ? <View style={s.viewAsBox}>
+          <Text style={s.viewAsTitle}>Ver como este usuário</Text>
+          <Text style={s.meta}>Abre o app exatamente como {status.full_name || status.username} vê — menu, boletos, débitos, avisos. Somente leitura: nenhuma ação é gravada. Vale por 30 minutos e fica registrado em Auditoria do condomínio.</Text>
+          <TextInput placeholder="Motivo (obrigatório) — ex.: moradora diz que não vê os boletos" value={viewAsReason} onChangeText={setViewAsReason} style={[s.input, s.viewAsInput]} maxLength={500} multiline />
+          <Pressable disabled={loading || viewAsReason.trim().length < 10} onPress={openViewAs} style={[s.viewAsButton, (loading || viewAsReason.trim().length < 10) && s.actionButtonDisabled]}><Text style={s.viewAsButtonText}>Ver como {status.full_name || status.username}</Text></Pressable>
+        </View> : null}
       </Panel>
     </View> : null}
   </ScrollView>
@@ -187,4 +208,9 @@ const s = StyleSheet.create({
   actionButton: { borderWidth: 1, borderColor: '#bfd1ea', backgroundColor: colors.softBlue, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10 },
   actionButtonDisabled: { opacity: 0.5 },
   actionText: { color: colors.primary, fontWeight: '900', fontSize: 13 },
+  viewAsBox: { marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border, gap: 8 },
+  viewAsTitle: { color: colors.ink, fontSize: 16, fontWeight: '900' },
+  viewAsInput: { minHeight: 64, paddingTop: 10, textAlignVertical: 'top' },
+  viewAsButton: { alignSelf: 'flex-start', backgroundColor: '#7a2e0e', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 11 },
+  viewAsButtonText: { color: '#fff', fontWeight: '900', fontSize: 13 },
 });

@@ -8,6 +8,10 @@ import { buildInitialPassword, buildManagerInitialPassword } from '../services/p
 import { normalizeDocument } from '../services/documentService';
 import { sendWelcomeEmail, sendPasswordResetByAdminEmail } from '../services/emailService';
 import { CURRENT_TERMS_VERSION } from './authRoutes';
+import { randomUUID } from 'crypto';
+import { signViewAsToken, VIEW_AS_DURATION_MS } from '../services/authService';
+import { requestMeta } from '../services/requestMeta';
+import type { UserRole } from '../types';
 
 // Ferramenta de suporte para corrigir conta sem SQL manual: um conjunto fixo
 // de ações (nunca edição livre de banco), sempre localizadas por usuário +
@@ -169,6 +173,48 @@ router.post('/users/:id/reset-password', asyncHandler((req, res) =>
 
 router.post('/users/:id/resend-welcome-email', asyncHandler((req, res) =>
   rotatePasswordAndNotify(req, res, sendWelcomeEmail, 'resend_welcome_email', 'Reenviou o e-mail de acesso (com nova senha)')));
+
+// "Ver como este usuário": só admin_geral, só sobre moradores, com motivo
+// obrigatório (o admin vai ver dados pessoais e financeiros da pessoa). Gera
+// um token curto da pessoa marcado como visualização — o middleware
+// authenticate recusa qualquer escrita com ele. O síndico daquele condomínio
+// vê em Auditoria quando e por que o admin abriu a visualização.
+router.post('/users/:id/view-as', asyncHandler(async (req, res) => {
+  if (req.user?.role !== 'admin_geral') return res.status(403).json({ message: 'Somente o administrador geral pode ver o app como outro usuário.' });
+  const reason = String(req.body?.reason || '').trim();
+  if (reason.length < 10) return res.status(400).json({ message: 'Informe o motivo da visualização (mínimo de 10 caracteres).' });
+  const target = await loadAuthorizedTarget(req, res);
+  if (!target) return;
+  if (!RESIDENT_ROLES.includes(target.role)) return res.status(400).json({ message: 'A visualização como usuário é só para moradores (proprietário/inquilino).' });
+  if (target.deleted_at) return res.status(400).json({ message: 'Esta conta está excluída.' });
+
+  const sessionId = randomUUID();
+  const expiresAt = new Date(Date.now() + VIEW_AS_DURATION_MS);
+  const meta = requestMeta(req);
+  await query(
+    `insert into view_as_sessions(id,admin_user_id,target_user_id,condominium_id,reason,expires_at,ip_address,user_agent)
+     values($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [sessionId, req.user.id, target.id, target.condominium_id, reason.slice(0, 500), expiresAt, meta.ip, meta.userAgent],
+  );
+  const viewAs = { sessionId, adminId: req.user.id, adminName: req.user.fullName || req.user.username || null, expiresAt: expiresAt.toISOString() };
+  const user = {
+    id: target.id,
+    username: target.username,
+    role: target.role as UserRole,
+    condominiumId: target.condominium_id,
+    condominiumName: target.condominium_name,
+    fullName: target.full_name,
+    // As telas de bloqueio (trocar senha, aceitar termos) ficam de fora: o
+    // admin vê o que a pessoa vê depois de entrar, sem mexer nas pendências dela.
+    mustChangePassword: false,
+    termsAcceptedVersion: CURRENT_TERMS_VERSION,
+    termsAcceptedAt: target.terms_accepted_at?.toISOString() || null,
+    activeProfileId: null,
+    viewAs,
+  };
+  await logSupportAction(req, target, 'view_as_start', `Abriu a visualização como ${target.full_name || target.username} (somente leitura). Motivo: ${reason.slice(0, 300)}`);
+  return res.json({ token: signViewAsToken(user, viewAs), user, expiresAt: viewAs.expiresAt });
+}));
 
 router.post('/users/:id/clear-terms-acceptance', asyncHandler(async (req, res) => {
   const target = await loadAuthorizedTarget(req, res);

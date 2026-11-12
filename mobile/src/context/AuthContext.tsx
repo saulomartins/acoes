@@ -1,7 +1,7 @@
 import React, { createContext, ReactNode, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { API_BASE_URL, apiRequest, onPlatformSuspended, onSessionExpired, onSessionRefreshed, refreshSession } from '../api/client';
+import { API_BASE_URL, apiRequest, onPlatformSuspended, onSessionExpired, onSessionRefreshed, onViewAsEnded, refreshSession, setViewAsToken } from '../api/client';
 import { isAppVisible } from '../services/attention';
 import { registerForPushNotifications, unregisterPushNotifications } from '../services/pushNotifications';
 
@@ -21,7 +21,11 @@ type AuthUser = {
   tourCompletedAt?: string | null;
   // null = perfil padrão. Setado = um dos perfis extras listados em `profiles`.
   activeProfileId?: string | null;
+  // Preenchido só durante "Ver como este usuário" (Suporte, admin_geral).
+  viewAs?: ViewAsInfo | null;
 };
+
+export type ViewAsInfo = { sessionId: string; adminId: string; adminName: string | null; expiresAt: string };
 
 // Um login pode ter mais de um perfil (ex.: síndico que também é
 // proprietário de uma unidade) — id null é sempre o perfil padrão.
@@ -85,6 +89,12 @@ type AuthContextType = {
   updateUser: (user: AuthUser) => Promise<void>;
   switchProfile: (profileId: string | null) => Promise<void>;
   selectProfile: (profileId: string | null) => Promise<void>;
+  // "Ver como este usuário" (Suporte, só admin_geral na web): troca o app
+  // inteiro para a visão da pessoa, somente leitura. A conta do admin fica
+  // guardada e volta com stopViewAs (ou sozinha quando a visualização vence).
+  viewAs: ViewAsInfo | null;
+  startViewAs: (targetUserId: string, condominiumId: string, reason: string) => Promise<void>;
+  stopViewAs: () => Promise<void>;
 };
 
 type AuthResponse = {
@@ -210,6 +220,9 @@ export const AuthContext = createContext<AuthContextType>({
   updateUser: async () => {},
   switchProfile: async () => {},
   selectProfile: async () => {},
+  viewAs: null,
+  startViewAs: async () => {},
+  stopViewAs: async () => {},
 });
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -225,6 +238,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [needsProfileSelection, setNeedsProfileSelection] = useState(false);
   const [nativeAccessBlocked, setNativeAccessBlocked] = useState(false);
   const [platformSuspendedMessage, setPlatformSuspendedMessage] = useState<string | null>(null);
+  // Conta do admin guardada durante "Ver como este usuário". O token dele
+  // continua no storage; aqui fica o usuário para voltar sem nova consulta.
+  const [viewAsAdminUser, setViewAsAdminUser] = useState<AuthUser | null>(null);
+  const viewAs = user?.viewAs ?? null;
 
   // Suspensão por inadimplência (só moradores são bloqueados por inteiro).
   // Pergunta ao entrar/trocar de perfil; falha de rede não bloqueia ninguém.
@@ -312,7 +329,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    if (!userToken || !user) {
+    // Na visualização como usuário este aparelho (do admin) nunca se registra
+    // para receber os pushes da pessoa visualizada.
+    if (!userToken || !user || user.viewAs) {
       setPushStatus('idle');
       setPushError(null);
       return;
@@ -372,6 +391,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!userToken || !user) {
       setProfiles([]);
       setProfilesLoaded(false);
+      return;
+    }
+    // Visualização como usuário: sem troca de perfil (a troca usaria o
+    // refresh token do admin).
+    if (user.viewAs) {
+      setProfiles([]);
+      setProfilesLoaded(true);
       return;
     }
     let active = true;
@@ -460,6 +486,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const switchProfile = async (profileId: string | null) => {
+    if (user?.viewAs) throw new Error('Saia da visualização para trocar de perfil.');
     const refreshToken = await storage.get('refreshToken');
     if (!refreshToken) throw new Error('Sessão expirada. Entre novamente.');
     setIsLoading(true);
@@ -489,7 +516,62 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // Volta para a conta do admin. `notifyServer` = false quando a própria API
+  // já disse que a visualização acabou (vencida ou encerrada).
+  const restoreAdminSession = async (notifyServer: boolean) => {
+    const viewToken = user?.viewAs ? userToken : null;
+    setViewAsToken(null);
+    if (notifyServer && viewToken) {
+      await fetch(`${API_BASE_URL}/auth/view-as/end`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${viewToken}` } }).catch(() => null);
+    }
+    const adminToken = await storage.get('userToken');
+    const storedAdmin = await storage.get('authUser');
+    const adminUser = viewAsAdminUser || (storedAdmin ? JSON.parse(storedAdmin) as AuthUser : null);
+    setViewAsAdminUser(null);
+    if (!adminToken || !adminUser) {
+      // Sessão do admin sumiu nesse meio tempo: volta ao login em vez de
+      // ficar num estado misto.
+      setUserToken(null);
+      setUser(null);
+      return;
+    }
+    setUserToken(adminToken);
+    setUser(adminUser);
+  };
+
+  const startViewAs = async (targetUserId: string, condominiumId: string, reason: string) => {
+    if (!userToken || !user || user.role !== 'admin_geral' || user.viewAs) throw new Error('Somente o administrador geral pode ver o app como outro usuário.');
+    const response = await apiRequest<{ token: string; user: AuthUser; expiresAt: string }>(
+      `/support/users/${targetUserId}/view-as`, userToken,
+      { method: 'POST', body: JSON.stringify({ condominiumId, reason }) },
+    );
+    setViewAsAdminUser(user);
+    setViewAsToken(response.token);
+    setNeedsProfileSelection(false);
+    setUserToken(response.token);
+    setUser(response.user);
+  };
+
+  const stopViewAs = () => restoreAdminSession(true);
+
+  useEffect(() => onViewAsEnded(() => {
+    void restoreAdminSession(false);
+    setAuthError('A visualização como usuário terminou. Você voltou para a sua conta.');
+  }));
+
+  // Volta sozinho quando a visualização vence (30 min), mesmo sem nenhuma
+  // chamada à API nesse meio tempo.
+  useEffect(() => {
+    if (!viewAs) return;
+    const remaining = new Date(viewAs.expiresAt).getTime() - Date.now();
+    const timer = setTimeout(() => { void restoreAdminSession(true); }, Math.max(0, remaining));
+    return () => clearTimeout(timer);
+  }, [viewAs?.sessionId]);
+
   const signOut = async () => {
+    // Durante a visualização, "Sair" só encerra a visualização — nunca desloga
+    // o admin nem a pessoa visualizada.
+    if (user?.viewAs) { await stopViewAs(); return; }
     setIsLoading(true);
     setAuthError(null);
     try {
@@ -518,7 +600,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, userToken, isLoading, authError, pushStatus, pushError, condominiumFeatures, profiles, needsProfileSelection, nativeAccessBlocked, platformSuspendedMessage, recheckPlatformAccess, signIn, signInWithBiometrics, signOut, signUp, updateUser, switchProfile, selectProfile }}>
+    <AuthContext.Provider value={{ user, userToken, isLoading, authError, pushStatus, pushError, condominiumFeatures, profiles, needsProfileSelection, nativeAccessBlocked, platformSuspendedMessage, recheckPlatformAccess, signIn, signInWithBiometrics, signOut, signUp, updateUser, switchProfile, selectProfile, viewAs, startViewAs, stopViewAs }}>
       {children}
     </AuthContext.Provider>
   );

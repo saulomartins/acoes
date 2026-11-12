@@ -15,6 +15,7 @@ import { useSectionTour } from '../ui/useSectionTour';
 import TourButton from '../ui/TourButton';
 
 type InvoiceStatus = 'pending_provider' | 'issued' | 'paid' | 'overdue' | 'canceled';
+type ResidentInvoiceNotice = { unitLabel: string; linkedSince: string | null; isFinancialResponsible: boolean; hiddenUnitInvoices: number };
 type Invoice = {
   id:string; user_id?:string; amount_cents:number; due_date:string; reference_month:string|null; status:InvoiceStatus;
   provider:string; external_id:string|null; digitable_line:string|null; paid_at?:string|null;
@@ -88,10 +89,13 @@ export default function Invoices({navigation}:any){
   const [downloadingZip,setDownloadingZip]=useState(false);
   const [debtEditingId,setDebtEditingId]=useState('');const [debtReasonDraft,setDebtReasonDraft]=useState('');const [debtSaving,setDebtSaving]=useState(false);const [debtSettledViaPix,setDebtSettledViaPix]=useState(false);
   const [unmatched,setUnmatched]=useState<UnmatchedBankCharge[]>([]);
+  // Morador: boletos da unidade que existem mas não estão no nome dele (ver
+  // getResidentInvoiceNotice na API). A tela explica em vez de parecer vazia.
+  const [residentNotice,setResidentNotice]=useState<ResidentInvoiceNotice|null>(null);
 
   const load=useCallback(async()=>{
     if(!userToken)return;setLoading(true);setError(null);
-    try{const requests:Promise<any>[]=[apiRequest<{invoices:Invoice[]}>('/invoices',userToken)];if(canManage)requests.push(apiRequest('/users',userToken),apiRequest('/billing/settings',userToken),apiRequest('/invoices/unmatched-bank-charges',userToken));const [response,usersResponse,settingsResponse,unmatchedResponse]=await Promise.all(requests);setItems(response.invoices);if(canManage){setPeople(usersResponse.users.filter((person:any)=>['proprietario','inquilino'].includes(person.role)&&!person.billing_exempt));setBeneficiaryName(settingsResponse.condominium?.name||'');setBeneficiaryDocument(settingsResponse.condominium?.cnpj||'');if(settingsResponse.settings?.description_template)setDescription(settingsResponse.settings.description_template);setUnmatched(unmatchedResponse?.charges||[])}}
+    try{const requests:Promise<any>[]=[apiRequest<{invoices:Invoice[];residentNotice?:ResidentInvoiceNotice|null}>('/invoices',userToken)];if(canManage)requests.push(apiRequest('/users',userToken),apiRequest('/billing/settings',userToken),apiRequest('/invoices/unmatched-bank-charges',userToken));const [response,usersResponse,settingsResponse,unmatchedResponse]=await Promise.all(requests);setItems(response.invoices);setResidentNotice(response.residentNotice||null);if(canManage){setPeople(usersResponse.users.filter((person:any)=>['proprietario','inquilino'].includes(person.role)&&!person.billing_exempt));setBeneficiaryName(settingsResponse.condominium?.name||'');setBeneficiaryDocument(settingsResponse.condominium?.cnpj||'');if(settingsResponse.settings?.description_template)setDescription(settingsResponse.settings.description_template);setUnmatched(unmatchedResponse?.charges||[])}}
     catch(e){setError(e instanceof Error?e.message:'Não foi possível carregar as cobranças.')}
     finally{setLoading(false)}
   },[canManage,userToken]);
@@ -239,10 +243,17 @@ export default function Invoices({navigation}:any){
           {composition(featured)}
           {openItems.length>1?<Text style={r.moreOpen}>Você tem mais {openItems.length-1} boleto(s) em aberto no histórico abaixo.</Text>:null}
         </View>:<View style={[r.featured,r.featuredOk]}>
-          <Text style={r.okTitle}>{loading&&!items.length?'Carregando…':'Tudo em dia'}</Text>
+          <Text style={r.okTitle}>{loading&&!items.length?'Carregando…':!items.length&&residentNotice?'Nenhum boleto no seu nome':'Tudo em dia'}</Text>
           <Text style={r.okText}>{items.length?'Nenhum boleto em aberto na sua unidade.':'Ainda não há boletos emitidos para você.'}</Text>
         </View>}
       </View>
+
+      {residentNotice?<View style={r.noticeBox} accessibilityRole="summary">
+        <Text style={r.noticeTitle}>Por que {items.length?'alguns boletos da unidade não aparecem':'não aparecem boletos'} aqui?</Text>
+        <Text style={r.noticeText}>{residentNotice.linkedSince?`Seu cadastro no ${residentNotice.unitLabel} é de ${formatBrazilianDate(residentNotice.linkedSince)}, depois da geração dos boletos já emitidos para a unidade.`:`Os boletos já emitidos para o ${residentNotice.unitLabel} foram gerados antes do seu cadastro.`} Cada boleto fica no nome de quem era o responsável financeiro da unidade na data em que ele foi gerado, e continua com essa pessoa.</Text>
+        <Text style={r.noticeText}>Quem acompanha todos os boletos da unidade é o proprietário.{residentNotice.isFinancialResponsible?' Como agora você é o responsável financeiro, os próximos boletos serão gerados no seu nome e vão aparecer nesta tela.':''}</Text>
+        <Text style={r.noticeHint}>Dúvidas sobre um boleto anterior: fale com o proprietário ou com a administração do condomínio.</Text>
+      </View>:null}
 
       <View ref={registerSection('history')} style={[r.historyWrap,isActive('history')&&s.tourHighlight]}>
         <View style={r.historyHead}><Text style={r.historyTitle}>Histórico</Text><Pressable onPress={syncAll} disabled={loading}><Text style={r.syncLink}>{loading?'Buscando no banco…':'Buscar boletos em aberto no banco'}</Text></Pressable></View>
@@ -428,6 +439,10 @@ const r=StyleSheet.create({
   moreOpen:{color:'#5b6577',fontSize:13},
   okTitle:{color:'#0b6b5d',fontSize:22,fontWeight:'900'},
   okText:{color:'#2f5d55',fontSize:14},
+  noticeBox:{borderWidth:1,borderColor:'#c9d8ef',backgroundColor:'#f2f7fe',borderRadius:14,padding:16,gap:8},
+  noticeTitle:{color:'#1d3b66',fontSize:16,fontWeight:'900'},
+  noticeText:{color:'#334761',fontSize:14,lineHeight:20},
+  noticeHint:{color:'#5b6577',fontSize:13},
   chip:{fontSize:12,fontWeight:'900',paddingHorizontal:10,paddingVertical:4,borderRadius:999,overflow:'hidden',backgroundColor:'#fbf1dc',color:'#7a520a'},
   chipPaid:{backgroundColor:'#e6f6f2',color:'#0b6b5d'},
   chipOverdue:{backgroundColor:'#fbebeb',color:'#a12c2c'},
