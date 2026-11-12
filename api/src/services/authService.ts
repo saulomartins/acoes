@@ -242,7 +242,11 @@ export const login = async (identifier: string, password: string, meta: RequestM
      from users u left join condominiums c on c.id=u.condominium_id
      where unaccent(lower(u.username)) = unaccent($1)
         or (u.email is not null and lower(trim(u.email)) = $1)
-        or ($2 <> '' and regexp_replace(coalesce(u.cpf,''), '[^0-9]', '', 'g') = $2)`,
+        -- admin_geral NUNCA entra por CPF (só usuário de acesso ou o e-mail
+        -- dele): a conta da plataforma não pode ser alcançada pelo CPF pessoal
+        -- de quem também é morador. Pedido do dono em 12/11/2026, depois de
+        -- entrar no admin sem querer digitando o próprio CPF.
+        or ($2 <> '' and u.role <> 'admin_geral' and regexp_replace(coalesce(u.cpf,''), '[^0-9]', '', 'g') = $2)`,
     [normalizedIdentifier, cpfDigits],
   );
 
@@ -264,8 +268,8 @@ export const login = async (identifier: string, password: string, meta: RequestM
   // `admin_geral` nunca é escolhida automaticamente por esse caminho — ela
   // se acessa pelo usuário de acesso. Assim o morador entra normalmente e
   // não existe caminho que promova alguém a admin sem ele pedir.
-  // Atenção: só descartamos admin_geral para DESEMPATAR. Se o admin for a
-  // única conta que bateu, ele entra normalmente por CPF/e-mail também.
+  // Por CPF o admin_geral nem chega aqui (filtrado no SQL acima); por e-mail,
+  // só quando é o e-mail cadastrado na própria conta admin.
   let user = matches[0];
   if (matches.length > 1) {
     const nonAdmin = matches.filter(match => match.role !== 'admin_geral');
@@ -485,6 +489,32 @@ export const requestPasswordReset = async (email: string) => {
   }
 };
 
+// A mesma pessoa pode ter mais de uma conta pessoal (mesmo CPF/CNPJ — ex.:
+// morador em um condomínio e síndico em outro). Senha criada pela PRÓPRIA
+// pessoa (troca, link de redefinição) vale para todas elas, para não ficar
+// uma senha em cada conta. admin_geral fica de fora nos dois sentidos: a
+// conta da plataforma tem senha própria (decisão do dono, 12/11/2026).
+// As contas que mudaram perdem as sessões abertas, como numa troca normal.
+type Executor = { query: <R extends Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<{ rows: R[] }> };
+const syncPasswordToSiblingAccounts = async (db: Executor, userId: string, passwordHash: string) => {
+  const siblings = await db.query<{ id: string }>(
+    `update users s set password_hash=$2, must_change_password=false, temporary_password_expires_at=null
+     from users me
+     where me.id=$1 and me.role <> 'admin_geral'
+       and s.id <> me.id and s.role <> 'admin_geral' and s.deleted_at is null
+       and length(regexp_replace(upper(coalesce(me.cpf,'')),'[^0-9A-Z]','','g')) >= 11
+       and regexp_replace(upper(coalesce(s.cpf,'')),'[^0-9A-Z]','','g') = regexp_replace(upper(coalesce(me.cpf,'')),'[^0-9A-Z]','','g')
+     returning s.id`,
+    [userId, passwordHash],
+  );
+  const ids = siblings.rows.map(row => row.id);
+  if (ids.length) {
+    await db.query(`update refresh_tokens set revoked_at=now() where user_id = any($1::uuid[]) and revoked_at is null`, [ids]);
+    await db.query(`update password_reset_tokens set used_at=coalesce(used_at,now()) where user_id = any($1::uuid[])`, [ids]);
+  }
+  return ids;
+};
+
 // Dono de um link de redefinição ainda válido — a rota usa para aplicar as
 // regras de senha (passwordPolicyService) antes de gravar.
 export const findResetTokenUserId = async (token: string) => {
@@ -510,6 +540,7 @@ export const resetPassword = async (token: string, password: string) => {
     await client.query(`update password_reset_tokens set used_at=now() where id=$1`, [reset.id]);
     await client.query(`update password_reset_tokens set used_at=coalesce(used_at,now()) where user_id=$1`, [reset.user_id]);
     await client.query(`update refresh_tokens set revoked_at=now() where user_id=$1 and revoked_at is null`, [reset.user_id]);
+    await syncPasswordToSiblingAccounts(client as unknown as Executor, reset.user_id, passwordHash);
     return true;
   });
 };
@@ -530,6 +561,7 @@ export const changePassword = async (userId: string, password: string, currentSe
     `update refresh_tokens set revoked_at = now() where user_id = $1 and revoked_at is null and ($2::uuid is null or id <> $2::uuid)`,
     [userId, currentSessionId],
   );
+  await syncPasswordToSiblingAccounts({ query } as unknown as Executor, userId, passwordHash);
   const condominium = await query<{ name: string | null }>(`select name from condominiums where id=$1`, [user.condominium_id]);
   return publicUser({ ...user, condominium_name: condominium.rows[0]?.name || null });
 };
